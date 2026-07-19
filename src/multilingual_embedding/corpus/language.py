@@ -1,16 +1,31 @@
 """
 Language codes and script based language inference.
 
-The framework identifies languages by ISO 639-1 code. Where a document
-does not declare one, :func:`infer_language` guesses from the dominant
-Unicode script.
+Languages are identified by ISO 639 code. Two-letter ISO 639-1 codes are
+used where one exists; the three-letter ISO 639-2/3 form is accepted for
+languages that have no two-letter code, which includes several scheduled
+languages of India — Maithili (``mai``), Santali (``sat``), Konkani
+(``kok``), Dogri (``doi``), Meitei (``mni``) and Bodo (``brx``).
 
-That inference is deliberately conservative. A script maps to a language
-only when the correspondence is effectively one to one — Devanagari to
-Hindi, Tamil to Tamil, Hangul to Korean. Latin, Arabic and Han are each
-shared by many languages, so they return ``None`` rather than a guess.
-Statistical language identification is out of scope for this layer; a
-caller that needs it should set the language explicitly.
+Where a document declares no language, :func:`infer_language` guesses
+from the dominant Unicode script. That inference is deliberately
+limited, and it is worth being precise about what it does and does not
+claim:
+
+*It returns nothing for scripts serving many languages with no dominant
+one.* Latin, Arabic, Cyrillic and Han all return ``None``. A
+plausible-looking wrong answer is worse than an honest absence.
+
+*Where it does answer, it returns the most widely used language of that
+script, not an identification.* Devanagari resolves to Hindi even though
+Marathi, Nepali, Sanskrit, Maithili, Konkani, Dogri and Bodo also use
+it; Bengali resolves to Bengali though Assamese shares the script. These
+are defensible defaults because one language dominates usage by an order
+of magnitude, but they are defaults, not detections.
+
+Statistical language identification is out of scope for this layer. A
+caller that needs to distinguish Marathi from Hindi, or Assamese from
+Bengali, must set the language explicitly or use a dedicated identifier.
 """
 
 from __future__ import annotations
@@ -66,10 +81,18 @@ _LANGUAGES: tuple[Language, ...] = (
     Language("id", "Indonesian", Script.LATIN),
     Language("vi", "Vietnamese", Script.LATIN),
     Language("tr", "Turkish", Script.LATIN),
+    # The 22 scheduled languages of India, plus English. Several have no
+    # ISO 639-1 two-letter code and are identified by their 639-2/3 form.
     Language("hi", "Hindi", Script.DEVANAGARI),
     Language("mr", "Marathi", Script.DEVANAGARI),
     Language("ne", "Nepali", Script.DEVANAGARI),
+    Language("sa", "Sanskrit", Script.DEVANAGARI),
+    Language("mai", "Maithili", Script.DEVANAGARI),
+    Language("kok", "Konkani", Script.DEVANAGARI),
+    Language("doi", "Dogri", Script.DEVANAGARI),
+    Language("brx", "Bodo", Script.DEVANAGARI),
     Language("bn", "Bengali", Script.BENGALI),
+    Language("as", "Assamese", Script.BENGALI),
     Language("gu", "Gujarati", Script.GUJARATI),
     Language("pa", "Punjabi", Script.GURMUKHI),
     Language("ta", "Tamil", Script.TAMIL),
@@ -77,8 +100,15 @@ _LANGUAGES: tuple[Language, ...] = (
     Language("kn", "Kannada", Script.KANNADA),
     Language("ml", "Malayalam", Script.MALAYALAM),
     Language("or", "Odia", Script.ORIYA),
+    Language("sat", "Santali", Script.OL_CHIKI),
+    Language("mni", "Meitei", Script.MEETEI_MAYEK),
     Language("ar", "Arabic", Script.ARABIC),
     Language("ur", "Urdu", Script.ARABIC),
+    # Sindhi and Kashmiri are written in Perso-Arabic in India and
+    # Pakistan; both also have Devanagari orthographies, which this
+    # single-script mapping cannot express.
+    Language("sd", "Sindhi", Script.ARABIC),
+    Language("ks", "Kashmiri", Script.ARABIC),
     Language("fa", "Persian", Script.ARABIC),
     Language("he", "Hebrew", Script.HEBREW),
     Language("ru", "Russian", Script.CYRILLIC),
@@ -95,11 +125,14 @@ _BY_CODE: dict[str, Language] = {language.code: language for language in _LANGUA
 
 LANGUAGE_NAMES: dict[str, str] = {language.code: language.name for language in _LANGUAGES}
 
-# Scripts used by exactly one supported language, or with one
-# overwhelmingly dominant member. Only these support inference.
+# Scripts served by exactly one language, or by one that dominates usage
+# by an order of magnitude. Only these support inference; see the module
+# docstring on what that inference does and does not claim.
 _UNAMBIGUOUS_SCRIPTS: dict[Script, str] = {
     Script.DEVANAGARI: "hi",
     Script.BENGALI: "bn",
+    Script.OL_CHIKI: "sat",
+    Script.MEETEI_MAYEK: "mni",
     Script.GUJARATI: "gu",
     Script.GURMUKHI: "pa",
     Script.TAMIL: "ta",
@@ -119,15 +152,29 @@ _UNAMBIGUOUS_SCRIPTS: dict[Script, str] = {
 
 def normalize_language_code(code: str) -> str:
     """
-    Normalise a language tag to a bare lowercase ISO 639-1 code.
+    Normalise a language tag to a bare lowercase ISO 639 code.
 
-    Regional and script subtags are stripped, so ``"en-GB"``,
-    ``"EN_gb"`` and ``"en"`` all yield ``"en"``.
+    Regional and script subtags are stripped, so ``"en-GB"``, ``"EN_gb"``
+    and ``"en"`` all yield ``"en"``, and ``"mai-Deva"`` yields ``"mai"``.
+
+    Both two-letter ISO 639-1 and three-letter ISO 639-2/3 codes are
+    accepted. The three-letter form is not a convenience: several
+    scheduled languages of India — Maithili, Santali, Konkani, Dogri,
+    Meitei and Bodo — have no two-letter code at all, so rejecting it
+    would make them impossible to label.
 
     Raises
     ------
     ValidationError
-        If the value is not a two letter code.
+        If the value is not a two or three letter alphabetic code.
+
+    Example
+    -------
+    ::
+
+        normalize_language_code("en-GB")    -> "en"
+        normalize_language_code("MAI")      -> "mai"
+        normalize_language_code("sat-Olck") -> "sat"
     """
 
     if not isinstance(code, str) or not code.strip():
@@ -135,9 +182,9 @@ def normalize_language_code(code: str) -> str:
 
     primary = code.strip().replace("_", "-").split("-")[0].lower()
 
-    if len(primary) != 2 or not primary.isalpha():
+    if len(primary) not in (2, 3) or not primary.isalpha():
         raise ValidationError(
-            "Language code must be a two letter ISO 639-1 code",
+            "Language code must be a two letter ISO 639-1 or three letter ISO 639-2/3 code",
             code=code,
         )
 

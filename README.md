@@ -9,7 +9,7 @@ management and evaluation in between built to be inspected, configured and repro
 corpus  ->  tokenizer  ->  vocabulary  ->  embeddings  ->  evaluation  ->  search
 ```
 
-**792 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
+**963 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
 
 ---
 
@@ -280,10 +280,17 @@ treating it as a core requirement changed the implementation:
 
 **Sentence segmentation knows more than the full stop.** The terminator inventory
 covers the Devanagari danda (`।`) and double danda (`॥`), the CJK ideographic full
-stop (`。`), the Arabic question mark (`؟`), the Urdu full stop (`۔`) and the Ethiopic
-full stop (`።`). CJK and Indic terminators end a sentence without a following space,
-so the usual "period, space, capital letter" heuristic never fires for them and is
-bypassed.
+stop (`。`), the Arabic question mark (`؟`), the Urdu full stop (`۔`), the Ethiopic
+full stop (`።`), the Ol Chiki mucaad (`᱾`) and the Meetei Mayek cheikhei (`꯫`). CJK
+and Indic terminators end a sentence without a following space, so the usual
+"period, space, capital letter" heuristic never fires for them and is bypassed.
+
+**All 22 scheduled languages of India are supported**, plus English — verified
+end to end by [`tests/corpus/test_indian_languages.py`](tests/corpus/test_indian_languages.py),
+which asserts script detection, segmentation, word splitting and language naming for
+each. That spans ten scripts, including Ol Chiki (Santali) and Meetei Mayek (Meitei),
+and the six languages that have no ISO 639-1 two-letter code and must be identified by
+their three-letter ISO 639-2/3 form.
 
 **Word splitting handles combining marks.** Python's `\w` does not match Unicode
 combining marks, so a naive `\w+` both fragments words *and silently drops characters*:
@@ -550,7 +557,7 @@ quanfire-multilingual-embedding/
 │   ├── corpus/  vocabulary/  tokenizer/  embedding/  evaluation/  pipelines/
 │   ├── cli.py                      the `qfme` command
 │   └── py.typed                    marks the package as typed for consumers
-├── tests/                          792 tests mirroring the source layout
+├── tests/                          963 tests mirroring the source layout
 ├── examples/                       runnable end-to-end example
 ├── data/sample/                    six-language sample corpus
 ├── docs/                           MkDocs documentation

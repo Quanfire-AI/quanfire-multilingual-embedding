@@ -37,16 +37,21 @@ __all__ = [
 # Terminators across the supported scripts.
 #
 # ASCII    . ! ?      Latin, Cyrillic, Greek and most alphabetic scripts
-# ।  ॥               Devanagari danda and double danda (Hindi, Marathi, Nepali)
-# ۔  ؟               Urdu full stop, Arabic question mark
+# ।  ॥               Devanagari danda and double danda. Shared by Hindi,
+#                     Marathi, Nepali, Sanskrit, Maithili, Konkani, Dogri,
+#                     Bodo, and used by Bengali, Odia and Gurmukhi too.
+# ۔  ؟               Urdu full stop, Arabic question mark. Also Sindhi
+#                     and Kashmiri, which are written in Perso-Arabic.
 # 。 ！ ？ ．          CJK fullwidth forms, used without a following space
 # ።                  Ethiopic full stop
-SENTENCE_TERMINATORS: frozenset[str] = frozenset(".!?।॥۔؟。！？．።…")
+# ᱾  ᱿               Ol Chiki mucaad and double mucaad (Santali)
+# ꯫                  Meetei Mayek cheikhei (Meitei/Manipuri)
+SENTENCE_TERMINATORS: frozenset[str] = frozenset(".!?।॥۔؟。！？．።…᱾᱿꯫")
 
 # Terminators that end a sentence unconditionally. CJK and Indic scripts
 # do not require whitespace after a terminator, so the usual
 # "terminator followed by space and a capital" heuristic never fires.
-_UNCONDITIONAL_TERMINATORS: frozenset[str] = frozenset("।॥。！？．።")
+_UNCONDITIONAL_TERMINATORS: frozenset[str] = frozenset("।॥。！？．።᱾᱿꯫")
 
 # Characters permitted between a terminator and the sentence boundary,
 # so that `He said "stop!"` keeps the quote with the sentence it closes.

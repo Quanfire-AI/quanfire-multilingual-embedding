@@ -47,6 +47,8 @@ class Script(StrEnum):
     KANNADA = "Knda"
     MALAYALAM = "Mlym"
     ORIYA = "Orya"
+    OL_CHIKI = "Olck"
+    MEETEI_MAYEK = "Mtei"
     ARABIC = "Arab"
     HEBREW = "Hebr"
     CYRILLIC = "Cyrl"
@@ -85,6 +87,10 @@ _UNSORTED_SCRIPT_RANGES: tuple[tuple[int, int, Script], ...] = (
     (0x0C80, 0x0CFF, Script.KANNADA),
     (0x0D00, 0x0D7F, Script.MALAYALAM),
     (0x0E00, 0x0E7F, Script.THAI),
+    # Ol Chiki, the script of Santali, and Meetei Mayek, the script of
+    # Meitei (Manipuri). Both are scheduled languages of India written in
+    # purpose-built scripts rather than in a shared Indic one.
+    (0x1C50, 0x1C7F, Script.OL_CHIKI),
     (0x1200, 0x137F, Script.ETHIOPIC),
     (0x1E00, 0x1EFF, Script.LATIN),
     (0x2C60, 0x2C7F, Script.LATIN),
@@ -93,6 +99,7 @@ _UNSORTED_SCRIPT_RANGES: tuple[tuple[int, int, Script], ...] = (
     (0x3400, 0x4DBF, Script.HAN),
     (0x4E00, 0x9FFF, Script.HAN),
     (0xA720, 0xA7FF, Script.LATIN),
+    (0xABC0, 0xABFF, Script.MEETEI_MAYEK),
     (0xAC00, 0xD7AF, Script.HANGUL),
     (0x1100, 0x11FF, Script.HANGUL),
     (0x3130, 0x318F, Script.HANGUL),

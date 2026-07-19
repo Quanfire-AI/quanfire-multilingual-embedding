@@ -40,13 +40,34 @@ from multilingual_embedding.corpus.validators import (
 class TestLanguage:
     @pytest.mark.parametrize(
         ("raw", "expected"),
-        [("en", "en"), ("EN", "en"), ("en-GB", "en"), ("en_gb", "en"), ("  hi  ", "hi")],
+        [
+            ("en", "en"),
+            ("EN", "en"),
+            ("en-GB", "en"),
+            ("en_gb", "en"),
+            ("  hi  ", "hi"),
+            # Three-letter ISO 639-2/3 codes, for languages that have no
+            # two-letter form. Several scheduled languages of India are
+            # only expressible this way.
+            ("mai", "mai"),
+            ("SAT", "sat"),
+            ("sat-Olck", "sat"),
+            ("brx", "brx"),
+        ],
     )
     def test_normalization(self, raw: str, expected: str) -> None:
         assert normalize_language_code(raw) == expected
 
-    @pytest.mark.parametrize("raw", ["", "e", "eng", "1a", None])
+    @pytest.mark.parametrize("raw", ["", "e", "engl", "1a", "12", None])
     def test_invalid_codes_rejected(self, raw: object) -> None:
+        """
+        Only two and three letter alphabetic codes are valid.
+
+        Note ``"eng"`` is deliberately absent: it is the legitimate ISO
+        639-2 code for English, and an earlier version of this rule
+        wrongly rejected it along with every three-letter code.
+        """
+
         with pytest.raises(ValidationError):
             normalize_language_code(raw)  # type: ignore[arg-type]
 
