@@ -7,8 +7,8 @@ vectors to the vocabulary that indexes them. The sentence encoders
 compose word vectors into sentence vectors, and :class:`SimilarityIndex`
 searches a set of those.
 
-:class:`EmbeddingModel` is the contract a future fastText or transformer
-encoder would implement so the rest of the pipeline needs no changes.
+:class:`EmbeddingModel` is the contract a future static model would
+implement. Contextual encoders need a broader abstraction; see ROADMAP.md.
 """
 
 from __future__ import annotations

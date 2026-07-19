@@ -47,7 +47,7 @@ copied from a real run, not written by hand. This is not a stylistic preference:
 project's own documentation review found six genuine bugs precisely because the examples
 were run rather than assumed.
 
-**Do not document what does not exist.** There is no transformer, no fastText, no
+**Do not document what does not exist.** There is no transformer, no character n-gram model, no
 contrastive learning and no PyTorch in this project. Where future work is mentioned it
 is labelled as not implemented.
 

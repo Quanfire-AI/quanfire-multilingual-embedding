@@ -12,9 +12,10 @@ of those. It is its own layer because everything below it deals in text and ids 
 everything here deals in float arrays, and because the `EmbeddingModel` contract lets
 the pipeline layer swap the model without knowing which one it holds.
 
-There is no PyTorch, no transformer encoder, no fastText and no contrastive learning
-in this package. `base.py` names fastText and transformers as models the ABC is shaped
-to accommodate; neither is implemented. Training is numpy only.
+There is no transformer encoder, no character n-gram model and no contrastive learning
+in this package, and no deep learning runtime. `base.py` is shaped to accommodate other
+static models; a contextual encoder needs a broader abstraction, which `ROADMAP.md`
+covers. Training is numpy only.
 
 ## Modules
 

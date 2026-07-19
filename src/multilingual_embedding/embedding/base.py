@@ -1,8 +1,8 @@
 """
 Contract shared by every embedding model.
 
-Word2Vec is the first implementation, but fastText and transformer
-encoders are expected to follow. Pinning the four operations that a
+Word2Vec is the first implementation; other static models and
+contextual encoders are expected to follow. Pinning the four operations that a
 training pipeline actually needs — train, expose a matrix, save, load —
 means the pipeline can swap models without knowing which one it holds.
 

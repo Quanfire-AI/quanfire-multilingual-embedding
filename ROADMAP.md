@@ -9,18 +9,18 @@ Everything described past Stage 0 is a proposal, not a commitment.
 
 ## Positioning
 
-The objective is an embedding model in the class of OpenAI's
-`text-embedding-3-*`, exposed over an API.
+The objective is a general-purpose text embedding model of commercial quality, exposed
+over an API.
 
-The strategy is **not** to match those models on English. That is not winnable:
-Qwen3-Embedding-8B, Llama-Embed-Nemotron-8B and KaLM-Embedding-Gemma3-12B already
-outperform them on open leaderboards, backed by Alibaba, NVIDIA and Tencent compute
-budgets. Entering that race means losing it slowly.
+The strategy is **not** to match the leading commercial embedding services on English.
+That is not winnable: several open models already outperform them on public leaderboards,
+built by organisations with compute budgets orders of magnitude larger than ours. Entering
+that race means losing it slowly.
 
-The strategy is to **own Indian languages**. OpenAI's models are mediocre on Indic text.
-AI4Bharat's IndicBERT covers 12 languages; Google's MuRIL covers 17. Nine of the 22
-scheduled languages — Santali, Bodo, Dogri, Maithili, Meitei, Konkani, Kashmiri, Sindhi
-and Sanskrit — are served badly or not at all by anyone.
+The strategy is to **own Indian languages**. The major commercial and open models are all
+weak on Indic text. The best existing multilingual efforts cover 12 to 17 Indian
+languages. Nine of the 22 scheduled languages — Santali, Bodo, Dogri, Maithili, Meitei,
+Konkani, Kashmiri, Sindhi and Sanskrit — are served badly or not at all by anyone.
 
 This repository already handles the text of all 22 correctly. That is the foundation of
 a defensible position: *the best embedding model for Indian languages*, rather than a
@@ -84,37 +84,46 @@ no adequate public benchmark for the nine low-resource languages. Building it is
 proof and a moat — a credible public Indic retrieval benchmark is itself a contribution
 that attracts users.
 
-Assemble held-out retrieval and similarity sets per language. Sources: MIRACL (Hindi,
-Bengali, Telugu), FLORES-200 (all 22, translation pairs usable for bitext retrieval),
-Samanantar, IndicGLUE, translated mMARCO. For low-resource languages, bootstrap from
-parallel corpora and human-verify a small gold set.
+Assemble held-out retrieval and similarity sets per language, drawing on the public
+multilingual retrieval benchmarks, the large Indic parallel corpora, and the standard
+Indic language-understanding suites. Several cover only the well-resourced languages; for
+the rest, bootstrap from parallel text and human-verify a small gold set.
 
-Score the word2vec baseline, BGE-M3, and `text-embedding-3-large` on it. **Publish the
-numbers even where we lose** — a benchmark that only flatters its author convinces nobody.
+Score three systems on it: our word2vec baseline, a strong open multilingual model, and a
+leading commercial embedding API. **Publish the numbers even where we lose** — a benchmark
+that only flatters its author convinces nobody.
 
 - **Deliverables:** per-language eval sets; a `qfme benchmark` command; a public
   leaderboard table; baseline numbers for three models.
 - **Exit criterion:** a reproducible number for every one of the 22 languages, and a
-  documented, defensible gap where OpenAI is weak.
+  documented, defensible gap where the incumbents are weak.
 - **Effort:** 3–4 weeks. Mostly data work. No GPU.
 - **Risk:** for Santali, Bodo, Dogri and Meitei there may be too little text to build a
   meaningful set. If so, say so publicly rather than fabricating one.
 
 ### Stage 2 — Fine-tune an open base model
 
-Contrastively fine-tune **BGE-M3** (568M, XLM-RoBERTa, MIT licence, 100+ languages,
-8192 context) on Indic pairs. Qwen3-Embedding-0.6B is the alternative if licence terms
-suit better.
+Contrastively fine-tune an open multilingual base model on Indic pairs. Select it against
+these criteria rather than by reputation:
+
+| Criterion | Target |
+|---|---|
+| Parameters | 500M–700M — trainable on our hardware, large enough to be competitive |
+| Licence | Permissive, allowing commercial use and redistribution |
+| Language coverage | 100+, with the Indic scripts already in its tokenizer |
+| Context length | 512 minimum; longer is useful but not required for embeddings |
+| Architecture | Encoder, or a decoder adapted with bidirectional attention |
 
 Technique: InfoNCE with in-batch negatives plus mined hard negatives. Large effective
 batch matters more than almost anything else for contrastive training — use GradCache if
 GPU memory is the constraint. Add Matryoshka representation learning so callers can
-truncate dimensions, matching the `text-embedding-3` interface.
+truncate dimensions, which is the interface commercial APIs expose.
 
 - **Deliverables:** training pipeline; `TransformerEncoder` implementing `TextEncoder`;
   a trained checkpoint; Stage 1 benchmark numbers for it.
-- **Exit criterion:** **beats `text-embedding-3-large` on the Indic benchmark** for at
-  least the 12 well-resourced languages, and does not regress badly on English.
+- **Exit criterion:** **beats the leading commercial embedding API on the Indic
+  benchmark** for at least the 12 well-resourced languages, without regressing badly on
+  English.
 - **Effort:** 4–6 weeks.
 - **Compute:** runs locally on the 16 GB RTX 4070 Ti SUPER using LoRA plus GradCache —
   see the compute profile below. Expect 1.5–3 days per full run over ~1M pairs, so
@@ -122,22 +131,24 @@ truncate dimensions, matching the `text-embedding-3` interface.
 
 ### Stage 3 — Serve it
 
-FastAPI over the artifact-loading pattern that already exists. Use an **OpenAI-compatible
-request and response schema** so it is a drop-in replacement — that removes the main
-adoption barrier at essentially zero design cost.
+A web service over the artifact-loading pattern that already exists. Adopt the **de facto
+industry-standard request and response schema** so the service is a drop-in replacement
+for existing embedding APIs — that removes the main adoption barrier at essentially zero
+design cost.
 
 - **Deliverables:** `POST /v1/embeddings`; batching; model versioning; dimension
   truncation; ONNX export and quantization; container image; latency and throughput
   benchmarks; auth and rate limiting.
-- **Exit criterion:** p95 latency under 100 ms for a single short input on CPU, and a
-  client can switch from OpenAI by changing only the base URL.
+- **Exit criterion:** p95 latency under 100 ms for a single short input on CPU, and an
+  existing client can switch to us by changing only the base URL.
 - **Effort:** 3–4 weeks.
 - **Note:** serving cost, not training cost, will dominate the budget from here on.
 
 ### Stage 4 — Deeper training *(conditional)*
 
-Only if Stage 2 demonstrates real demand. Continued pretraining on IndicCorp v2 (~20.9B
-tokens, 24 languages) followed by contrastive training, rather than fine-tuning alone.
+Only if Stage 2 demonstrates real demand. Continued pretraining on the large Indic
+monolingual corpora — roughly 20B tokens across 24 languages — followed by contrastive
+training, rather than fine-tuning alone.
 
 - **Exit criterion:** a material gain over the Stage 2 checkpoint on the same benchmark.
 - **Effort:** 3–6 months.
@@ -163,7 +174,7 @@ Training happens on a dedicated workstation, separate from the development machi
 |---|---|
 | CPU | Intel i7-14700K, 20 cores / 28 threads |
 | RAM | 32 GB |
-| GPU | NVIDIA RTX 4070 Ti SUPER, **16 GB VRAM** |
+| GPU | RTX 4070 Ti SUPER, **16 GB VRAM** |
 | Storage | ~720 GB free |
 | OS | Windows (x64) |
 
@@ -171,7 +182,7 @@ Training happens on a dedicated workstation, separate from the development machi
 
 ### What fits in 16 GB
 
-For BGE-M3 (568M parameters), measured against the usual training-memory formula:
+For a 568M-parameter base model, against the usual training-memory formula:
 
 | Configuration | Model + optimizer | Left for activations |
 |---|---|---|
@@ -202,9 +213,10 @@ bf16 TFLOPS, 672 vs 1555 GB/s bandwidth). A LoRA run over ~1M pairs that takes 1
 an A100 should be expected to take **1.5–3 days** here.
 
 That makes full runs a weekend activity, not an interactive one — so **iterate on a
-smaller base model first**. `multilingual-e5-small` (118M) trains several times faster and
-validates the entire pipeline; move to BGE-M3 only once the data, loss and evaluation are
-known-good. Reserve the long runs for configurations already proven at small scale.
+smaller base model first**. A ~120M-parameter multilingual encoder trains several times
+faster and validates the entire pipeline; move to the 568M model only once the data, loss
+and evaluation are known-good. Reserve the long runs for configurations already proven at
+small scale.
 
 ### Practical notes
 
@@ -212,9 +224,9 @@ known-good. Reserve the long runs for configurations already proven at small sca
   the ML tooling — `bitsandbytes`, GradCache implementations, most training scripts — is
   Linux-first. Native Windows will cost time on dependency problems that have nothing to
   do with the model.
-- **Storage needs planning.** IndicCorp v2 is ~20.9B tokens; the full set will not sit
-  comfortably alongside checkpoints in 720 GB. Keep corpora gzipped — the framework's
-  readers already handle `.gz` transparently — and subset by language tier.
+- **Storage needs planning.** The full Indic monolingual corpora run to ~20B tokens and
+  will not sit comfortably alongside checkpoints in 720 GB. Keep corpora gzipped — the
+  framework's readers already handle `.gz` transparently — and subset by language tier.
 - **32 GB system RAM is adequate** because the corpus layer streams rather than
   materialising. That design choice, made for a different reason, pays off here.
 - **PyTorch becomes a dependency at Stage 2.** This is the first real change to the
@@ -241,9 +253,9 @@ competitors fairly, and reporting losses.
 one to verify a gold set cheaply. Budget for native-speaker review, or scope those
 languages as best-effort and label them as such.
 
-**Licence compatibility.** BGE-M3 is MIT and safe. Verify any base model's terms before
-building on it, and record the training data's licence — a model inherits the constraints
-of its corpus.
+**Licence compatibility.** Verify any base model's terms before building on it, and
+record the training data's licence — a model inherits the constraints of its corpus. A
+permissive base licence is a hard selection criterion, not a preference.
 
 **Serving economics.** A 568M model on CPU is viable; on GPU it is not free. Model the
 per-request cost before committing to a pricing structure.
@@ -255,8 +267,8 @@ per-request cost before committing to a pricing structure.
 1. **Stage 0** — the encoder abstraction. Small, unblocks everything, no external
    dependency. Can start immediately.
 2. **Data sourcing in parallel** — audit what exists per language, starting with
-   Samanantar, IndicCorp v2, MIRACL and FLORES-200. This is the long pole; begin it
-   before it is needed.
+   the public Indic parallel corpora, the monolingual corpora, and the multilingual
+   retrieval benchmarks. This is the long pole; begin it before it is needed.
 3. **Decide the language tier** — all 22 at best-effort, or 6–8 with genuine depth. This
    determines the shape of Stages 1 and 2.
 
@@ -266,9 +278,9 @@ per-request cost before committing to a pricing structure.
 |---|---|---|
 | GPU access — owned or rented? | Determines Stage 2 iteration speed. | **Resolved** — local RTX 4070 Ti SUPER (16 GB) covers Stages 0–3; only Stage 4 needs rental |
 | Language tier — all 22, or a focused subset? | Drives benchmark and data effort. | Open |
-| Base model — BGE-M3 or Qwen3-Embedding? | Licence and size trade-off. BGE-M3 is the safer default. | Leaning BGE-M3 |
+| Base model | Licence and size trade-off; see the selection criteria in Stage 2. | Open |
 | Open weights or closed? | Affects adoption, benchmark credibility, and commercial model. | Open |
-| Target dimensions | Matching 1536/3072 eases migration from OpenAI. | Leaning Matryoshka, truncatable |
+| Target dimensions | Matching the common 1536/3072 sizes eases migration from existing APIs. | Leaning Matryoshka, truncatable |
 
 ---
 

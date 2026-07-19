@@ -82,7 +82,7 @@ Implemented and tested end to end:
 pretends otherwise:
 
 - **No transformer.** No encoder, no attention, no positional encoding.
-- **No fastText.** There is no subword-averaging embedding model; word2vec operates on
+- **No subword-averaging model.** There is no character n-gram embedding model; word2vec operates on
   SentencePiece pieces, which is a different thing.
 - **No contrastive learning** and no fine-tuning of any kind.
 - **No PyTorch, and no deep learning runtime at all.** The full dependency set is

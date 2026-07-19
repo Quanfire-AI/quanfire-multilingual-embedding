@@ -32,8 +32,8 @@ corpus  ->  tokenizer  ->  vocabulary  ->  embeddings  ->  evaluation  ->  searc
 - [Limitations](#limitations)
 
 > **Where this is going:** [ROADMAP.md](ROADMAP.md) sets out the path from this
-> word2vec baseline to a served, Indic-first embedding model in the class of OpenAI's
-> `text-embedding-3-*`, with staged deliverables and exit criteria.
+> word2vec baseline to a served, Indic-first embedding model of commercial quality,
+> with staged deliverables and exit criteria.
 
 > **Looking for the full reference?**
 > [`knowledge-base/QuanFire-Multilingual-Embedding-Handbook.pdf`](knowledge-base/QuanFire-Multilingual-Embedding-Handbook.pdf)
@@ -547,8 +547,8 @@ byte-identically.
 
 Exact cosine search is the right choice up to roughly 10⁵–10⁶ vectors. Beyond that
 you need an approximate index, which this framework does not provide; the embeddings
-themselves are plain `float32` numpy arrays, so they feed directly into FAISS, HNSW or
-a vector database without conversion.
+themselves are plain `float32` numpy arrays, so they feed directly into any approximate
+nearest-neighbour library or vector database without conversion.
 
 ---
 
