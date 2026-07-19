@@ -2,7 +2,7 @@
 
 > From a word2vec baseline to a served, Indic-first text embedding model.
 
-**Status:** Stage 0 not started. Stages 1–5 are planned, not built.
+**Status:** Stage 0 **complete**. Stages 1–5 are planned, not built.
 Everything described past Stage 0 is a proposal, not a commitment.
 
 ---
@@ -62,7 +62,7 @@ elsewhere". That was wrong, and it is corrected. Fixing it is Stage 0.
 Each stage has an exit criterion. A stage is not finished when the code works; it is
 finished when the criterion is met.
 
-### Stage 0 — Make the architecture admit contextual models
+### Stage 0 — Make the architecture admit contextual models ✅ **done**
 
 **Why first:** everything downstream depends on it, and it is small.
 
@@ -71,11 +71,18 @@ both static and contextual models implement. Re-point `SemanticSearchPipeline` a
 `TextEncoder` rather than `EmbeddingMatrix`. The word2vec path becomes one implementation;
 nothing about its behaviour changes.
 
-- **Deliverables:** `TextEncoder` protocol; `StaticTextEncoder` wrapping the current
-  matrix; search pipeline decoupled; architecture test extended to cover the new layer.
-- **Exit criterion:** the existing 963 tests still pass, and a stub encoder returning
-  random vectors can be served through the pipeline end to end.
-- **Effort:** ~1 week. No GPU. No new dependencies.
+- **Delivered:** `embedding/encoder.py` defining the `TextEncoder` protocol;
+  `SemanticSearchPipeline` re-pointed at it, with `matrix` and `tokenizer` now optional
+  extras rather than requirements; `from_static()` preserving the static path;
+  17 new tests, two of them architectural.
+- **Exit criterion — met.** All 963 prior tests still pass, and a `HashingEncoder`
+  backed by no model, no vocabulary and no matrix indexes and searches end to end.
+- **Actual effort:** well under the estimated week. No GPU, no new dependencies, no
+  behaviour change to any existing encoder — both shipped encoders already satisfied the
+  contract, which is why it was defined to match them.
+
+The contract is a `Protocol` rather than an ABC, deliberately: a future contextual
+encoder satisfies it by shape, without importing anything from this package.
 
 ### Stage 1 — Build the evaluation benchmark, before any model
 
@@ -152,8 +159,13 @@ training, rather than fine-tuning alone.
 
 - **Exit criterion:** a material gain over the Stage 2 checkpoint on the same benchmark.
 - **Effort:** 3–6 months.
-- **Compute:** beyond the local workstation. 8× A100 for weeks — on the order of
-  **$10,000–25,000** rented. Do not begin this without Stage 2 numbers justifying it.
+- **Compute:** feasible locally, at roughly **30 days of continuous training** for a
+  568M model over ~20B tokens. That is a month of electricity rather than a rental
+  invoice. Renting a 4× A100 node compresses it to ~3 days if time matters more than
+  money. Either way, do not begin without Stage 2 numbers justifying it.
+- **Caveats for the local route:** a consumer card at full load for a month needs real
+  cooling and stable power, checkpoint frequently and assume at least one crash, and the
+  workstation is unavailable for anything else throughout.
 
 ### Stage 5 — Multimodal *(parked)*
 
@@ -217,6 +229,55 @@ smaller base model first**. A ~120M-parameter multilingual encoder trains severa
 faster and validates the entire pipeline; move to the 568M model only once the data, loss
 and evaluation are known-good. Reserve the long runs for configurations already proven at
 small scale.
+
+### Capability envelope
+
+What the workstation can and cannot train, computed from the memory formula above and a
+FLOP estimate at ~30% achieved utilisation.
+
+| Model size | Serve (bf16) | LoRA train | Full fine-tune |
+|---|---|---|---|
+| 118M encoder | yes | yes | yes |
+| 278M encoder | yes | yes | yes |
+| **568M encoder — the target** | yes | **yes** | yes, with an 8-bit optimizer |
+| 1.5B | yes | yes | no |
+| 4B | yes | yes | no |
+| 8B | tight | **no** | no |
+
+Training time, contrastive fine-tune over 1M pairs for 3 epochs:
+
+| Model | Wall-clock |
+|---|---|
+| 118M | ~0.8 days |
+| **568M** | **~3.7 days** |
+| 1.5B | ~9.7 days |
+
+**The ceiling is the 568M class**, and that is the strategic point rather than a
+disappointment. The models topping public leaderboards are 8B and cannot be trained here
+at any speed. Out-scaling them is not available; out-specialising them is. A focused
+568M model trained on data nobody else has beats a general 8B model on that data, and
+this hardware trains it over a weekend.
+
+The binding constraint remains **data, not compute**.
+
+### Storage budget
+
+The full pipeline fits with room to spare, provided corpora stay compressed — which the
+readers handle transparently.
+
+| Item | Size |
+|---|---|
+| Indic monolingual corpora, 24 languages, gzipped | ~120 GB |
+| Parallel corpora, ~50M pairs, gzipped | ~18 GB |
+| Tokenised training shards | ~60 GB |
+| Base model weights and variants | ~15 GB |
+| Checkpoints | ~25 GB |
+| Evaluation artefacts | ~5 GB |
+| Working space and headroom | ~80 GB |
+| **Total** | **~323 GB of 720 GB free** |
+
+RAM and CPU are not constraints. The corpus layer streams rather than materialising, and
+the data preparation that dominates Stage 1 parallelises well across 20 cores.
 
 ### Practical notes
 

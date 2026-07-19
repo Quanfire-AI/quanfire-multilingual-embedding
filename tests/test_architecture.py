@@ -157,3 +157,65 @@ def test_package_ships_py_typed_marker() -> None:
     """
 
     assert (SOURCE_ROOT / "py.typed").is_file()
+
+
+def test_every_registered_encoder_satisfies_the_text_encoder_contract() -> None:
+    """
+    The search pipeline accepts anything shaped like a ``TextEncoder``.
+
+    An encoder added to the registry that does not conform would pass
+    its own unit tests and then fail inside the pipeline at runtime, so
+    conformance is checked here across the whole registry rather than
+    per implementation.
+    """
+
+    import numpy as np
+
+    from multilingual_embedding.embedding.encoder import TextEncoder
+    from multilingual_embedding.embedding.matrix import EmbeddingMatrix
+    from multilingual_embedding.embedding.sentence import SENTENCE_ENCODERS
+    from multilingual_embedding.vocabulary.vocabulary import Vocabulary
+
+    vocabulary = Vocabulary.from_counter({"alpha": 3, "beta": 2}, min_count=1)
+
+    matrix = EmbeddingMatrix(
+        vocabulary,
+        np.zeros((len(vocabulary), 4), dtype=np.float32),
+    )
+
+    assert len(SENTENCE_ENCODERS), "the encoder registry should not be empty"
+
+    for key in SENTENCE_ENCODERS:
+        encoder = SENTENCE_ENCODERS.create(key, matrix)
+
+        assert isinstance(encoder, TextEncoder), key
+
+
+def test_search_pipeline_does_not_require_an_embedding_matrix() -> None:
+    """
+    The decoupling that lets a contextual model be served.
+
+    A transformer computes vectors at call time and has no per-token
+    table, so a pipeline that demanded an ``EmbeddingMatrix`` could not
+    accept one. This asserts the constructor's contract directly, since
+    a signature regression here would not otherwise be caught until a
+    contextual encoder existed to break against it.
+    """
+
+    import inspect
+
+    from multilingual_embedding.pipelines.search import SemanticSearchPipeline
+
+    parameters = inspect.signature(SemanticSearchPipeline.__init__).parameters
+
+    assert parameters["matrix"].default is None, "matrix must stay optional"
+
+    assert parameters["tokenizer"].default is None, "tokenizer must stay optional"
+
+    required = [
+        name
+        for name, parameter in parameters.items()
+        if name != "self" and parameter.default is inspect.Parameter.empty
+    ]
+
+    assert required == ["encoder"], f"only the encoder should be required, got {required}"

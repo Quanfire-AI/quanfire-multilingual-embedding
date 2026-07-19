@@ -14,6 +14,7 @@ implement. Contextual encoders need a broader abstraction; see ROADMAP.md.
 from __future__ import annotations
 
 from .base import EmbeddingModel
+from .encoder import TextEncoder, encoder_dimension
 from .index import SearchResult, SimilarityIndex
 from .matrix import EmbeddingMatrix
 from .sentence import (
@@ -33,5 +34,7 @@ __all__ = [
     "SentenceEncoder",
     "SifEncoder",
     "SimilarityIndex",
+    "TextEncoder",
     "Word2Vec",
+    "encoder_dimension",
 ]

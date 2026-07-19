@@ -1,9 +1,14 @@
 """
 Semantic search pipeline.
 
-Loads a trained tokenizer and embedding matrix from an experiment
-directory, encodes a set of sentences into vectors, and answers nearest
-neighbour queries over them.
+Encodes a set of sentences into vectors and answers nearest neighbour
+queries over them.
+
+The pipeline depends on the
+:class:`~multilingual_embedding.embedding.encoder.TextEncoder` contract
+rather than on an embedding matrix, so it serves static and contextual
+models alike. :meth:`SemanticSearchPipeline.from_directory` builds the
+static path from a trained experiment directory.
 
 This is the inference counterpart to
 :mod:`multilingual_embedding.pipelines.training`. It deliberately loads
@@ -31,6 +36,7 @@ import numpy as np
 from multilingual_embedding.config.base import ExperimentConfig
 from multilingual_embedding.core.exceptions import ResourceNotFoundError
 from multilingual_embedding.core.logging import get_logger
+from multilingual_embedding.embedding.encoder import TextEncoder
 from multilingual_embedding.embedding.index import SearchResult, SimilarityIndex
 from multilingual_embedding.embedding.matrix import EmbeddingMatrix
 from multilingual_embedding.embedding.sentence import MeanPoolingEncoder, SentenceEncoder
@@ -69,18 +75,26 @@ class SemanticSearchPipeline:
     """
     Nearest neighbour search over sentence embeddings.
 
+    Depends on the :class:`~multilingual_embedding.embedding.encoder.TextEncoder`
+    contract — text in, vectors out — rather than on an embedding matrix.
+    That is what lets it serve a contextual model, which computes vectors
+    at call time and has no per-token table to hold.
+
     Parameters
     ----------
-    tokenizer:
-        Tokenizer matching the one the embeddings were trained with.
-        Using a different tokenizer would produce pieces that index into
-        the wrong embedding rows.
+    encoder:
+        Anything satisfying ``TextEncoder``.
 
     matrix:
-        The trained embedding matrix.
+        The embedding matrix, when the encoder happens to be backed by
+        one. Optional, and ``None`` for contextual models. It is kept
+        only to support :meth:`similar_tokens`, which is meaningful for
+        static models alone.
 
-    encoder:
-        Sentence encoder. Defaults to mean pooling.
+    tokenizer:
+        The tokenizer the static encoder segments with, when there is a
+        separable one. ``None`` for a contextual model, whose tokenizer
+        is internal to it.
 
     Example
     -------
@@ -98,23 +112,47 @@ class SemanticSearchPipeline:
 
     def __init__(
         self,
-        tokenizer: SentencePieceTokenizer,
-        matrix: EmbeddingMatrix,
-        encoder: SentenceEncoder | None = None,
+        encoder: TextEncoder,
+        *,
+        matrix: EmbeddingMatrix | None = None,
+        tokenizer: SentencePieceTokenizer | None = None,
     ) -> None:
-        self._tokenizer = tokenizer
+        self._encoder = encoder
 
         self._matrix = matrix
 
-        self._encoder = (
+        self._tokenizer = tokenizer
+
+        self._index: SimilarityIndex | None = None
+
+        self._texts: list[str] = []
+
+    @classmethod
+    def from_static(
+        cls,
+        tokenizer: SentencePieceTokenizer,
+        matrix: EmbeddingMatrix,
+        encoder: SentenceEncoder | None = None,
+    ) -> SemanticSearchPipeline:
+        """
+        Build a pipeline over a static embedding matrix.
+
+        The tokenizer must be the one the embeddings were trained with;
+        a different one produces pieces that index into the wrong rows.
+
+        Parameters
+        ----------
+        encoder:
+            Sentence encoder over the matrix. Defaults to mean pooling.
+        """
+
+        resolved = (
             encoder
             if encoder is not None
             else MeanPoolingEncoder(matrix, tokenize=tokenizer.tokenize)
         )
 
-        self._index: SimilarityIndex | None = None
-
-        self._texts: list[str] = []
+        return cls(resolved, matrix=matrix, tokenizer=tokenizer)
 
     @classmethod
     def from_directory(
@@ -161,7 +199,7 @@ class SemanticSearchPipeline:
             extra={"directory": str(root), "vocabulary_size": len(matrix)},
         )
 
-        return cls(tokenizer, matrix, encoder=encoder)
+        return cls.from_static(tokenizer, matrix, encoder)
 
     @classmethod
     def from_config(cls, config: ExperimentConfig) -> SemanticSearchPipeline:
@@ -170,22 +208,34 @@ class SemanticSearchPipeline:
         return cls.from_directory(config.experiment_directory)
 
     @property
-    def matrix(self) -> EmbeddingMatrix:
-        """The embedding matrix backing this pipeline."""
+    def encoder(self) -> TextEncoder:
+        """The encoder queries and documents are embedded with."""
 
-        return self._matrix
+        return self._encoder
 
     @property
-    def tokenizer(self) -> SentencePieceTokenizer:
+    def tokenizer(self) -> SentencePieceTokenizer | None:
         """
-        The tokenizer queries are encoded with.
+        The tokenizer a static encoder segments with.
 
-        Exposed alongside :attr:`matrix` because the two must agree:
-        a tokenizer that normalizes differently from the one that
-        produced the vectors yields pieces the matrix has no rows for.
+        Exposed alongside :attr:`matrix` because the two must agree: a
+        tokenizer that normalizes differently from the one that produced
+        the vectors yields pieces the matrix has no rows for. ``None``
+        for a contextual model, whose tokenizer is not separable.
         """
 
         return self._tokenizer
+
+    @property
+    def matrix(self) -> EmbeddingMatrix | None:
+        """
+        The embedding matrix, when the encoder is backed by one.
+
+        ``None`` for a contextual model, which computes vectors at call
+        time and holds no per-token table.
+        """
+
+        return self._matrix
 
     @property
     def indexed_count(self) -> int:
@@ -227,7 +277,7 @@ class SemanticSearchPipeline:
         # failing on an inference that has nothing to infer from.
         self._index = SimilarityIndex.build(
             zip(texts, vectors, strict=True),
-            dimension=self._matrix.dimension,
+            dimension=self._encoder.dimension,
         )
 
         _logger.info("Indexed sentences", extra={"count": len(texts)})
@@ -268,7 +318,7 @@ class SemanticSearchPipeline:
         which is the quickest way to sanity check what a model learned.
         """
 
-        if token not in self._matrix:
+        if self._matrix is None or token not in self._matrix:
             return []
 
         return self._matrix.most_similar(token, top_k)
@@ -276,5 +326,5 @@ class SemanticSearchPipeline:
     def __repr__(self) -> str:
         return (
             f"SemanticSearchPipeline(indexed={self.indexed_count}, "
-            f"vocabulary_size={len(self._matrix)})"
+            f"dimension={self._encoder.dimension})"
         )
