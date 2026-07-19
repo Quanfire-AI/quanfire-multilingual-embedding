@@ -31,6 +31,10 @@ corpus  ->  tokenizer  ->  vocabulary  ->  embeddings  ->  evaluation  ->  searc
 - [Development](#development)
 - [Limitations](#limitations)
 
+> **Where this is going:** [ROADMAP.md](ROADMAP.md) sets out the path from this
+> word2vec baseline to a served, Indic-first embedding model in the class of OpenAI's
+> `text-embedding-3-*`, with staged deliverables and exit criteria.
+
 > **Looking for the full reference?**
 > [`knowledge-base/QuanFire-Multilingual-Embedding-Handbook.pdf`](knowledge-base/QuanFire-Multilingual-Embedding-Handbook.pdf)
 > is a 47-page handbook covering purpose, design, architecture, components, usage, local
@@ -116,7 +120,7 @@ Stated up front, because a framework that claims everything is useful for nothin
 | 3 | Tokenization — normalizers, pre-tokenizers, SentencePiece | **Implemented** |
 | 4 | Vocabulary — token/id mapping, special tokens, persistence | **Implemented** |
 | 5 | Embeddings — word2vec, sentence encoders, similarity search | **Implemented** |
-| 6 | Transformer encoder, contrastive learning, fine-tuning | **Not implemented** |
+| 6 | Transformer encoder, contrastive learning, fine-tuning | **Not implemented** — planned in [ROADMAP.md](ROADMAP.md) |
 
 Phase 6 is deliberately absent rather than stubbed. The dependency set is
 `numpy`, `pandas`, `pyyaml`, `sentencepiece`, `tqdm` — there is **no PyTorch**, and
