@@ -1,0 +1,138 @@
+"""
+Corpus layer: text representation, segmentation, reading and statistics.
+
+The hierarchy is::
+
+    Corpus
+     └── Document
+          └── Paragraph
+               └── Sentence
+                    └── Token
+
+Each node stores its span relative to its parent, so any unit can be
+mapped back to its exact position in the source text.
+"""
+
+from __future__ import annotations
+
+from .corpus import Corpus
+from .document import Document
+from .exceptions import (
+    CorpusError,
+    CorpusFormatError,
+    EmptyCorpusError,
+    SegmentationError,
+)
+from .iterator import SentenceStream, batched, take
+from .language import (
+    LANGUAGE_NAMES,
+    Language,
+    expected_script,
+    infer_language,
+    language_name,
+    normalize_language_code,
+)
+from .loader import (
+    build_filter,
+    build_reader,
+    load_corpus,
+    stream_documents,
+    stream_sentences,
+)
+from .paragraph import Paragraph
+from .reader import (
+    READERS,
+    CorpusReader,
+    JsonlReader,
+    LineReader,
+    TextFileReader,
+    reader_for,
+    resolve_reader_type,
+)
+from .script import (
+    Script,
+    ScriptProfile,
+    detect_script,
+    is_whitespace_delimited,
+    script_histogram,
+)
+from .segmentation import (
+    SENTENCE_TERMINATORS,
+    split_paragraphs,
+    split_sentences,
+    split_words,
+)
+from .sentence import Sentence
+from .statistics import (
+    CorpusStatistics,
+    LengthSummary,
+    StatisticsAccumulator,
+    compute_statistics,
+)
+from .token import Token
+from .validators import (
+    DocumentDeduplicator,
+    FilterReport,
+    SentenceFilter,
+    validate_document,
+)
+from .writer import (
+    CorpusWriter,
+    JsonlCorpusWriter,
+    PlainTextCorpusWriter,
+    write_sentences,
+)
+
+__all__ = [
+    "LANGUAGE_NAMES",
+    "READERS",
+    "SENTENCE_TERMINATORS",
+    "Corpus",
+    "CorpusError",
+    "CorpusFormatError",
+    "CorpusReader",
+    "CorpusStatistics",
+    "CorpusWriter",
+    "Document",
+    "DocumentDeduplicator",
+    "EmptyCorpusError",
+    "FilterReport",
+    "JsonlCorpusWriter",
+    "JsonlReader",
+    "Language",
+    "LengthSummary",
+    "LineReader",
+    "Paragraph",
+    "PlainTextCorpusWriter",
+    "Script",
+    "ScriptProfile",
+    "SegmentationError",
+    "Sentence",
+    "SentenceFilter",
+    "SentenceStream",
+    "StatisticsAccumulator",
+    "TextFileReader",
+    "Token",
+    "batched",
+    "build_filter",
+    "build_reader",
+    "compute_statistics",
+    "detect_script",
+    "expected_script",
+    "infer_language",
+    "is_whitespace_delimited",
+    "language_name",
+    "load_corpus",
+    "normalize_language_code",
+    "reader_for",
+    "resolve_reader_type",
+    "script_histogram",
+    "split_paragraphs",
+    "split_sentences",
+    "split_words",
+    "stream_documents",
+    "stream_sentences",
+    "take",
+    "validate_document",
+    "write_sentences",
+]

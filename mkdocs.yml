@@ -1,0 +1,49 @@
+site_name: QuanFire Multilingual Embedding
+site_description: A production-grade multilingual NLP and embedding framework
+repo_url: https://github.com/quanfire/quanfire-multilingual-embedding
+edit_uri: ""
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Architecture: architecture.md
+  - Configuration: configuration.md
+
+# docs/README.md documents this directory for anyone browsing the repository
+# on GitHub. MkDocs would otherwise treat it as a second index page and
+# collide with index.md, which fails the build under --strict.
+exclude_docs: |
+  README.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+
+watch:
+  - src/multilingual_embedding

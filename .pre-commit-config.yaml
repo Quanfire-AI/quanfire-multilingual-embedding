@@ -1,0 +1,42 @@
+# Pre-commit hooks.
+#
+# Install once with:
+#
+#     uv run pre-commit install
+#
+# The hooks mirror what CI enforces, so a commit that passes locally
+# passes remotely.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict
+      - id: debug-statements
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.12.0
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.17.0
+    hooks:
+      - id: mypy
+        # The framework's own dependencies must be visible to mypy, or it
+        # reports missing imports for numpy and yaml.
+        additional_dependencies:
+          - numpy>=2.0
+          - types-PyYAML
+        args: ["--config-file=pyproject.toml"]
+        files: ^src/
