@@ -2,8 +2,29 @@
 
 > From a word2vec baseline to a served, Indic-first text embedding model.
 
-**Status:** Stage 0 **complete**. Stages 1–5 are planned, not built.
-Everything described past Stage 0 is a proposal, not a commitment.
+> ## ⚠ BLOCKED — pending demand validation
+>
+> **Stages 1–5 are on hold and must not be started.** They were scoped against an
+> assumption that has never been tested: that QuanFire customers need Indic document
+> handling. No customer has asked for it. It is a hypothesis, not a requirement.
+>
+> **The blocking question:** what share of documents already uploaded to DocPro are in
+> non-Latin scripts, and does quality correlate with script?
+>
+> That is answerable in a day from data QuanFire already holds, by running script
+> detection over the existing document text and cross-referencing it against whatever
+> quality signal exists. Set the decision threshold *before* looking at the result,
+> otherwise the outcome will be read as encouraging whatever it says.
+>
+> **Two further findings that should temper this plan.** The Indic language space is
+> heavily funded and its main participants release models free, so an embedding model is
+> unlikely to be a viable product on its own. And QuanFire already has live products; the
+> defensible position is document intelligence with customer data and on-premise
+> deployment, not a commodity model. If the validation succeeds, the justified scope is
+> probably far narrower than what follows.
+
+**Status:** Stage 0 **complete**. Stages 1–5 are **blocked**, not merely unstarted.
+Everything past Stage 0 is a proposal contingent on validation.
 
 ---
 
