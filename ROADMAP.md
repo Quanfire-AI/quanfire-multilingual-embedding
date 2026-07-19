@@ -116,10 +116,9 @@ truncate dimensions, matching the `text-embedding-3` interface.
 - **Exit criterion:** **beats `text-embedding-3-large` on the Indic benchmark** for at
   least the 12 well-resourced languages, and does not regress badly on English.
 - **Effort:** 4–6 weeks.
-- **Compute:** LoRA on a single 24 GB GPU (RTX 4090 / A10) is sufficient for a first run,
-  roughly 12–24 hours for ~1M pairs. A full fine-tune wants 4× A100. At current rental
-  rates (~$1.80/hr A100, ~$3/hr H100), **a training run costs $50–200** — this stage is
-  cheap, and the cost is dominated by experimentation, not by any single run.
+- **Compute:** runs locally on the 16 GB RTX 4070 Ti SUPER using LoRA plus GradCache —
+  see the compute profile below. Expect 1.5–3 days per full run over ~1M pairs, so
+  validate the pipeline on a smaller base model first. **No rental cost for this stage.**
 
 ### Stage 3 — Serve it
 
@@ -142,8 +141,8 @@ tokens, 24 languages) followed by contrastive training, rather than fine-tuning 
 
 - **Exit criterion:** a material gain over the Stage 2 checkpoint on the same benchmark.
 - **Effort:** 3–6 months.
-- **Compute:** 8× A100 for weeks — on the order of **$10,000–25,000**. Do not begin this
-  without Stage 2 numbers justifying it.
+- **Compute:** beyond the local workstation. 8× A100 for weeks — on the order of
+  **$10,000–25,000** rented. Do not begin this without Stage 2 numbers justifying it.
 
 ### Stage 5 — Multimodal *(parked)*
 
@@ -153,6 +152,75 @@ beyond config and serving scaffolding.
 
 **Deliberately not planned in detail.** Revisit only once the text model is serving real
 traffic. Sequencing these earlier would starve the one thing with a defensible position.
+
+---
+
+## Compute profile
+
+Training happens on a dedicated workstation, separate from the development machine:
+
+| | |
+|---|---|
+| CPU | Intel i7-14700K, 20 cores / 28 threads |
+| RAM | 32 GB |
+| GPU | NVIDIA RTX 4070 Ti SUPER, **16 GB VRAM** |
+| Storage | ~720 GB free |
+| OS | Windows (x64) |
+
+**This is sufficient for Stages 0 through 3.** Only Stage 4 requires rented hardware.
+
+### What fits in 16 GB
+
+For BGE-M3 (568M parameters), measured against the usual training-memory formula:
+
+| Configuration | Model + optimizer | Left for activations |
+|---|---|---|
+| Full fine-tune, bf16 + fp32 Adam | 8.5 GB | 7.5 GB |
+| Full fine-tune, bf16 + 8-bit Adam | 5.3 GB | 10.7 GB |
+| **LoRA (r=16), bf16 frozen base** | **1.1 GB** | **14.9 GB** |
+
+**Use LoRA.** Activations are where contrastive training actually needs room, and LoRA
+leaves nearly the whole card for them. A full fine-tune fits only with 8-bit Adam and a
+batch size too small to be useful.
+
+### The technique that makes this work
+
+Contrastive training quality depends heavily on **effective batch size**, because
+in-batch examples serve as each other's negatives. A 16 GB card fits perhaps 8–16
+sequences at 512 tokens — far below the 512–2048 that good results need.
+
+**GradCache** solves this: representations are computed in chunks without gradients, then
+recomputed chunk-by-chunk during the backward pass. It decouples effective batch size from
+VRAM at the cost of roughly a second forward pass. With it, effective batches of 1024+ are
+reachable on this card. Without it, this hardware cannot train a competitive contrastive
+model, regardless of how long it runs.
+
+### Expected wall-clock
+
+The 4070 Ti SUPER is roughly a third of an A100 for this workload (~44 vs ~156 dense
+bf16 TFLOPS, 672 vs 1555 GB/s bandwidth). A LoRA run over ~1M pairs that takes 12–24h on
+an A100 should be expected to take **1.5–3 days** here.
+
+That makes full runs a weekend activity, not an interactive one — so **iterate on a
+smaller base model first**. `multilingual-e5-small` (118M) trains several times faster and
+validates the entire pipeline; move to BGE-M3 only once the data, loss and evaluation are
+known-good. Reserve the long runs for configurations already proven at small scale.
+
+### Practical notes
+
+- **Use WSL2, not native Windows.** CUDA support is full, performance is near-native, and
+  the ML tooling — `bitsandbytes`, GradCache implementations, most training scripts — is
+  Linux-first. Native Windows will cost time on dependency problems that have nothing to
+  do with the model.
+- **Storage needs planning.** IndicCorp v2 is ~20.9B tokens; the full set will not sit
+  comfortably alongside checkpoints in 720 GB. Keep corpora gzipped — the framework's
+  readers already handle `.gz` transparently — and subset by language tier.
+- **32 GB system RAM is adequate** because the corpus layer streams rather than
+  materialising. That design choice, made for a different reason, pays off here.
+- **PyTorch becomes a dependency at Stage 2.** This is the first real change to the
+  project's dependency posture and should be a deliberate, recorded decision. Keep it
+  confined to the new encoder package so the existing NumPy pipeline stays installable
+  without it.
 
 ---
 
@@ -196,7 +264,7 @@ per-request cost before committing to a pricing structure.
 
 | Decision | Why it matters | Status |
 |---|---|---|
-| GPU access — owned or rented? | Determines Stage 2 iteration speed. Rental at ~$50–200 per run is affordable either way. | Open |
+| GPU access — owned or rented? | Determines Stage 2 iteration speed. | **Resolved** — local RTX 4070 Ti SUPER (16 GB) covers Stages 0–3; only Stage 4 needs rental |
 | Language tier — all 22, or a focused subset? | Drives benchmark and data effort. | Open |
 | Base model — BGE-M3 or Qwen3-Embedding? | Licence and size trade-off. BGE-M3 is the safer default. | Leaning BGE-M3 |
 | Open weights or closed? | Affects adoption, benchmark credibility, and commercial model. | Open |
