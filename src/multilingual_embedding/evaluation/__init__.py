@@ -33,6 +33,11 @@ from .metrics import (
     spearman_correlation,
 )
 from .report import EvaluationReport
+from .retrieval import (
+    RetrievalReport,
+    RetrievalScores,
+    evaluate_retrieval,
+)
 from .tokenizer_eval import (
     TokenizerEvaluator,
     TokenizerMetrics,
@@ -45,6 +50,8 @@ __all__ = [
     "EmbeddingEvaluator",
     "EmbeddingMetrics",
     "EvaluationReport",
+    "RetrievalReport",
+    "RetrievalScores",
     "SimilarityPair",
     "TokenizerEvaluator",
     "TokenizerMetrics",
@@ -52,6 +59,7 @@ __all__ = [
     "average_precision",
     "cosine_similarity",
     "cosine_similarity_matrix",
+    "evaluate_retrieval",
     "evaluate_tokenizer",
     "f1_score",
     "language_fairness",
