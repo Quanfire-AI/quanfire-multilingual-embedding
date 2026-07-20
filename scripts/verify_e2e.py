@@ -208,14 +208,54 @@ def describe_environment() -> dict[str, Any]:
 # ----------------------------------------------------------------------
 
 
-def stage_extract(dump: Path, language: str, output: Path) -> tuple[Path, dict[str, Any]]:
+def is_complete_gzip(path: Path) -> bool:
+    """
+    True when a gzip file decompresses to its end.
+
+    A file left behind by an interrupted run is a valid gzip *prefix*,
+    so its mere existence proves nothing — reusing one would feed a
+    truncated corpus into everything downstream and the damage would show
+    up as a quality problem rather than an error. Reading it through is
+    cheap next to re-extracting a dump.
+    """
+
+    import gzip
+
+    if not path.exists():
+        return False
+
+    try:
+        with gzip.open(path, "rb") as handle:
+            while handle.read(1024 * 1024):
+                pass
+    except (OSError, EOFError):
+        return False
+
+    return True
+
+
+def stage_extract(
+    dump: Path, language: str, output: Path, reuse: bool
+) -> tuple[Path, dict[str, Any]]:
     """Extract a dump, and report how much of it was not article prose."""
 
     from multilingual_embedding.corpus.wikipedia import extract_dump
 
+    if reuse and is_complete_gzip(output):
+        with __import__("gzip").open(output, "rt", encoding="utf-8") as handle:
+            count = sum(1 for _ in handle)
+
+        return output, {
+            "reused": True,
+            "dump_mb": round(dump.stat().st_size / 1024**2, 1),
+            "articles_written": count,
+            "output_mb": round(output.stat().st_size / 1024**2, 1),
+        }
+
     count = extract_dump(dump, output, language=language)
 
     return output, {
+        "reused": False,
         "dump_mb": round(dump.stat().st_size / 1024**2, 1),
         "articles_written": count,
         "output_mb": round(output.stat().st_size / 1024**2, 1),
@@ -460,6 +500,16 @@ def main() -> int:
     )
 
     parser.add_argument(
+        "--reuse",
+        action="store_true",
+        help=(
+            "Skip extraction when a complete output already exists. "
+            "Checked by decompressing it, so a file left behind by an "
+            "interrupted run is re-extracted rather than trusted"
+        ),
+    )
+
+    parser.add_argument(
         "--full",
         action="store_true",
         help=(
@@ -528,6 +578,7 @@ def main() -> int:
             dump,
             language,
             arguments.work / f"{language}.jsonl.gz",
+            arguments.reuse,
         )
 
         if corpus is None:
