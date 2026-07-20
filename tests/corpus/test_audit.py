@@ -269,3 +269,76 @@ class TestCommandLine:
         assert payload["documents"] == 1
 
         assert payload["usable"] is True
+
+
+class TestSeverityDependsOnPrevalence:
+    """
+    A verdict on a corpus is not the same as a finding about a document.
+
+    Hindi Wikipedia carries mojibake in 2 of 118,571 articles — its own
+    source is damaged, and always was. The audit called the whole corpus
+    unusable and would have blocked training on the other 118,569.
+
+    What ERROR is meant to mean is "the extraction did not finish", and
+    that looks entirely different: markup or encoding damage in most
+    documents, not two of them.
+    """
+
+    def _corpus(self, damaged: int, clean: int) -> list[Document]:
+        broken = [
+            Document.from_text(f"Damaged text {i}: caf� na�ve r�sum�.", identifier=f"b{i}")
+            for i in range(damaged)
+        ]
+
+        fine = [
+            Document.from_text(
+                f"A perfectly ordinary document number {i}. It has two sentences.",
+                identifier=f"g{i}",
+            )
+            for i in range(clean)
+        ]
+
+        return broken + fine
+
+    def test_rare_damage_is_a_warning_and_the_corpus_stays_usable(self) -> None:
+        audit = audit_corpus(self._corpus(damaged=2, clean=2000))
+
+        finding = next(f for f in audit.findings if f.code == "encoding_damage")
+
+        assert finding.severity is Severity.WARNING
+
+        assert audit.usable, "a handful of bad source documents must not block training"
+
+    def test_widespread_damage_is_an_error(self) -> None:
+        """The extraction really is broken here, and should block."""
+
+        audit = audit_corpus(self._corpus(damaged=400, clean=600))
+
+        finding = next(f for f in audit.findings if f.code == "encoding_damage")
+
+        assert finding.severity is Severity.ERROR
+
+        assert not audit.usable
+
+    def test_a_downgraded_finding_says_what_share_it_affects(self) -> None:
+        """
+        Otherwise the reader cannot tell a warning about two documents
+        from a warning about two thousand.
+        """
+
+        audit = audit_corpus(self._corpus(damaged=2, clean=2000))
+
+        finding = next(f for f in audit.findings if f.code == "encoding_damage")
+
+        assert "%" in finding.remedy
+
+        assert "source" in finding.remedy
+
+    def test_the_finding_is_still_reported_either_way(self) -> None:
+        """Downgrading severity must not mean hiding the problem."""
+
+        audit = audit_corpus(self._corpus(damaged=1, clean=5000))
+
+        codes = {f.code for f in audit.findings}
+
+        assert "encoding_damage" in codes

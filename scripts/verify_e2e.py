@@ -297,6 +297,15 @@ def stage_audit(corpus: Path) -> tuple[Any, dict[str, Any]]:
 
     audit = audit_corpus(reader_for(corpus).iter_documents())
 
+    # A stage that ran without raising is not the same as a stage whose
+    # answer was good. The audit reported usable=False on Hindi and the
+    # report printed PASS beside it, because "did not raise" was the only
+    # thing being checked. The verdict is the result here.
+    if not audit.usable:
+        blocking = ", ".join(f.code for f in audit.findings if f.severity is Severity.ERROR)
+
+        raise RuntimeError(f"audit judged the corpus unusable: {blocking}")
+
     return audit, {
         "documents": audit.documents,
         "sentences": audit.sentences,

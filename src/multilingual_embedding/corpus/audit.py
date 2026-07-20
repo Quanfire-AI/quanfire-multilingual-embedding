@@ -55,6 +55,16 @@ _MARKUP_MARKERS: tuple[str, ...] = (
 
 _REPLACEMENT_CHARACTER = "�"
 
+# The share above which an ERROR-class problem is treated as a broken
+# extraction rather than a damaged source. Below it, the same problem is
+# reported as a warning naming the affected share.
+#
+# One percent is a judgement, not a measurement. It sits far above the
+# 0.0017% of Hindi Wikipedia that carries mojibake in its own source, and
+# far below what a genuinely unfinished extraction produces — markup
+# survives in most documents or almost none, rarely in between.
+_SYSTEMATIC_SHARE = 0.01
+
 
 class Severity(StrEnum):
     """How much a finding should worry the reader."""
@@ -357,7 +367,21 @@ def _build_findings(
     total: int,
     example_limit: int,
 ) -> list[Finding]:
-    """Turn raw problem lists into ordered findings."""
+    """
+    Turn raw problem lists into ordered findings.
+
+    Severity depends on how widespread a problem is, not only on what it
+    is. The distinction that matters is between a *broken extraction* and
+    a *damaged source*: markup in half the documents means the pipeline
+    did not finish and the corpus should not be trained on, while two
+    articles in a hundred thousand carrying mojibake means Wikipedia
+    contains two bad articles and always did.
+
+    This was wrong until real data showed it. Hindi Wikipedia has
+    replacement characters in 2 of 118,571 documents — 0.0017% — and the
+    audit called the whole corpus unusable, which would have blocked
+    training on the other 118,569 for no reason.
+    """
 
     findings: list[Finding] = []
 
@@ -367,15 +391,33 @@ def _build_findings(
         if not affected:
             continue
 
+        share = len(affected) / total if total else 0.0
+
+        # An ERROR-class problem below the threshold is a real finding
+        # about a few documents rather than a verdict on the corpus, so
+        # it is reported as a warning with the remedy adjusted to say so.
+        graded = severity
+
+        adjusted = remedy
+
+        if severity is Severity.ERROR and share < _SYSTEMATIC_SHARE:
+            graded = Severity.WARNING
+
+            adjusted = (
+                f"{remedy} Affects {share * 100:.3g}% of documents, so this "
+                f"reads as damage in the source rather than a broken "
+                f"extraction — dropping those documents is usually enough."
+            )
+
         findings.append(
             Finding(
-                severity=severity,
+                severity=graded,
                 code=code,
                 message=f"{len(affected)} {message}.",
                 count=len(affected),
-                share=len(affected) / total if total else 0.0,
+                share=share,
                 examples=affected[:example_limit],
-                remedy=remedy,
+                remedy=adjusted,
             )
         )
 
