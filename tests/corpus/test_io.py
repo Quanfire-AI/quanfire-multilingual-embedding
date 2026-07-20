@@ -290,3 +290,54 @@ class TestConfiguredTextField:
         assert isinstance(build_reader(config), TextFileReader)
 
         assert load_corpus(config).document_count == 2
+
+
+class TestFormatNamesAgree:
+    """
+    Three places name the corpus formats: the reader registry, the
+    configuration validator and the command-line ``--format`` choices.
+    They are written out separately and drifted once already — ``lines``
+    was registered and usable from Python, yet rejected by both the
+    config and the CLI, so a sentence-per-line corpus could not be read
+    through either entry point.
+    """
+
+    def registry_names(self) -> set[str]:
+        from multilingual_embedding.corpus.reader import READERS
+
+        return set(READERS.keys())
+
+    def test_config_accepts_every_registered_reader(self) -> None:
+        from multilingual_embedding.config.base import CorpusConfig
+
+        for name in self.registry_names():
+            CorpusConfig(source="corpus.txt", format=name)
+
+    def test_command_line_offers_every_registered_reader(self) -> None:
+        """
+        Checked per subcommand, not unioned across them. A union passes
+        while one subcommand alone is missing a format, which is exactly
+        the shape the drift took.
+        """
+
+        from multilingual_embedding.cli import build_parser
+
+        parser = build_parser()
+
+        expected = self.registry_names()
+
+        checked = 0
+
+        for action in parser._subparsers._group_actions:  # type: ignore[union-attr]
+            for name, sub in action.choices.items():  # type: ignore[attr-defined]
+                for candidate in sub._actions:
+                    if candidate.dest != "format" or not candidate.choices:
+                        continue
+
+                    checked += 1
+
+                    missing = expected - set(candidate.choices)
+
+                    assert not missing, f"{name} --format omits {sorted(missing)}"
+
+        assert checked, "no subcommand exposed --format; the test found nothing to check"

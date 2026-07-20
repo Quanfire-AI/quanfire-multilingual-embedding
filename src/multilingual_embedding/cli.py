@@ -79,6 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_stats_parser(subparsers)
 
+    _add_validate_parser(subparsers)
+
     _add_train_parser(subparsers)
 
     _add_search_parser(subparsers)
@@ -107,6 +109,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     handlers = {
         "stats": _run_stats,
+        "validate": _run_validate,
         "train": _run_train,
         "search": _run_search,
         "evaluate": _run_evaluate,
@@ -168,7 +171,7 @@ def _add_stats_parser(subparsers: Any) -> None:
 
     parser.add_argument("--source", type=Path, help="Corpus file or directory")
 
-    parser.add_argument("--format", default="auto", choices=["auto", "text", "jsonl"])
+    parser.add_argument("--format", default="auto", choices=["auto", "text", "lines", "jsonl"])
 
     parser.add_argument("--language", help="Default language code for the corpus")
 
@@ -176,6 +179,29 @@ def _add_stats_parser(subparsers: Any) -> None:
         "--output",
         type=Path,
         help="Write the statistics as JSON to this path",
+    )
+
+
+def _add_validate_parser(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "validate",
+        help="Audit a corpus for problems before training on it",
+    )
+
+    _add_common_config_arguments(parser)
+
+    parser.add_argument("--source", type=Path, help="Corpus file or directory")
+
+    parser.add_argument("--format", default="auto", choices=["auto", "text", "lines", "jsonl"])
+
+    parser.add_argument("--language", help="Default language code for the corpus")
+
+    parser.add_argument("--output", type=Path, help="Write the audit as JSON to this path")
+
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit non-zero on warnings as well as errors",
     )
 
 
@@ -222,7 +248,7 @@ def _add_search_parser(subparsers: Any) -> None:
 
     parser.add_argument("--top-k", type=int, default=5)
 
-    parser.add_argument("--format", default="auto", choices=["auto", "text", "jsonl"])
+    parser.add_argument("--format", default="auto", choices=["auto", "text", "lines", "jsonl"])
 
 
 def _add_evaluate_parser(subparsers: Any) -> None:
@@ -240,7 +266,7 @@ def _add_evaluate_parser(subparsers: Any) -> None:
 
     parser.add_argument("--source", type=Path, required=True, help="Corpus to evaluate on")
 
-    parser.add_argument("--format", default="auto", choices=["auto", "text", "jsonl"])
+    parser.add_argument("--format", default="auto", choices=["auto", "text", "lines", "jsonl"])
 
     parser.add_argument("--output", type=Path, help="Write the report JSON here")
 
@@ -274,6 +300,63 @@ def _run_stats(args: argparse.Namespace) -> int:
         print(f"Wrote statistics to {args.output}")
     else:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
+
+    return EXIT_SUCCESS
+
+
+def _run_validate(args: argparse.Namespace) -> int:
+    """
+    Audit a corpus and report what is wrong with it.
+
+    Exits non-zero when the corpus is unusable, so that a data pipeline
+    can gate on it rather than discovering the problem during training.
+    """
+
+    from multilingual_embedding.corpus.audit import Severity, audit_corpus
+    from multilingual_embedding.corpus.loader import stream_documents
+
+    config = _resolve_config(args)
+
+    audit = audit_corpus(stream_documents(config.corpus, deduplicate=False))
+
+    if args.output:
+        from multilingual_embedding.utils.io import write_json
+
+        write_json(args.output, audit.to_dict())
+
+        print(f"Wrote audit to {args.output}")
+    else:
+        print(f"documents  {audit.documents}")
+
+        print(f"sentences  {audit.sentences}")
+
+        print(f"languages  {', '.join(sorted(audit.languages)) or '(none declared)'}")
+
+        print(f"scripts    {', '.join(sorted(audit.scripts)) or '(none)'}")
+
+        if not audit.findings:
+            print("\nNo problems found.")
+        else:
+            print()
+
+            for finding in audit.findings:
+                marker = {"error": "ERROR  ", "warning": "WARNING", "info": "INFO   "}[
+                    str(finding.severity)
+                ]
+
+                print(f"{marker} {finding.message}")
+
+                if finding.examples:
+                    print(f"        e.g. {', '.join(finding.examples)}")
+
+                if finding.remedy:
+                    print(f"        -> {finding.remedy}")
+
+    if not audit.usable:
+        return EXIT_ERROR
+
+    if args.strict and any(f.severity is Severity.WARNING for f in audit.findings):
+        return EXIT_ERROR
 
     return EXIT_SUCCESS
 

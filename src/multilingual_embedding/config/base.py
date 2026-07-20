@@ -53,8 +53,10 @@ class CorpusConfig:
         ``patterns``.
 
     format:
-        Reader to use: ``"text"``, ``"jsonl"`` or ``"auto"``. ``"auto"``
-        selects by file extension.
+        Reader to use: ``"text"``, ``"lines"``, ``"jsonl"`` or
+        ``"auto"``. ``"auto"`` selects by file extension, which cannot
+        distinguish a sentence-per-line file from prose, so name
+        ``"lines"`` explicitly for those.
 
     patterns:
         Glob patterns applied when ``source`` is a directory.
@@ -119,11 +121,11 @@ class CorpusConfig:
                 maximum=self.max_sentence_characters,
             )
 
-        if self.format not in {"auto", "text", "jsonl"}:
+        if self.format not in {"auto", "text", "lines", "jsonl"}:
             raise ConfigurationError(
                 "Unsupported corpus format",
                 format=self.format,
-                supported=["auto", "text", "jsonl"],
+                supported=["auto", "text", "lines", "jsonl"],
             )
 
 

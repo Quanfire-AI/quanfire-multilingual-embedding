@@ -15,6 +15,7 @@ mapped back to its exact position in the source text.
 
 from __future__ import annotations
 
+from .audit import CorpusAudit, Finding, Severity, audit_corpus
 from .corpus import Corpus
 from .document import Document
 from .exceptions import (
@@ -88,6 +89,7 @@ __all__ = [
     "READERS",
     "SENTENCE_TERMINATORS",
     "Corpus",
+    "CorpusAudit",
     "CorpusError",
     "CorpusFormatError",
     "CorpusReader",
@@ -97,6 +99,7 @@ __all__ = [
     "DocumentDeduplicator",
     "EmptyCorpusError",
     "FilterReport",
+    "Finding",
     "JsonlCorpusWriter",
     "JsonlReader",
     "Language",
@@ -110,9 +113,11 @@ __all__ = [
     "Sentence",
     "SentenceFilter",
     "SentenceStream",
+    "Severity",
     "StatisticsAccumulator",
     "TextFileReader",
     "Token",
+    "audit_corpus",
     "batched",
     "build_filter",
     "build_reader",

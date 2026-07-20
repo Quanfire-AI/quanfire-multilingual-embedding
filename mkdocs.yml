@@ -27,6 +27,7 @@ nav:
   - Getting started: getting-started.md
   - Architecture: architecture.md
   - Configuration: configuration.md
+  - Data format: data-format.md
 
 # docs/README.md documents this directory for anyone browsing the repository
 # on GitHub. MkDocs would otherwise treat it as a second index page and
