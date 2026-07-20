@@ -121,6 +121,8 @@ ignore = [
 # PyTorch code. Renaming it to satisfy the naming rule would make this
 # package read unlike every other model implementation.
 "src/multilingual_embedding/embedding/neural/*" = ["N812"]
+"tests/embedding/test_neural.py" = ["N812"]
+"tests/embedding/test_lora_gradcache.py" = ["N812"]
 
 [tool.mypy]
 python_version = "3.12"

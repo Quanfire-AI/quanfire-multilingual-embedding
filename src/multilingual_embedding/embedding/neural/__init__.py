@@ -26,6 +26,12 @@ other:
 ``training``
     Contrastive fitting on text pairs, with InfoNCE over in-batch
     negatives.
+
+``lora``
+    Low-rank adapters, so a large model trains on a small card.
+
+``gradcache``
+    Gradient caching, so the contrastive batch can exceed memory.
 """
 
 from __future__ import annotations
@@ -42,6 +48,16 @@ else:
 
 from .architecture import EncoderConfig, TransformerEncoderModel
 from .encoder import NeuralTextEncoder, Tokenizes, resolve_device
+from .gradcache import cached_contrastive_backward, suggest_chunk_size
+from .lora import (
+    LoRAConfig,
+    LoRALinear,
+    apply_lora,
+    load_lora_state_dict,
+    lora_state_dict,
+    merge_lora,
+    parameter_summary,
+)
 from .training import (
     ContrastiveConfig,
     ContrastiveTrainer,
@@ -53,10 +69,19 @@ __all__ = [
     "ContrastiveConfig",
     "ContrastiveTrainer",
     "EncoderConfig",
+    "LoRAConfig",
+    "LoRALinear",
     "NeuralTextEncoder",
     "TextPair",
     "Tokenizes",
     "TrainingReport",
     "TransformerEncoderModel",
+    "apply_lora",
+    "cached_contrastive_backward",
+    "load_lora_state_dict",
+    "lora_state_dict",
+    "merge_lora",
+    "parameter_summary",
     "resolve_device",
+    "suggest_chunk_size",
 ]

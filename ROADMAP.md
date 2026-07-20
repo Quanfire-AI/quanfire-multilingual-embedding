@@ -89,13 +89,22 @@ has a verified loop to land on.
 - **Introduced:** PyTorch, as the optional `neural` extra. Verified that the base
   install still works without it.
 
-### Phase B — Contrastive training
+### Phase B — Training that fits the hardware 🔧 **partly done**
 
-Fine-tune an encoder on pairs. InfoNCE with in-batch negatives plus mined hard negatives,
-LoRA over a frozen base, GradCache to reach a usable effective batch on 16 GB.
+The two techniques that make a 568M model trainable on a 16 GB card.
 
-- **Deliverables:** training loop; pair dataset abstraction; LoRA and GradCache
-  integration; checkpointing and resumption; Matryoshka dimension truncation.
+**Delivered.** `lora.py` — adapters over frozen weights, with merging, adapter-only
+checkpoints, and a refusal when the target names match nothing. At BERT-base shape the
+trainable share is **0.80%**, the adapter checkpoint is **3.4 MB against a 419 MB model**,
+and Adam's optimizer state falls from **0.82 GB to 6.8 MB**.
+
+`gradcache.py` — chunked encoding with a cached vector gradient, so the contrastive batch
+is bounded by disk rather than VRAM. Verified gradient-for-gradient identical to a single
+large backward pass, and invariant to chunk size.
+
+**Still to do.** Adapting an external pretrained checkpoint, hard-negative mining,
+Matryoshka truncation, checkpoint resumption.
+
 - **Exit criterion:** a fine-tuned model beats its own base checkpoint on a held-out set
   from the same domain. Beating the base is the honest bar — beating a commercial API is
   a separate claim requiring a separate benchmark.
@@ -222,6 +231,40 @@ preparation parallelises across 20 cores.
 | From-scratch pretraining | **Phase E** |
 
 ---
+
+## Architecture policy
+
+**Use proven architectures. Do not invent new ones.**
+
+Transformers for text, U-Net or diffusion transformers for images, and whatever is
+established for a modality when it is reached. Inventing an architecture that beats these
+is a research programme with poor odds and compute requirements far beyond this hardware,
+and it is explicitly not the objective.
+
+What is written out here is *our implementation* of a standard design, which is a
+different thing from a new design. Owning the implementation means the training loop can
+be trusted and inspected; owning the architecture would mean owning a research risk.
+
+The differentiation comes from data and domain, not from novel mathematics. A standard
+architecture trained on a corpus nobody else holds beats a novel architecture trained on
+the same public data as everyone else.
+
+The levers worth pulling, none of which require new mathematics:
+
+| Lever | Effect |
+|---|---|
+| Domain-specific tokenizer | Domain terms become single pieces rather than fragments |
+| Training objective and pair selection | Where domain adaptation actually lives |
+| Matryoshka dimensions | Truncatable vectors; cheaper storage, one model |
+| Multi-vector late interaction | Better retrieval than single-vector, at higher index cost |
+| Hybrid sparse and dense | Exact term matching alongside semantics |
+
+**Why word2vec stays.** Not as a product — as the baseline. Its limitation is structural
+rather than a matter of training: one row per token id means `river bank` and `savings
+bank` receive byte-identical vectors, and no quantity of data changes that. It is kept
+because every exit criterion in this roadmap is of the form "beats X", and without a
+baseline that claim is unfalsifiable. It also trains in seconds on CPU with no torch,
+which makes it the pipeline's smoke test.
 
 ## Principles
 
