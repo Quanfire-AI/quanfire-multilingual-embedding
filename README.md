@@ -196,9 +196,13 @@ how the tests verify it; producing a model worth serving wants a card. See
 **To use it** — a `qfme` command available anywhere, like any other CLI tool:
 
 ```bash
-uv tool install '.[neural,wikipedia]'      # from a clone; git+https once public
+uv tool install 'git+ssh://git@github.com/<owner>/quanfire-multilingual-embedding[neural,wikipedia]'
 qfme --version
 ```
+
+No clone needed — anyone whose SSH key has access to the repository can run that, private
+or not. From a clone you already have, `uv tool install '.[neural,wikipedia]'` does the
+same.
 
 That is the whole install: no environment to activate, no `PATH` to edit. `uv` gives the
 tool its own isolated environment and links a shim into `~/.local/bin`.

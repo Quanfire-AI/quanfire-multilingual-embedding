@@ -13,20 +13,26 @@ Everything below was executed and its output pasted verbatim.
 
 ## Use it: a system-wide `qfme`
 
+One line, if your SSH key has access to the repository — no clone needed:
+
 ```bash
-uv tool install 'git+https://github.com/<owner>/quanfire-multilingual-embedding[neural,wikipedia]'
+uv tool install 'git+ssh://git@github.com/<owner>/quanfire-multilingual-embedding[neural,wikipedia]'
 ```
 
-Or from a clone, which is what to do while the repository is private:
+```
+Installed 1 executable: qfme
+```
+
+From a clone you already have, equivalently:
 
 ```bash
 cd quanfire-multilingual-embedding
 uv tool install '.[neural,wikipedia]'
 ```
 
-```
-Installed 1 executable: qfme
-```
+The difference matters later, not now: the git install can be updated with
+`uv tool upgrade`, the local one cannot. See
+[giving it to someone else](#giving-it-to-someone-else).
 
 That is the whole install. No virtual environment to activate, no `PATH` to edit, nothing
 to remember. From any directory:
@@ -178,32 +184,79 @@ is what you want while developing.
 
 ## Giving it to someone else
 
-**Today the repository is private**, so `uv tool install git+https://…` fails for anyone
-without access — GitHub answers an anonymous request with `404`, so the error reads
-"Repository not found" rather than "permission denied". Verified:
+The repository is private, and staying that way for now. That is not a blocker: **anyone
+GitHub grants access to can install it directly**, with the same one-line command you used.
 
-```
-$ git clone https://github.com/<owner>/quanfire-multilingual-embedding
-remote: Repository not found.
-```
-
-Three ways to distribute, in increasing order of effort:
-
-| Route | Command for the recipient | Needs |
-|---|---|---|
-| **Wheel** | `uv tool install ./quanfire_multilingual_embedding-0.1.0-py3-none-any.whl` | You send a file from `uv build` |
-| **Private git** | `uv tool install 'git+ssh://git@github.com/<owner>/<repo>[neural,wikipedia]'` | Their SSH key on the repo |
-| **Public or PyPI** | `uv tool install 'quanfire-multilingual-embedding[neural,wikipedia]'` | Making the repo public, or publishing |
-
-The wheel route needs nothing from GitHub:
+### For a collaborator with repo access
 
 ```bash
-uv build --wheel        # writes dist/*.whl
+uv tool install 'git+ssh://git@github.com/<owner>/quanfire-multilingual-embedding[neural,wikipedia]'
 ```
 
-Before publishing publicly, two things need answers rather than assumptions: the licence,
-which is still recorded as undecided, and whether a model trained on CC BY-SA text carries
-that licence's terms — see [data format](data-format.md).
+```
+Installed 1 executable: qfme
+```
+
+Nothing else. No clone, no virtual environment, no build step. `uv` fetches over SSH,
+builds the wheel, and links the shim — verified end to end, including that `qfme extract`
+works afterwards, so the extras survive the git route.
+
+They need two things first:
+
+1. **An SSH key on their GitHub account**, working. `ssh -T git@github.com` should answer
+   `Hi <name>! You've successfully authenticated`.
+2. **Access to the repository** — collaborator, or membership of a team with read access.
+
+Missing either produces:
+
+```
+git@github.com: Permission denied (publickey).
+fatal: Could not read from remote repository.
+```
+
+Which is honest, unlike the anonymous HTTPS route: GitHub answers an unauthenticated
+request for a private repository with `404`, so `git+https://` reports **"Repository not
+found"** and sends the reader hunting for a typo in a URL that is perfectly correct.
+Prefer `git+ssh://` while the repository is private, for that reason alone.
+
+### Updating
+
+```bash
+uv tool upgrade quanfire-multilingual-embedding
+```
+
+```
+Updating ssh://git@github.com/<owner>/quanfire-multilingual-embedding (HEAD)
+ Updated ssh://git@github.com/<owner>/quanfire-multilingual-embedding (c1445b8)
+```
+
+It re-fetches the default branch, so a collaborator picks up new commits without touching
+git themselves.
+
+### When SSH is not available
+
+A wheel needs nothing from GitHub at all — useful for an air-gapped machine, a CI runner
+without a deploy key, or someone you would rather not add to the repository:
+
+```bash
+uv build --wheel                    # writes dist/*.whl
+# send the file, then on their machine:
+uv tool install ./quanfire_multilingual_embedding-0.1.0-py3-none-any.whl
+```
+
+The trade is that they get a frozen copy with no upgrade path — `uv tool upgrade` has
+nowhere to look.
+
+### If it ever goes public
+
+| Route | Command | Needs |
+|---|---|---|
+| Public git | `uv tool install 'git+https://github.com/<owner>/<repo>[neural,wikipedia]'` | Making the repository public |
+| PyPI | `uv tool install 'quanfire-multilingual-embedding[neural,wikipedia]'` | Publishing a release |
+
+Two things want answers before either, rather than assumptions: the licence, still recorded
+as undecided, and whether a model trained on CC BY-SA text carries that licence's terms —
+see [data format](data-format.md).
 
 ---
 
