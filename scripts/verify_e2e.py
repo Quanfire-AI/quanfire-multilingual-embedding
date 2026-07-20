@@ -83,6 +83,8 @@ class Stage:
 
     error: str = ""
 
+    peak_memory_mb: float | None = None
+
 
 STAGES: list[Stage] = []
 
@@ -94,6 +96,12 @@ def run(name: str, function: Any, *args: Any, **kwargs: Any) -> Any:
 
     STAGES.append(stage)
 
+    # Announced before it runs, not after. Without this a stage that
+    # takes an hour is indistinguishable from a stage that has hung, and
+    # neither the operator nor the author can say which — which is
+    # exactly what happened on the first real dump.
+    say(f"  [{time.strftime('%H:%M:%S')}] {name} ...")
+
     started = time.perf_counter()
 
     try:
@@ -101,20 +109,49 @@ def run(name: str, function: Any, *args: Any, **kwargs: Any) -> Any:
 
         stage.ok, stage.detail = True, detail
 
+        say(f"  [{time.strftime('%H:%M:%S')}] {name} done in {time.perf_counter() - started:.1f}s")
+
         return result
     except Exception as error:
         stage.error = f"{type(error).__name__}: {error}"
 
         stage.detail = {"traceback": traceback.format_exc().splitlines()[-3:]}
 
+        say(f"  [{time.strftime('%H:%M:%S')}] {name} FAILED: {stage.error}")
+
         return None
     finally:
         stage.seconds = time.perf_counter() - started
+
+        stage.peak_memory_mb = resident_mb()
 
 
 # ----------------------------------------------------------------------
 # Environment
 # ----------------------------------------------------------------------
+
+
+def resident_mb() -> float | None:
+    """
+    Peak resident memory in megabytes.
+
+    The units differ by platform and getting them wrong is easy: macOS
+    reports ``ru_maxrss`` in bytes, Linux in kilobytes. Reported in MB
+    rather than GB because a mislabelled GB figure claimed this process
+    had used 176 GB, which is the kind of number that gets ignored rather
+    than questioned.
+    """
+
+    try:
+        import resource
+
+        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+
+        divisor = 1024**2 if sys.platform == "darwin" else 1024
+    except Exception:
+        return None
+
+    return round(peak / divisor, 2)
 
 
 def describe_environment() -> dict[str, Any]:
@@ -208,15 +245,15 @@ def stage_mine(corpus: Path, output: Path) -> tuple[Path, dict[str, Any]]:
 
     import gzip
 
-    from multilingual_embedding.corpus.pairs import mine_pairs
+    from multilingual_embedding.corpus.pairs import PairStatistics, iter_pairs
     from multilingual_embedding.corpus.reader import reader_for
 
-    pairs, statistics = mine_pairs(reader_for(corpus).iter_documents())
+    statistics = PairStatistics()
 
     opener = gzip.open if output.suffix == ".gz" else open
 
     with opener(output, "wt", encoding="utf-8") as handle:
-        for pair in pairs:
+        for pair in iter_pairs(reader_for(corpus).iter_documents(), None, statistics):
             handle.write(json.dumps(pair.to_record(), ensure_ascii=False) + "\n")
 
     summary = statistics.to_dict()
@@ -605,6 +642,9 @@ def main() -> int:
 
         for key, value in stage.detail.items():
             say(f"       {key}: {value}")
+
+        if stage.peak_memory_mb is not None:
+            say(f"       peak_resident_mb: {stage.peak_memory_mb}")
 
     failures = [s for s in STAGES if not s.ok]
 

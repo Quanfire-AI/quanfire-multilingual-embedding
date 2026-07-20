@@ -501,7 +501,11 @@ def _run_mine_pairs(args: argparse.Namespace) -> int:
     import gzip
     import json as _json
 
-    from multilingual_embedding.corpus.pairs import PairConfig, mine_pairs
+    from multilingual_embedding.corpus.pairs import (
+        PairConfig,
+        PairStatistics,
+        iter_pairs,
+    )
     from multilingual_embedding.corpus.reader import reader_for
 
     reader = reader_for(args.source, format=args.format)
@@ -511,16 +515,19 @@ def _run_mine_pairs(args: argparse.Namespace) -> int:
         kinds=tuple(kind.strip() for kind in args.kinds.split(",") if kind.strip()),
     )
 
-    pairs, statistics = mine_pairs(reader.iter_documents(), config)
-
     destination = Path(args.output).expanduser()
 
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     opener = gzip.open if destination.suffix == ".gz" else open
 
+    statistics = PairStatistics()
+
+    # Streamed rather than collected. A pair set from a mid-sized
+    # Wikipedia is millions of pairs holding two strings each, and
+    # holding them all before writing is gigabytes for no reason.
     with opener(destination, "wt", encoding="utf-8") as handle:
-        for pair in pairs:
+        for pair in iter_pairs(reader.iter_documents(), config, statistics):
             handle.write(_json.dumps(pair.to_record(), ensure_ascii=False) + "\n")
 
     summary = statistics.to_dict()

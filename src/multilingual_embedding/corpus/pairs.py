@@ -47,6 +47,7 @@ __all__ = [
     "PairConfig",
     "PairKind",
     "PairStatistics",
+    "iter_pairs",
     "mine_pairs",
     "token_overlap",
 ]
@@ -362,6 +363,127 @@ def _candidates(document: Document, config: PairConfig) -> Iterator[tuple[str, s
             yield first, second, PairKind.ADJACENT
 
 
+def iter_pairs(
+    documents: Iterable[Document],
+    config: PairConfig | None = None,
+    statistics: PairStatistics | None = None,
+) -> Iterator[MinedPair]:
+    """
+    Yield pairs one at a time, so a large corpus never has to fit.
+
+    :func:`mine_pairs` collects into a list, which is convenient and
+    bounded by the pair set rather than by the corpus — but a pair set
+    from a mid-sized Wikipedia is millions of pairs holding two strings
+    each, and that is gigabytes. Streaming to disk is the difference
+    between a laptop finishing and a laptop swapping.
+
+    Pass a :class:`PairStatistics` to have it filled in as pairs are
+    produced; it is only complete once the iterator is exhausted.
+
+    Example
+    -------
+    ::
+
+        stats = PairStatistics()
+
+        for pair in iter_pairs(reader.iter_documents(), statistics=stats):
+            handle.write(json.dumps(pair.to_record()) + "\n")
+
+        print(stats.to_dict())
+    """
+
+    settings = config if config is not None else PairConfig()
+
+    counts = statistics if statistics is not None else PairStatistics()
+
+    seen: set[str] = set()
+
+    overlap_totals: dict[str, float] = {}
+
+    for document in documents:
+        counts.documents += 1
+
+        for raw_anchor, raw_positive, kind in _candidates(document, settings):
+            anchor = " ".join(raw_anchor.split())
+
+            positive = " ".join(raw_positive.split())
+
+            if len(anchor) < settings.minimum_anchor_characters:
+                counts.rejected_short_anchor += 1
+
+                continue
+
+            if len(positive) < settings.minimum_positive_characters:
+                counts.rejected_short_positive += 1
+
+                continue
+
+            positive = positive[: settings.maximum_positive_characters]
+
+            overlap = token_overlap(anchor, positive)
+
+            if overlap > settings.maximum_overlap:
+                counts.rejected_overlap += 1
+
+                continue
+
+            digest = hash_text(f"{anchor}\x00{positive}")
+
+            if digest in seen:
+                counts.rejected_duplicate += 1
+
+                continue
+
+            seen.add(digest)
+
+            counts.produced += 1
+
+            counts.by_kind[kind] = counts.by_kind.get(kind, 0) + 1
+
+            overlap_totals[kind] = overlap_totals.get(kind, 0.0) + overlap
+
+            counts.mean_overlap_by_kind = {
+                name: overlap_totals[name] / total for name, total in counts.by_kind.items()
+            }
+
+            yield MinedPair(
+                anchor=anchor,
+                positive=positive,
+                kind=kind,
+                document=document.identifier or "",
+                language=document.metadata.base.language,
+                overlap=overlap,
+            )
+
+    _report(counts)
+
+
+def _report(statistics: PairStatistics) -> None:
+    """Log the yield, and warn about any kind that leaks."""
+
+    _logger.info(
+        "Mined training pairs",
+        extra={
+            "documents": statistics.documents,
+            "pairs": statistics.produced,
+            "by_kind": statistics.by_kind,
+        },
+    )
+
+    for kind, mean in statistics.mean_overlap_by_kind.items():
+        if mean > _LEAKY_OVERLAP:
+            _logger.warning(
+                "Pair kind is largely solvable by string matching; a falling "
+                "loss on it is weak evidence the model learned meaning",
+                extra={
+                    "kind": kind,
+                    "mean_overlap": round(mean, 4),
+                    "pairs": statistics.by_kind[kind],
+                    "remedy": "lower PairConfig.maximum_overlap, or drop this kind",
+                },
+            )
+
+
 def mine_pairs(
     documents: Iterable[Document],
     config: PairConfig | None = None,
@@ -398,93 +520,8 @@ def mine_pairs(
         print(stats.to_dict()["mean_overlap_by_kind"])
     """
 
-    settings = config if config is not None else PairConfig()
-
     statistics = PairStatistics()
 
-    pairs: list[MinedPair] = []
-
-    seen: set[str] = set()
-
-    overlap_totals: dict[str, float] = {}
-
-    for document in documents:
-        statistics.documents += 1
-
-        for anchor, positive, kind in _candidates(document, settings):
-            anchor = " ".join(anchor.split())
-
-            positive = " ".join(positive.split())
-
-            if len(anchor) < settings.minimum_anchor_characters:
-                statistics.rejected_short_anchor += 1
-
-                continue
-
-            if len(positive) < settings.minimum_positive_characters:
-                statistics.rejected_short_positive += 1
-
-                continue
-
-            positive = positive[: settings.maximum_positive_characters]
-
-            overlap = token_overlap(anchor, positive)
-
-            if overlap > settings.maximum_overlap:
-                statistics.rejected_overlap += 1
-
-                continue
-
-            digest = hash_text(f"{anchor}\x00{positive}")
-
-            if digest in seen:
-                statistics.rejected_duplicate += 1
-
-                continue
-
-            seen.add(digest)
-
-            pairs.append(
-                MinedPair(
-                    anchor=anchor,
-                    positive=positive,
-                    kind=kind,
-                    document=document.identifier or "",
-                    language=document.metadata.base.language,
-                    overlap=overlap,
-                )
-            )
-
-            statistics.produced += 1
-
-            statistics.by_kind[kind] = statistics.by_kind.get(kind, 0) + 1
-
-            overlap_totals[kind] = overlap_totals.get(kind, 0.0) + overlap
-
-    statistics.mean_overlap_by_kind = {
-        kind: overlap_totals[kind] / count for kind, count in statistics.by_kind.items()
-    }
-
-    _logger.info(
-        "Mined training pairs",
-        extra={
-            "documents": statistics.documents,
-            "pairs": statistics.produced,
-            "by_kind": statistics.by_kind,
-        },
-    )
-
-    for kind, mean in statistics.mean_overlap_by_kind.items():
-        if mean > _LEAKY_OVERLAP:
-            _logger.warning(
-                "Pair kind is largely solvable by string matching; a falling "
-                "loss on it is weak evidence the model learned meaning",
-                extra={
-                    "kind": kind,
-                    "mean_overlap": round(mean, 4),
-                    "pairs": statistics.by_kind[kind],
-                    "remedy": "lower PairConfig.maximum_overlap, or drop this kind",
-                },
-            )
+    pairs = list(iter_pairs(documents, config, statistics))
 
     return pairs, statistics
