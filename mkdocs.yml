@@ -24,6 +24,7 @@ theme:
 
 nav:
   - Home: index.md
+  - Installing: installing.md
   - Getting started: getting-started.md
   - Architecture: architecture.md
   - Configuration: configuration.md

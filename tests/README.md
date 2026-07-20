@@ -1,6 +1,6 @@
 # tests
 
-> The test suite. 1076 tests, 94% statement coverage, mirroring the source layout.
+> The test suite. 1103 tests, 94% statement coverage, mirroring the source layout.
 
 ## Purpose
 
@@ -27,7 +27,7 @@ failure appears:
 | [`core/`](core/README.md) | 27 | Registry, factory, logging, exception context |
 | [`config/`](config/README.md) | 87 | Config validation, merging, precedence, compute profiles, persistence |
 | [`utils/`](utils/README.md) | 61 | Validation, hashing, filesystem, I/O, serialization |
-| [`corpus/`](corpus/README.md) | 397 | Scripts, segmentation, nodes, readers, statistics, auditing, the 22 scheduled languages |
+| [`corpus/`](corpus/README.md) | 424 | Scripts, segmentation, nodes, readers, statistics, auditing, the 22 scheduled languages |
 | [`vocabulary/`](vocabulary/README.md) | 36 | Token/id mapping, special tokens, builder, persistence |
 | [`tokenizer/`](tokenizer/README.md) | 187 | Normalizers, pre-tokenizers, encoding, training, round trips |
 | [`embedding/`](embedding/README.md) | 148 | Matrix, word2vec, sentence encoders, index, contextual encoder, LoRA, gradient caching |

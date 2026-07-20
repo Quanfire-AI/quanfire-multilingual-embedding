@@ -14,7 +14,7 @@ Two model families share that pipeline: a **static** word2vec baseline in pure n
 a **contextual** transformer encoder trained contrastively, which needs the optional
 `neural` extra. The static model is the floor the contextual one is measured against.
 
-**1076 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
+**1103 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
 
 ---
 
@@ -193,6 +193,18 @@ how the tests verify it; producing a model worth serving wants a card. See
 
 ### Setup
 
+**To use it** — a `qfme` command available anywhere, like any other CLI tool:
+
+```bash
+uv tool install '.[neural,wikipedia]'      # from a clone; git+https once public
+qfme --version
+```
+
+That is the whole install: no environment to activate, no `PATH` to edit. `uv` gives the
+tool its own isolated environment and links a shim into `~/.local/bin`.
+
+**To develop it** — edit the code and run the tests:
+
 ```bash
 git clone <repository-url>
 cd quanfire-multilingual-embedding
@@ -206,10 +218,10 @@ would silently lose the contextual encoder and `qfme extract`. Omit them deliber
 you want the small install: everything through vocabulary, word2vec, search and evaluation
 works without either.
 
-`qfme` lives in `.venv/bin/` rather than on the system path, so an unactivated terminal
-reports `command not found: qfme`. That is expected. Use `uv run qfme …`, or
-`.venv/bin/qfme …`, or activate as above. Full detail, including what breaks without each
-extra, is in [`docs/getting-started.md`](docs/getting-started.md).
+With the *development* install, `qfme` lives in `.venv/bin/` rather than on the system
+path, so an unactivated terminal reports `command not found: qfme`. That is expected — use
+`uv run qfme …`, `.venv/bin/qfme …`, or activate as above. The *tool* install has no such
+caveat. Full detail in [`docs/installing.md`](docs/installing.md).
 
 ### Verify the installation
 
@@ -713,7 +725,7 @@ quanfire-multilingual-embedding/
 │   ├── embedding/                  word2vec, and neural/ for the transformer
 │   ├── cli.py                      the `qfme` command
 │   └── py.typed                    marks the package as typed for consumers
-├── tests/                          1076 tests mirroring the source layout
+├── tests/                          1103 tests mirroring the source layout
 ├── configs/                        compute profiles — cpu.yaml, gpu.yaml
 ├── examples/                       runnable end-to-end example
 ├── data/sample/                    six-language sample corpus
