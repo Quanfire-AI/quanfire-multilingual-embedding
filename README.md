@@ -31,9 +31,10 @@ corpus  ->  tokenizer  ->  vocabulary  ->  embeddings  ->  evaluation  ->  searc
 - [Development](#development)
 - [Limitations](#limitations)
 
-> **Where this is going:** [ROADMAP.md](ROADMAP.md) sets out the path from this
-> word2vec baseline to a served, Indic-first embedding model of commercial quality,
-> with staged deliverables and exit criteria.
+> **Where this is going:** [ROADMAP.md](ROADMAP.md) sets out the path to an embedding
+> model factory — corpus in, trained and evaluated model out, generic or adapted to a
+> specific domain. The word2vec model below is the static baseline that future encoders
+> are measured against.
 
 > **Looking for the full reference?**
 > [`knowledge-base/QuanFire-Multilingual-Embedding-Handbook.pdf`](knowledge-base/QuanFire-Multilingual-Embedding-Handbook.pdf)
