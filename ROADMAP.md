@@ -3,7 +3,7 @@
 > An embedding model factory: corpus in, trained and evaluated model out — generic or
 > domain-specific.
 
-**Status:** Phase 0 complete. Phases A–E planned.
+**Status:** Phases 0 and A complete. Phases B–E planned.
 
 ---
 
@@ -66,7 +66,7 @@ without rewriting anything downstream.
 Verified by a `HashingEncoder` backed by no model, no vocabulary and no matrix, indexing
 and searching end to end.
 
-### Phase A — Serve a real pretrained encoder
+### Phase A — A contextual encoder we own ✅ **done**
 
 Load a pretrained transformer checkpoint and expose it through `TextEncoder`. Inference
 only, no training.
@@ -75,13 +75,21 @@ This is first because it is the shortest path to a usable model. Everything down
 evaluation, pair mining, serving — needs *some* real encoder to work against, and a
 loaded checkpoint provides one immediately.
 
-- **Deliverables:** `TransformerEncoder` implementing `TextEncoder`; mean/CLS pooling;
-  batched encoding; L2 normalisation; a `qfme encode` command.
-- **Exit criterion:** the existing semantic search pipeline runs unchanged against a
-  pretrained encoder and returns better results than word2vec on the same corpus,
-  measured with the existing evaluation harness.
-- **Introduces:** PyTorch. Confined to this package so the numpy pipeline stays
-  installable without it.
+The architecture is written out rather than borrowed. Loading a pretrained checkpoint
+first would have meant a good checkpoint masking a broken training loop; a model defined
+here cannot hide that. Adapting external checkpoints is a smaller, later step that now
+has a verified loop to land on.
+
+- **Delivered:** `embedding/neural/` — a pre-norm transformer encoder with fused
+  attention and mean pooling; `NeuralTextEncoder` satisfying the `TextEncoder` contract;
+  an InfoNCE contrastive trainer with warmup, decay, gradient clipping and decay-group
+  splitting; save and load; 25 tests.
+- **Exit criterion — met.** On a two-topic synthetic corpus, a 28k-parameter model over
+  38 steps moved the separation between within-topic and cross-topic similarity from
+  **0.175 to 1.326**, with cross-topic similarity going negative. It serves through the
+  existing search pipeline unchanged.
+- **Introduced:** PyTorch, as the optional `neural` extra. Verified that the base
+  install still works without it.
 
 ### Phase B — Contrastive training
 

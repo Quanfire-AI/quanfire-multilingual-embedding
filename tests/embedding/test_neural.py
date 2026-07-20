@@ -1,0 +1,402 @@
+"""
+The contextual encoder, and the proof that it learns.
+
+The decisive tests are in :class:`TestItActuallyLearns`. Everything else
+here checks shapes and contracts, which a model that has learned nothing
+would pass just as easily. A transformer that emits well-formed vectors
+containing no information is the default failure mode of a hand-written
+training loop, and only a retrieval test catches it.
+
+The model used throughout is deliberately tiny — two layers, 32
+dimensions — so the whole module runs in seconds on CPU. That is the
+point: the same code path trains a real model, differing only in
+configuration.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+torch = pytest.importorskip("torch", reason="requires the neural extra")
+
+from multilingual_embedding.core.exceptions import ValidationError  # noqa: E402
+from multilingual_embedding.embedding.encoder import TextEncoder  # noqa: E402
+from multilingual_embedding.embedding.neural import (  # noqa: E402
+    ContrastiveConfig,
+    ContrastiveTrainer,
+    EncoderConfig,
+    NeuralTextEncoder,
+    TextPair,
+    TransformerEncoderModel,
+)
+from multilingual_embedding.pipelines.search import SemanticSearchPipeline  # noqa: E402
+
+VOCABULARY = 64
+
+DIMENSION = 32
+
+
+class WordTokenizer:
+    """
+    A hashing tokenizer, so these tests need no trained subword model.
+
+    Deterministic, and that is what matters: the same word always maps to
+    the same id, which is all the encoder requires.
+    """
+
+    def __init__(self, vocabulary_size: int = VOCABULARY) -> None:
+        self.vocabulary_size = vocabulary_size
+
+    def encode(self, text: str) -> WordTokenizer._Encoding:
+        ids = [
+            # 0 is padding, so ids start at 1.
+            1 + (abs(hash(word)) % (self.vocabulary_size - 1))
+            for word in text.split()
+        ]
+
+        return WordTokenizer._Encoding(ids)
+
+    class _Encoding:
+        def __init__(self, ids: list[int]) -> None:
+            self.ids = ids
+
+
+def build_encoder(**overrides: object) -> NeuralTextEncoder:
+    """A small encoder on CPU, for speed and determinism."""
+
+    settings: dict[str, object] = {
+        "vocabulary_size": VOCABULARY,
+        "dimension": DIMENSION,
+        "layers": 2,
+        "heads": 4,
+        "max_length": 32,
+        "dropout": 0.0,
+    }
+
+    settings.update(overrides)
+
+    torch.manual_seed(0)
+
+    model = TransformerEncoderModel(EncoderConfig(**settings))  # type: ignore[arg-type]
+
+    return NeuralTextEncoder(model, WordTokenizer(), device="cpu")
+
+
+class TestArchitecture:
+    def test_rejects_dimension_not_divisible_by_heads(self) -> None:
+        with pytest.raises(ValidationError, match="divide evenly"):
+            EncoderConfig(vocabulary_size=10, dimension=10, heads=4)
+
+    def test_feedforward_defaults_to_four_times_width(self) -> None:
+        assert EncoderConfig(vocabulary_size=10, dimension=64).feedforward_dimension == 256
+
+    def test_forward_returns_one_vector_per_sequence(self) -> None:
+        model = TransformerEncoderModel(
+            EncoderConfig(vocabulary_size=VOCABULARY, dimension=DIMENSION, layers=1)
+        )
+
+        ids = torch.randint(1, VOCABULARY, (3, 7))
+
+        mask = torch.ones((3, 7), dtype=torch.long)
+
+        assert model(ids, mask).shape == (3, DIMENSION)
+
+    def test_sequence_longer_than_position_table_is_rejected(self) -> None:
+        model = TransformerEncoderModel(
+            EncoderConfig(vocabulary_size=VOCABULARY, dimension=DIMENSION, max_length=8)
+        )
+
+        with pytest.raises(ValidationError, match="position table"):
+            model(torch.ones((1, 9), dtype=torch.long), torch.ones((1, 9), dtype=torch.long))
+
+    def test_padding_does_not_change_a_sequence_encoding(self) -> None:
+        """
+        The property that makes batching safe.
+
+        If padding leaked into attention or pooling, a sentence would
+        encode differently depending on what happened to be batched
+        alongside it — a bug that survives every shape test and quietly
+        degrades retrieval.
+        """
+
+        model = TransformerEncoderModel(
+            EncoderConfig(vocabulary_size=VOCABULARY, dimension=DIMENSION, layers=2, dropout=0.0)
+        ).eval()
+
+        ids = torch.tensor([[5, 9, 13]])
+
+        mask = torch.ones((1, 3), dtype=torch.long)
+
+        padded_ids = torch.tensor([[5, 9, 13, 0, 0]])
+
+        padded_mask = torch.tensor([[1, 1, 1, 0, 0]])
+
+        with torch.no_grad():
+            plain = model(ids, mask)
+
+            padded = model(padded_ids, padded_mask)
+
+        torch.testing.assert_close(plain, padded, rtol=1e-4, atol=1e-5)
+
+    def test_parameter_count_is_reported(self) -> None:
+        model = TransformerEncoderModel(
+            EncoderConfig(vocabulary_size=VOCABULARY, dimension=DIMENSION, layers=2)
+        )
+
+        assert model.parameter_count() > 0
+
+
+class TestEncoderContract:
+    def test_satisfies_the_framework_contract(self) -> None:
+        assert isinstance(build_encoder(), TextEncoder)
+
+    def test_encode_returns_a_vector_of_declared_width(self) -> None:
+        assert build_encoder().encode("hello world").shape == (DIMENSION,)
+
+    def test_encode_batch_shape_and_order(self) -> None:
+        encoder = build_encoder()
+
+        texts = ["alpha beta", "gamma delta", "epsilon"]
+
+        batch = encoder.encode_batch(texts)
+
+        assert batch.shape == (3, DIMENSION)
+
+        for row, text in enumerate(texts):
+            np.testing.assert_allclose(batch[row], encoder.encode(text), rtol=1e-5, atol=1e-6)
+
+    def test_empty_batch_keeps_its_shape(self) -> None:
+        assert build_encoder().encode_batch([]).shape == (0, DIMENSION)
+
+    def test_empty_text_gives_zeros_not_nan(self) -> None:
+        """The contract's promise for unencodable input."""
+
+        vector = build_encoder().encode("")
+
+        assert not np.isnan(vector).any()
+
+        assert not np.any(vector)
+
+    def test_output_is_l2_normalised(self) -> None:
+        vector = build_encoder().encode("some words here")
+
+        assert float(np.linalg.norm(vector)) == pytest.approx(1.0, abs=1e-5)
+
+    def test_overlong_input_is_truncated_not_rejected(self) -> None:
+        """
+        A caller encoding a long document should get a vector for its
+        opening rather than an exception.
+        """
+
+        encoder = build_encoder(max_length=8)
+
+        assert encoder.encode(" ".join(["word"] * 200)).shape == (DIMENSION,)
+
+    def test_batching_does_not_change_results(self) -> None:
+        texts = [f"sentence number {index}" for index in range(7)]
+
+        large = build_encoder()
+
+        small = build_encoder()
+
+        small._batch_size = 2
+
+        np.testing.assert_allclose(
+            large.encode_batch(texts), small.encode_batch(texts), rtol=1e-5, atol=1e-6
+        )
+
+
+class TestItActuallyLearns:
+    """
+    The tests that matter.
+
+    A model producing correctly-shaped vectors that encode nothing passes
+    every other test in this module. These are the ones that would fail.
+    """
+
+    @staticmethod
+    def _topic_pairs() -> list[TextPair]:
+        """
+        Pairs drawn from two disjoint vocabularies.
+
+        No word appears in both topics, so a model that has learned the
+        structure must place each topic's texts together and apart from
+        the other's.
+        """
+
+        weather = ["rain", "storm", "cloud", "wind", "thunder", "drizzle"]
+
+        finance = ["bank", "loan", "credit", "market", "invoice", "ledger"]
+
+        pairs: list[TextPair] = []
+
+        for index in range(24):
+            first, second = weather[index % 6], weather[(index + 3) % 6]
+
+            pairs.append(TextPair(f"{first} {second}", f"{second} {first} today"))
+
+            third, fourth = finance[index % 6], finance[(index + 3) % 6]
+
+            pairs.append(TextPair(f"{third} {fourth}", f"{fourth} {third} today"))
+
+        return pairs
+
+    def test_loss_decreases(self) -> None:
+        encoder = build_encoder()
+
+        report = ContrastiveTrainer(
+            encoder,
+            ContrastiveConfig(epochs=6, batch_size=8, learning_rate=3e-3, seed=1),
+        ).train(self._topic_pairs())
+
+        assert report.improved, f"loss did not fall: {report.losses}"
+
+        assert report.steps > 0
+
+    def test_training_separates_the_two_topics(self) -> None:
+        """
+        The retrieval property, which is what the model is for.
+
+        Within-topic similarity must exceed cross-topic similarity after
+        training. This is the assertion a model that learned nothing
+        cannot pass.
+        """
+
+        encoder = build_encoder()
+
+        ContrastiveTrainer(
+            encoder,
+            ContrastiveConfig(epochs=8, batch_size=8, learning_rate=3e-3, seed=1),
+        ).train(self._topic_pairs())
+
+        weather = encoder.encode_batch(["rain storm", "cloud wind", "thunder drizzle"])
+
+        finance = encoder.encode_batch(["bank loan", "credit market", "invoice ledger"])
+
+        within = float(np.mean(weather @ weather.T)) + float(np.mean(finance @ finance.T))
+
+        across = float(np.mean(weather @ finance.T)) * 2
+
+        assert within > across, f"within={within / 2:.3f} across={across / 2:.3f}"
+
+    def test_training_is_reproducible(self) -> None:
+        pairs = self._topic_pairs()
+
+        def run() -> list[float]:
+            encoder = build_encoder()
+
+            return (
+                ContrastiveTrainer(encoder, ContrastiveConfig(epochs=2, batch_size=8, seed=7))
+                .train(pairs)
+                .losses
+            )
+
+        assert run() == run()
+
+    def test_too_few_pairs_is_rejected(self) -> None:
+        """
+        A batch of one has no negatives, so its loss is identically zero.
+
+        Training would appear to succeed while teaching nothing, which is
+        worse than failing.
+        """
+
+        with pytest.raises(ValidationError, match="at least two pairs"):
+            ContrastiveTrainer(build_encoder()).train([TextPair("a", "b")])
+
+    def test_report_serialises(self) -> None:
+        import json
+
+        report = ContrastiveTrainer(
+            build_encoder(), ContrastiveConfig(epochs=1, batch_size=8)
+        ).train(self._topic_pairs())
+
+        json.dumps(report.to_dict())
+
+
+class TestPersistence:
+    def test_round_trip_preserves_vectors(self, tmp_path: Path) -> None:
+        encoder = build_encoder()
+
+        text = "round trip check"
+
+        before = encoder.encode(text)
+
+        encoder.save(tmp_path / "encoder")
+
+        restored = NeuralTextEncoder.load(tmp_path / "encoder", WordTokenizer(), device="cpu")
+
+        np.testing.assert_allclose(restored.encode(text), before, rtol=1e-5, atol=1e-6)
+
+    def test_round_trip_after_training(self, tmp_path: Path) -> None:
+        """Trained weights, not just initial ones, must survive."""
+
+        encoder = build_encoder()
+
+        ContrastiveTrainer(encoder, ContrastiveConfig(epochs=2, batch_size=8, seed=3)).train(
+            TestItActuallyLearns._topic_pairs()
+        )
+
+        before = encoder.encode("rain storm")
+
+        encoder.save(tmp_path / "trained")
+
+        restored = NeuralTextEncoder.load(tmp_path / "trained", WordTokenizer(), device="cpu")
+
+        np.testing.assert_allclose(restored.encode("rain storm"), before, rtol=1e-5, atol=1e-6)
+
+    def test_version_mismatch_is_rejected(self, tmp_path: Path) -> None:
+        from multilingual_embedding.utils.io import read_json, write_json
+
+        encoder = build_encoder()
+
+        encoder.save(tmp_path / "encoder")
+
+        payload = read_json(tmp_path / "encoder" / "encoder.json")
+
+        payload["format_version"] = 999
+
+        write_json(tmp_path / "encoder" / "encoder.json", payload)
+
+        with pytest.raises(ValidationError, match="format version"):
+            NeuralTextEncoder.load(tmp_path / "encoder", WordTokenizer(), device="cpu")
+
+
+class TestServesThroughTheExistingPipeline:
+    """
+    Phase 0's exit criterion, now met by a real model.
+
+    The search pipeline was decoupled from the embedding matrix so that a
+    contextual encoder could be served without rewriting it. This is that
+    claim tested against an actual transformer rather than a stub.
+    """
+
+    def test_pipeline_accepts_the_neural_encoder(self) -> None:
+        pipeline = SemanticSearchPipeline(build_encoder())
+
+        assert pipeline.matrix is None
+
+        assert pipeline.encoder.dimension == DIMENSION
+
+    def test_search_returns_ranked_results(self) -> None:
+        pipeline = SemanticSearchPipeline(build_encoder())
+
+        corpus = ["rain storm today", "bank loan today", "cloud wind today"]
+
+        assert pipeline.index(corpus) == 3
+
+        hits = pipeline.search("rain storm today", top_k=3)
+
+        assert [hit.rank for hit in hits] == [1, 2, 3]
+
+        assert all(hits[index].score >= hits[index + 1].score for index in range(len(hits) - 1))
+
+    def test_exact_query_ranks_itself_first(self) -> None:
+        pipeline = SemanticSearchPipeline(build_encoder())
+
+        pipeline.index(["rain storm today", "bank loan today", "cloud wind today"])
+
+        assert pipeline.search("bank loan today", top_k=1)[0].text == "bank loan today"

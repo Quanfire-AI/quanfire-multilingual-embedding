@@ -117,6 +117,10 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Tests may use assert and shadow fixtures freely.
 "tests/**" = ["S101"]
+# `from torch.nn import functional as F` is the universal convention in
+# PyTorch code. Renaming it to satisfy the naming rule would make this
+# package read unlike every other model implementation.
+"src/multilingual_embedding/embedding/neural/*" = ["N812"]
 
 [tool.mypy]
 python_version = "3.12"
