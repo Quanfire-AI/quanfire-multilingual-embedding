@@ -332,7 +332,9 @@ def stage_mine(corpus: Path, output: Path) -> tuple[Path, dict[str, Any]]:
     }
 
 
-def stage_train_static(corpus: Path, name: str, full: bool) -> tuple[Path, dict[str, Any]]:
+def stage_train_static(
+    corpus: Path, name: str, full: bool, work: Path
+) -> tuple[Path, dict[str, Any]]:
     """
     Train the static model through the ordinary pipeline.
 
@@ -378,6 +380,13 @@ def stage_train_static(corpus: Path, name: str, full: bool) -> tuple[Path, dict[
 
     config = ExperimentConfig(
         name=name,
+        # Under --work, not the default "artifacts" relative to the
+        # current directory. Left at the default this writes into
+        # whatever directory it was launched from — which for a checkout
+        # means the repository itself, and which collided with the test
+        # suite when both ran at once.
+        output_directory=str(work / "artifacts"),
+        evaluation={"report_directory": str(work / "reports")},
         corpus={"source": str(source)},
         tokenizer={"vocab_size": 8000 if full else 2000},
         embedding=({"dimension": 128, "epochs": 3} if full else {"dimension": 32, "epochs": 1}),
@@ -773,6 +782,7 @@ def main() -> int:
             corpus,
             f"verify-{language}",
             arguments.full,
+            arguments.work,
         )
 
     if not arguments.skip_contextual and corpora:
