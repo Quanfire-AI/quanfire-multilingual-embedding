@@ -813,8 +813,10 @@ Stated plainly, because knowing where a tool stops is part of using it well.
   distributed training; a run is bounded by one process on one device.
 - **External pretrained checkpoints cannot yet be adapted.** The encoder is pre-norm and
   most published ones are post-norm, so their weights do not transfer directly.
-- **CUDA is unverified by local testing.** Development happens without an NVIDIA GPU, so
-  bf16 and device-specific paths are exercised on CPU only.
+- **CUDA is unverified by local testing**, though verified by hand on an RTX 4070 Ti
+  SUPER: gradient caching cut peak VRAM 12.2×, bf16 a further 1.6×, with final losses
+  within 0.51%. Development still happens without an NVIDIA GPU, so device-specific bugs
+  surface first on the training box.
 
 ---
 

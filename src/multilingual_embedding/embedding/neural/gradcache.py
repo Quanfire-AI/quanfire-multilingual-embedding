@@ -41,9 +41,25 @@ correct with dropout enabled; without that handling it would be correct
 only at ``dropout=0``, which is exactly the configuration a test is most
 likely to use.
 
-The cost is close to one extra forward pass, so roughly 1.5 to 1.7 times
-the wall-clock of an unconstrained batch of the same size — which would
-not fit at all.
+Measured on an RTX 4070 Ti SUPER, batch 256, a 5.3M-parameter encoder
+over 4,000 pairs — all four cells of the same experiment:
+
+===========  ================  ==============
+precision    no caching        chunk size 32
+===========  ================  ==============
+fp32         4.89 GB / 4.3 s   0.40 GB / 4.7 s
+bf16         2.99 GB / 2.7 s   0.29 GB / 4.7 s
+===========  ================  ==============
+
+So **caching is what buys the memory** — 12.2x on its own, against 1.6x
+for bf16 — and the two together give 16.9x. Final losses across all four
+cells spanned 0.51%, which is the exactness claim holding on real
+hardware rather than in a unit test.
+
+The wall-clock cost is smaller than the 1.5 to 1.7 times previously
+estimated here when measured against fp32 (1.09x), and close to it
+against bf16 (1.74x), because bf16 makes the forward pass that caching
+duplicates cheaper.
 """
 
 from __future__ import annotations

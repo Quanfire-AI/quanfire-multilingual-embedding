@@ -96,16 +96,38 @@ The profiles in `configs/` are loaded by the test suite rather than assumed corr
 in `gpu.yaml` would otherwise surface only on the training box, which is the machine
 furthest from a debugger.
 
-## What remains unverified here
+## What the settings actually buy
 
-This laptop has no CUDA, so **the CUDA paths are never executed by local testing**. bf16
-autocast is exercised genuinely on CPU — the operations really do run in bfloat16, and the
-loss really does still fall — but CUDA kernel selection, and the speed and memory claims
-that motivate bf16 in the first place, are not reachable from here. They stay unverified
-until a run happens on the GPU box.
+Measured on an RTX 4070 Ti SUPER under WSL2 — batch 256, a 5.3M-parameter encoder, 4,000
+mined Hindi pairs, all four combinations of the same experiment:
 
-Device-specific bugs will therefore surface first on Windows. That is a property of owning
-one GPU, not of this design; a branch would not have helped.
+| | no caching | `gradient_checkpoint_chunk: 32` |
+|---|---:|---:|
+| `fp32` | 4.89 GB / 4.3s | 0.40 GB / 4.7s |
+| `bf16` | 2.99 GB / 2.7s | **0.29 GB** / 4.7s |
+
+**Gradient caching is what buys the memory** — 12.2× on its own, against 1.6× for bf16;
+16.9× together. If you can set only one thing on a card that is running out of room, set
+the chunk.
+
+**bf16 turned out to buy speed**, 1.6× faster than fp32, which is not why it was chosen.
+Caching costs 1.09× wall clock on fp32 and 1.74× on bf16 — it duplicates the forward pass,
+and bf16 makes that pass cheaper, so the relative cost is higher where the baseline is
+faster.
+
+Final losses spanned **0.51%** across all four cells. That is the "mathematically exact"
+claim holding on real hardware rather than in a unit test.
+
+## What is still unverified
+
+**Everything at realistic model size.** Those numbers come from a 5.3M-parameter encoder
+using 0.29 GB of a 16 GB card. Activation memory scales with width, depth and sequence
+length, so they say nothing about where the ceiling sits for a 100M+ model — which is the
+size that matters. Re-measure before trusting `batch_size: 256` as a maximum; at this
+model size it is far below one.
+
+**Development still happens without CUDA**, so device-specific bugs will surface first on
+the training box. That is a property of owning one GPU, not of this design.
 
 ## Notes on WSL2
 

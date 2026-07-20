@@ -128,10 +128,24 @@ without a GPU.
 **Still to do.** Adapting an external pretrained checkpoint, hard-negative mining,
 Matryoshka truncation, checkpoint resumption.
 
-**Unverified.** Development happens without an NVIDIA GPU, so the CUDA paths are exercised
-by nothing local. bf16 autocast is genuinely tested on CPU, including that the loss still
-falls, but the memory and throughput claims that justify it are open until a run on real
-hardware.
+**Verified on hardware, 20 July 2026.** An RTX 4070 Ti SUPER, batch 256, a 5.3M-parameter
+encoder over 4,000 mined Hindi pairs:
+
+| | no caching | chunk 32 |
+|---|---:|---:|
+| fp32 | 4.89 GB / 4.3s | 0.40 GB / 4.7s |
+| bf16 | 2.99 GB / 2.7s | 0.29 GB / 4.7s |
+
+Gradient caching carries the memory saving — **12.2x alone**, against 1.6x for bf16, 16.9x
+together. Final losses spanned **0.51%** across all four cells, so the exactness claim
+holds off the test bench. bf16 also turned out to be **1.6x faster**, which was not why it
+was chosen.
+
+Initial loss matched `ln(batch_size)` to within 4-6% at both batch 16 and 256 — what an
+untrained contrastive model must show, and independent evidence the objective is right.
+
+**Still unverified:** everything at realistic model size. 5.3M parameters is a toy, and
+0.29 GB of a 16 GB card says nothing about where the ceiling sits for a 100M+ encoder.
 
 - **Exit criterion:** a fine-tuned model beats its own base checkpoint on a held-out set
   from the same domain. Beating the base is the honest bar — beating a commercial API is
