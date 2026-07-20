@@ -150,15 +150,60 @@ So a cross-lingual pair set is a **join**, not a scrape: article text from
 `pages-articles.xml.bz2`, keyed by page id, against `langlinks.sql.gz`. Budget for that
 rather than expecting the links to fall out of the text.
 
-**Natural training pairs fall out of the structure**, which matters because Phase C of
-the roadmap needs pairs and none are labelled:
+## Mining training pairs
 
-| Wikipedia structure | Pair |
-|---|---|
-| Title ↔ lead paragraph | query ↔ passage |
-| Section heading ↔ section body | query ↔ passage |
-| Article ↔ its interlanguage counterpart | cross-lingual alignment |
-| Consecutive paragraphs | weak positive |
+Contrastive training needs an anchor and a positive, and no labelled pairs exist. They are
+manufactured from the structure the extractor preserved:
+
+```bash
+qfme mine-pairs --source data/wikipedia/hi.jsonl.gz --output pairs/hi.jsonl.gz
+```
+
+```
+Wrote 7488 pairs to pairs/hi.jsonl.gz
+
+kind                  pairs   mean overlap
+adjacent               5072           0.45
+heading_section        1332           0.64
+title_lead             1084           0.89  <- solvable by string match
+```
+
+| Source | Anchor | Positive |
+|---|---|---|
+| `title_lead` | article title | lead paragraph |
+| `heading_section` | section heading | section body |
+| `adjacent` | a paragraph | the paragraph after it |
+
+**Read the overlap column before trusting any of it.** Overlap is the share of the anchor's
+words that already appear in the positive. A pair at 1.0 can be scored correctly by
+matching strings, so a model trained on it shows a falling loss while learning nothing
+about meaning — and nothing in the training run will tell you.
+
+Wikipedia leads restate their titles, so the most obvious pair source is the most
+contaminated. Measured on Meetei Mayek: **title/lead averages 0.89, and 70% of those pairs
+exceed 0.9.** The filter trades volume for pairs that cannot be solved lexically:
+
+| `--max-overlap` | pairs | title_lead | heading | adjacent |
+|---|---:|---:|---:|---:|
+| 1.0 (default) | 7,488 | 1,084 | 1,332 | 5,072 |
+| 0.9 | 6,325 | 321 | 945 | 5,059 |
+| 0.7 | 5,565 | 161 | 588 | 4,816 |
+| 0.5 | 3,678 | 98 | 407 | 3,173 |
+
+The default keeps everything and warns, because with a small corpus leaky pairs may still
+beat no pairs. The right value is an experiment, not a constant.
+
+Overlap is measured in words for whitespace-delimited scripts and in character bigrams
+otherwise. Without that split it reported `0.0` for Japanese and Thai — every pair passing
+the filter regardless of contamination, with the safety check silently off for exactly the
+scripts needing it most.
+
+Each pair records the document it came from. Two pairs from one article are about the same
+subject, so a batch holding both trains the model that a correct match is a negative.
+
+**Still missing: cross-lingual pairs.** An article and its counterpart in another language
+are the signal that aligns languages in one space, and they need the `langlinks.sql.gz`
+join described above.
 
 **The licence needs a decision, not a footnote.** Wikipedia text is CC BY-SA 4.0, which
 carries attribution and share-alike terms. Whether model weights trained on such text are

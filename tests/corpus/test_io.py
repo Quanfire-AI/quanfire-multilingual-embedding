@@ -386,7 +386,10 @@ class TestTheCliDocstringMatchesTheCli:
             for name in action.choices  # type: ignore[attr-defined]
         }
 
-        advertised = set(re.findall(r"qfme (\w+)", cli.__doc__ or ""))
+        # `[\w-]` rather than `\w`: subcommand names may be hyphenated,
+        # and `\w` captured "mine" from "mine-pairs", which then looked
+        # like an advertised command that does not exist.
+        advertised = set(re.findall(r"qfme ([\w-]+)", cli.__doc__ or ""))
 
         assert advertised <= registered, (
             f"the docstring advertises subcommands that do not exist: "

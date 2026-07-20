@@ -1,11 +1,12 @@
 """
 Command line interface.
 
-Installed as ``qfme``. Six subcommands cover the lifecycle::
+Installed as ``qfme``. Seven subcommands cover the lifecycle::
 
     qfme stats    --source data/corpus.jsonl
     qfme validate --source data/corpus.jsonl
     qfme extract  --dump hiwiki.xml.bz2 --output hi.jsonl.gz --language hi
+    qfme mine-pairs --source hi.jsonl.gz --output pairs/hi.jsonl.gz
     qfme train    --config experiments/demo.yaml
     qfme search   --experiment artifacts/demo --query "machine learning"
     qfme evaluate --experiment artifacts/demo --source data/corpus.jsonl
@@ -89,6 +90,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_extract_parser(subparsers)
 
+    _add_mine_pairs_parser(subparsers)
+
     _add_train_parser(subparsers)
 
     _add_search_parser(subparsers)
@@ -119,6 +122,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "stats": _run_stats,
         "validate": _run_validate,
         "extract": _run_extract,
+        "mine-pairs": _run_mine_pairs,
         "train": _run_train,
         "search": _run_search,
         "evaluate": _run_evaluate,
@@ -267,6 +271,47 @@ def _add_extract_parser(subparsers: Any) -> None:
         "--keep-duplicates",
         action="store_true",
         help="Keep articles whose text repeats an earlier one",
+    )
+
+
+def _add_mine_pairs_parser(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "mine-pairs",
+        help="Build contrastive training pairs from a corpus",
+    )
+
+    parser.add_argument("--source", type=Path, required=True, help="Corpus file or directory")
+
+    parser.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="Destination JSON Lines file; gzipped when it ends .gz",
+    )
+
+    parser.add_argument("--format", default="auto", choices=["auto", "text", "lines", "jsonl"])
+
+    parser.add_argument(
+        "--max-overlap",
+        type=float,
+        default=1.0,
+        help=(
+            "Reject a pair when this share of the anchor's words already appear "
+            "in the positive. 1.0 keeps everything; lower trades volume for pairs "
+            "that cannot be solved by string matching (default: 1.0)"
+        ),
+    )
+
+    parser.add_argument(
+        "--kinds",
+        default="title_lead,heading_section,adjacent",
+        help="Comma-separated pair sources to mine",
+    )
+
+    parser.add_argument(
+        "--report",
+        type=Path,
+        help="Write the mining statistics as JSON to this path",
     )
 
 
@@ -446,6 +491,62 @@ def _run_extract(args: argparse.Namespace) -> int:
     # here is the difference between a corpus that was checked and one
     # that merely exists.
     print(f"Next: qfme validate --source {args.output}")
+
+    return EXIT_SUCCESS
+
+
+def _run_mine_pairs(args: argparse.Namespace) -> int:
+    """Mine contrastive pairs, and report how leaky they are."""
+
+    import gzip
+    import json as _json
+
+    from multilingual_embedding.corpus.pairs import PairConfig, mine_pairs
+    from multilingual_embedding.corpus.reader import reader_for
+
+    reader = reader_for(args.source, format=args.format)
+
+    config = PairConfig(
+        maximum_overlap=args.max_overlap,
+        kinds=tuple(kind.strip() for kind in args.kinds.split(",") if kind.strip()),
+    )
+
+    pairs, statistics = mine_pairs(reader.iter_documents(), config)
+
+    destination = Path(args.output).expanduser()
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    opener = gzip.open if destination.suffix == ".gz" else open
+
+    with opener(destination, "wt", encoding="utf-8") as handle:
+        for pair in pairs:
+            handle.write(_json.dumps(pair.to_record(), ensure_ascii=False) + "\n")
+
+    summary = statistics.to_dict()
+
+    print(f"Wrote {statistics.produced} pairs to {destination}")
+
+    print()
+
+    print(f"{'kind':<18}{'pairs':>9}{'mean overlap':>15}")
+
+    for kind, count in sorted(summary["by_kind"].items()):
+        overlap = summary["mean_overlap_by_kind"][kind]
+
+        # Flagged inline rather than only in a log, because a reader
+        # scanning this table is exactly who needs to know that a kind
+        # can be solved without understanding anything.
+        note = "  <- solvable by string match" if overlap > 0.75 else ""
+
+        print(f"{kind:<18}{count:>9}{overlap:>15.2f}{note}")
+
+    if args.report:
+        from multilingual_embedding.utils.io import write_json
+
+        write_json(args.report, summary)
+
+        print(f"\nStatistics written to {args.report}")
 
     return EXIT_SUCCESS
 
