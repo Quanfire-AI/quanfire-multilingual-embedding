@@ -77,35 +77,78 @@ prepared dataset; it does not scrape.
 
 ---
 
-## 1. Two different things called "embedding"
+## 1. Token embeddings and retrieval embeddings
 
-This distinction determines what belongs in which project, so it comes first.
+An earlier draft of this document split these into "token embeddings, elsewhere" and
+"retrieval embeddings, here". **That was wrong and misleading.** This project builds
+both, and the second is made out of the first.
 
-| | **Retrieval embedding** | **Token embedding** |
-|---|---|---|
-| Unit | One vector per sentence or document | One vector per token id in a vocabulary |
-| Purpose | Measure similarity; find relevant text | First layer of a transformer |
-| Trained | Separately, contrastively, on pairs | Jointly with every other weight of the LLM |
-| Reusable | Yes — any model can consume the vectors | No — meaningless outside its own model |
-| Where it lives | **This project** | **Inside the LLM project** |
+There are three objects, not two.
 
-A retrieval embedding is never fed into an LLM. The pipeline is:
+### 1. The token embedding table — built here
+
+A matrix of shape `vocabulary × dimension`: one vector per token id. The project produces
+these on both paths.
+
+| Path | The table |
+|---|---|
+| Static | `EmbeddingMatrix` — the trained word2vec output, one row per token id |
+| Contextual | `TransformerEncoderModel.token_embedding` — an `nn.Embedding` of the same shape, the model's first layer |
+
+```python
+matrix.vector_for("rain")        # by token
+matrix.vector_for_id(4)          # by id
+model.token_embedding.weight     # (vocabulary, dimension)
+```
+
+### 2. The retrieval embedding — built here, out of the first
+
+One vector per piece of text, obtained by combining the token vectors of its tokens. On
+the static path that combination is a mean; on the contextual path the transformer
+contextualises each token before pooling, so the same token contributes differently
+depending on its neighbours.
+
+The relationship is literal, not analogical:
+
+```python
+encoder.encode("rain storm")
+    == (matrix.vector_for("rain") + matrix.vector_for("storm")) / 2      # True
+```
+
+**Token embeddings feeding retrieval embeddings is exactly what this project does.**
+
+### 3. A generative model's own token table — belongs to the LLM project
+
+Structurally the same object as (1) — `vocabulary × dimension` — but learned jointly with
+all the other weights of a specific generative model, against a next-token objective.
+That makes it inseparable from the model that produced it: its rows are meaningful only
+in the coordinate system the rest of those weights define.
+
+This is the only sense in which token embeddings belong elsewhere, and it is a narrow
+one.
+
+> **Could a table trained here initialise an LLM's embedding layer?**
+> Technically yes, if the vocabularies match exactly. In practice it is rarely worth it.
+> Initialising from word2vec was standard before transformers and is now uncommon,
+> because a transformer learns a better table jointly than it inherits. Treat it as an
+> option to measure, never as an assumed benefit.
+
+### What this means for retrieval-augmented generation
+
+The retrieval vector is not fed into the language model. It selects *which text* enters
+the prompt; the model then applies its own token table to that text.
 
 ```
 query ──► retrieval embedding ──► nearest documents ──► document TEXT into the prompt
                                                              │
                                        LLM tokenises that text
                                                              │
-                                       LLM's own token embeddings ──► transformer layers
+                                       LLM's own token table ──► its layers
 ```
 
-The retrieval vector selects *what text goes in the prompt*. It never crosses into the
-model. The exceptions — vision projectors in multimodal models, soft prompts, adapter
-layers — are architectural features of those models, not a general mechanism for feeding
-external vectors to an LLM.
-
-**Consequence:** token embeddings cannot be produced by this project. They are created
-when an LLM is trained, and a separate project owns that.
+The exceptions — vision projectors in multimodal models, soft prompts, adapter layers —
+are architectural features of those models rather than a general mechanism for feeding
+external vectors to a language model.
 
 ---
 
@@ -147,7 +190,7 @@ unmaintainable.
 
 | Not here | Where |
 |---|---|
-| The token-embedding table inside a generative model | `quanfire-llm` — learned jointly with the model's other weights, not suppliable from outside |
+| A *generative model's own* token table | `quanfire-llm` — learned jointly with that model's other weights, so not suppliable from outside. Token tables for retrieval **are** built here; see section 1. |
 | Corpus acquisition, scraping, licensing | `quanfire-datasets` |
 | Generation of any kind | the modality repository that owns it |
 | Authentication, quotas, billing, routing | the API gateway |
