@@ -61,6 +61,28 @@ def quiet_stderr() -> Any:
             os.close(saved)
 
 
+def clock() -> str:
+    """Wall-clock time, for a log a human reads while waiting."""
+
+    return time.strftime("%H:%M:%S")
+
+
+def duration(seconds: float) -> str:
+    """A span in the units a reader wants, not always seconds."""
+
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+
+    minutes, remainder = divmod(int(seconds), 60)
+
+    if minutes < 60:
+        return f"{minutes}m {remainder:02d}s"
+
+    hours, minutes = divmod(minutes, 60)
+
+    return f"{hours}h {minutes:02d}m {remainder:02d}s"
+
+
 def say(line: str = "") -> None:
     """Record a line for the report and show it as it happens."""
 
@@ -100,7 +122,7 @@ def run(name: str, function: Any, *args: Any, **kwargs: Any) -> Any:
     # takes an hour is indistinguishable from a stage that has hung, and
     # neither the operator nor the author can say which — which is
     # exactly what happened on the first real dump.
-    say(f"  [{time.strftime('%H:%M:%S')}] {name} ...")
+    say(f"  [{clock()}] {name} ...")
 
     started = time.perf_counter()
 
@@ -109,7 +131,7 @@ def run(name: str, function: Any, *args: Any, **kwargs: Any) -> Any:
 
         stage.ok, stage.detail = True, detail
 
-        say(f"  [{time.strftime('%H:%M:%S')}] {name} done in {time.perf_counter() - started:.1f}s")
+        say(f"  [{clock()}] {name} done in {duration(time.perf_counter() - started)}")
 
         return result
     except Exception as error:
@@ -117,7 +139,7 @@ def run(name: str, function: Any, *args: Any, **kwargs: Any) -> Any:
 
         stage.detail = {"traceback": traceback.format_exc().splitlines()[-3:]}
 
-        say(f"  [{time.strftime('%H:%M:%S')}] {name} FAILED: {stage.error}")
+        say(f"  [{clock()}] {name} FAILED: {stage.error}")
 
         return None
     finally:
@@ -529,9 +551,13 @@ def main() -> int:
 
     arguments.work.mkdir(parents=True, exist_ok=True)
 
+    started_at = time.time()
+
     say("=" * 68)
 
     say("QuanFire embedding — end-to-end verification")
+
+    say(f"STARTED  {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     say("=" * 68)
 
@@ -686,7 +712,7 @@ def main() -> int:
     for stage in STAGES:
         mark = "PASS" if stage.ok else "FAIL"
 
-        say(f"[{mark}] {stage.name:34} {stage.seconds:7.1f}s")
+        say(f"[{mark}] {stage.name:34} {duration(stage.seconds):>12}")
 
         if stage.error:
             say(f"       {stage.error}")
@@ -699,9 +725,22 @@ def main() -> int:
 
     failures = [s for s in STAGES if not s.ok]
 
+    elapsed = time.time() - started_at
+
     say()
 
+    say("=" * 68)
+
     say(f"{len(STAGES) - len(failures)}/{len(STAGES)} stages passed")
+
+    say(f"COMPLETED {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    say(f"TOTAL     {duration(elapsed)}")
+
+    if failures:
+        say(f"FAILED    {', '.join(stage.name for stage in failures)}")
+
+    say("=" * 68)
 
     report_path = arguments.work / "verification-report.txt"
 
