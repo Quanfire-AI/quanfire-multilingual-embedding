@@ -1,10 +1,11 @@
 """
 Command line interface.
 
-Installed as ``qfme``. Five subcommands cover the lifecycle::
+Installed as ``qfme``. Six subcommands cover the lifecycle::
 
     qfme stats    --source data/corpus.jsonl
     qfme validate --source data/corpus.jsonl
+    qfme extract  --dump hiwiki.xml.bz2 --output hi.jsonl.gz --language hi
     qfme train    --config experiments/demo.yaml
     qfme search   --experiment artifacts/demo --query "machine learning"
     qfme evaluate --experiment artifacts/demo --source data/corpus.jsonl
@@ -86,6 +87,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_validate_parser(subparsers)
 
+    _add_extract_parser(subparsers)
+
     _add_train_parser(subparsers)
 
     _add_search_parser(subparsers)
@@ -115,6 +118,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     handlers = {
         "stats": _run_stats,
         "validate": _run_validate,
+        "extract": _run_extract,
         "train": _run_train,
         "search": _run_search,
         "evaluate": _run_evaluate,
@@ -217,6 +221,52 @@ def _add_validate_parser(subparsers: Any) -> None:
         "--strict",
         action="store_true",
         help="Exit non-zero on warnings as well as errors",
+    )
+
+
+def _add_extract_parser(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "extract",
+        help="Extract a Wikipedia dump into the corpus format",
+    )
+
+    parser.add_argument(
+        "--dump",
+        type=Path,
+        required=True,
+        help="Path to a *-pages-articles.xml.bz2 dump",
+    )
+
+    parser.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="Destination JSON Lines file; gzipped when it ends .gz",
+    )
+
+    parser.add_argument(
+        "--language",
+        required=True,
+        help="ISO code recorded on every article, e.g. hi",
+    )
+
+    parser.add_argument(
+        "--minimum-characters",
+        type=int,
+        default=200,
+        help="Skip articles shorter than this (default: 200)",
+    )
+
+    parser.add_argument(
+        "--limit",
+        type=int,
+        help="Stop after this many articles, for trying a dump",
+    )
+
+    parser.add_argument(
+        "--keep-duplicates",
+        action="store_true",
+        help="Keep articles whose text repeats an earlier one",
     )
 
 
@@ -372,6 +422,30 @@ def _run_validate(args: argparse.Namespace) -> int:
 
     if args.strict and any(f.severity is Severity.WARNING for f in audit.findings):
         return EXIT_ERROR
+
+    return EXIT_SUCCESS
+
+
+def _run_extract(args: argparse.Namespace) -> int:
+    """Extract a Wikipedia dump, then say what to do next."""
+
+    from multilingual_embedding.corpus.wikipedia import extract_dump
+
+    count = extract_dump(
+        args.dump,
+        args.output,
+        language=args.language,
+        minimum_characters=args.minimum_characters,
+        limit=args.limit,
+        deduplicate=not args.keep_duplicates,
+    )
+
+    print(f"Wrote {count} articles to {args.output}")
+
+    # The extraction is not finished until it has been judged. Saying so
+    # here is the difference between a corpus that was checked and one
+    # that merely exists.
+    print(f"Next: qfme validate --source {args.output}")
 
     return EXIT_SUCCESS
 

@@ -35,6 +35,15 @@ neural = [
     "numpy<2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
 ]
 
+# Wikipedia extraction. Optional because most callers consume a corpus
+# rather than build one, and because MediaWiki markup is the only reason
+# this dependency exists — the parser is not used anywhere else.
+#
+#     uv sync --extra wikipedia
+wikipedia = [
+    "mwparserfromhell>=0.6,<1.0",
+]
+
 [project.scripts]
 qfme = "multilingual_embedding.cli:main"
 

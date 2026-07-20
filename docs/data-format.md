@@ -75,6 +75,49 @@ qfme validate --source "$OUTPUT" --output audit.json  # machine-readable
 | `WARNING` | Will train, but something was probably lost — duplicates, missing language, fragments |
 | `INFO` | Context worth knowing before trusting a result |
 
+## Extracting Wikipedia
+
+```bash
+uv sync --extra wikipedia
+curl -O https://dumps.wikimedia.org/hiwiki/latest/hiwiki-latest-pages-articles.xml.bz2
+
+qfme extract --dump hiwiki-latest-pages-articles.xml.bz2 \
+             --output data/wikipedia/hi.jsonl.gz --language hi
+qfme validate --source data/wikipedia/hi.jsonl.gz
+```
+
+Streaming, so a multi-gigabyte dump runs on a laptop within one article's memory. Try a
+dump before committing to it with `--limit 500`.
+
+What it does, and why each part is not optional:
+
+| Step | Reason |
+|---|---|
+| Keeps namespace 0, drops redirects | Talk pages and templates are project machinery, not prose |
+| Removes tables and block HTML *before* parsing | A parser keeps a table's cells, so a statistics table arrives as bare numbers that read like prose |
+| Drops boilerplate sections | A references list teaches citation formatting |
+| Skips articles under 200 characters | Wikipedia is full of one-line stubs that add vocabulary noise |
+| Drops articles whose markup is malformed | ~1% of articles; the source is broken and no parser can fix it |
+| Deduplicates | Template-generated stubs repeat verbatim — the Meetei Mayek wiki has **118 country articles sharing one sentence** |
+| Keeps sections as `(heading, body)` | A heading and its section are a query and a passage, which Phase C needs |
+
+Every drop is counted and logged. Nothing is removed silently.
+
+Measured end to end on the Meetei Mayek wiki — a 5 MB dump, about 16 seconds:
+
+| | Pages |
+|---|---:|
+| Seen in the dump | 15,514 |
+| Redirects and non-article namespaces | −4,348 |
+| Shorter than 200 characters | −8,547 |
+| Malformed markup, dropped | −24 |
+| Duplicates, dropped | −151 |
+| **Written** | **2,444** |
+
+The result passes `qfme validate` with no errors. Note how much of a dump is not article
+prose: **84% of pages were discarded**, most of them stubs. Plan corpus size from what
+survives, not from the dump's page count.
+
 ## Notes on Wikipedia specifically
 
 **Dumps.** `dumps.wikimedia.org`, one archive per language, `*-pages-articles.xml.bz2`.
@@ -86,11 +129,26 @@ Tamil have substantial Wikipedias; Santali, Bodo, Dogri and Meitei have very lit
 Expect the low-resource languages to remain low-resource after extraction, and plan the
 language tier accordingly rather than assuming coverage follows from the dump existing.
 
-**Interlanguage links are the most valuable thing in the dump**, and it is easy to miss.
-An article linked across languages gives *aligned* content — the Hindi and Tamil articles
-on the same subject. That is the parallel signal cross-lingual alignment needs, and
-without it a multilingual model puts each language in its own region of the space and
-retrieval across languages does not work. Extract the links, not only the text.
+**Interlanguage links are the most valuable thing Wikipedia offers**, because an article
+linked across languages gives *aligned* content — the Hindi and Tamil articles on the same
+subject. That is the parallel signal cross-lingual alignment needs; without it a
+multilingual model puts each language in its own region of the space and retrieval across
+languages does not work.
+
+**They are not in the article dump.** An earlier version of this page said to extract them
+from the wikitext, which was wrong and would have cost you an afternoon. Inline `[[xx:…]]`
+links were how it worked before Wikidata; they have since moved out. Measured on the
+Meetei Mayek wiki: **0 of 2,260 articles** carry one.
+
+They live in a separate file, as SQL rows of `(page_id, language, foreign_title)`:
+
+```
+https://dumps.wikimedia.org/<wiki>/latest/<wiki>-latest-langlinks.sql.gz
+```
+
+So a cross-lingual pair set is a **join**, not a scrape: article text from
+`pages-articles.xml.bz2`, keyed by page id, against `langlinks.sql.gz`. Budget for that
+rather than expecting the links to fall out of the text.
 
 **Natural training pairs fall out of the structure**, which matters because Phase C of
 the roadmap needs pairs and none are labelled:
