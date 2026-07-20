@@ -58,6 +58,11 @@ from .lora import (
     merge_lora,
     parameter_summary,
 )
+from .pretrained import (
+    POOLING_STRATEGIES,
+    PretrainedEncoderError,
+    PretrainedTextEncoder,
+)
 from .training import (
     ContrastiveConfig,
     ContrastiveTrainer,
@@ -66,12 +71,15 @@ from .training import (
 )
 
 __all__ = [
+    "POOLING_STRATEGIES",
     "ContrastiveConfig",
     "ContrastiveTrainer",
     "EncoderConfig",
     "LoRAConfig",
     "LoRALinear",
     "NeuralTextEncoder",
+    "PretrainedEncoderError",
+    "PretrainedTextEncoder",
     "TextPair",
     "Tokenizes",
     "TrainingReport",

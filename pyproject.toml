@@ -35,6 +35,16 @@ neural = [
     "numpy<2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
 ]
 
+# Adapting published checkpoints. Separate from `neural` because the
+# transformer in this project needs torch and nothing else — pulling in a
+# model hub client is only warranted when you actually intend to load
+# someone else's weights.
+#
+#     uv sync --extra pretrained
+pretrained = [
+    "transformers>=4.40,<5",
+]
+
 # Wikipedia extraction. Optional because most callers consume a corpus
 # rather than build one, and because MediaWiki markup is the only reason
 # this dependency exists — the parser is not used anywhere else.
