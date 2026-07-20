@@ -261,6 +261,39 @@ def is_complete_gzip(path: Path) -> bool:
     return True
 
 
+def dump_fingerprint(dump: Path) -> str:
+    """
+    Enough of a hash to tell two dumps apart.
+
+    Reported because a rounded size cannot. Two Tamil dumps downloaded on
+    different days both displayed as "258.0 MB" and produced 163,768 and
+    179,407 articles, and there was no way to tell from the reports
+    whether the input or the code had changed — which is the difference
+    between a rotated dump and a reproducibility bug.
+
+    Only the head and tail are read: hashing 258 MB on every run to
+    answer "is this the same file" is a poor trade, and a dump that
+    matches at both ends and differs in the middle is not a failure mode
+    Wikimedia has.
+    """
+
+    import hashlib
+
+    size = dump.stat().st_size
+
+    digest = hashlib.sha256(str(size).encode())
+
+    with dump.open("rb") as handle:
+        digest.update(handle.read(1024 * 1024))
+
+        if size > 2 * 1024 * 1024:
+            handle.seek(-1024 * 1024, 2)
+
+            digest.update(handle.read())
+
+    return digest.hexdigest()[:16]
+
+
 def stage_extract(
     dump: Path, language: str, output: Path, reuse: bool
 ) -> tuple[Path, dict[str, Any]]:
@@ -268,13 +301,16 @@ def stage_extract(
 
     from multilingual_embedding.corpus.wikipedia import extract_dump
 
+    fingerprint = dump_fingerprint(dump)
+
     if reuse and is_complete_gzip(output):
         with __import__("gzip").open(output, "rt", encoding="utf-8") as handle:
             count = sum(1 for _ in handle)
 
         return output, {
             "reused": True,
-            "dump_mb": round(dump.stat().st_size / 1024**2, 1),
+            "dump_bytes": dump.stat().st_size,
+            "dump_sha256_prefix": fingerprint,
             "articles_written": count,
             "output_mb": round(output.stat().st_size / 1024**2, 1),
         }
@@ -283,7 +319,8 @@ def stage_extract(
 
     return output, {
         "reused": False,
-        "dump_mb": round(dump.stat().st_size / 1024**2, 1),
+        "dump_bytes": dump.stat().st_size,
+        "dump_sha256_prefix": fingerprint,
         "articles_written": count,
         "output_mb": round(output.stat().st_size / 1024**2, 1),
     }
