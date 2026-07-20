@@ -68,12 +68,10 @@ and searching end to end.
 
 ### Phase A — A contextual encoder we own ✅ **done**
 
-Load a pretrained transformer checkpoint and expose it through `TextEncoder`. Inference
-only, no training.
+A transformer encoder, trainable, exposed through `TextEncoder`.
 
-This is first because it is the shortest path to a usable model. Everything downstream —
-evaluation, pair mining, serving — needs *some* real encoder to work against, and a
-loaded checkpoint provides one immediately.
+This came first because everything downstream — evaluation, pair mining, serving — needs
+a real encoder to work against.
 
 The architecture is written out rather than borrowed. Loading a pretrained checkpoint
 first would have meant a good checkpoint masking a broken training loop; a model defined
