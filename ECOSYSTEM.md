@@ -111,6 +111,75 @@ when an LLM is trained, and a separate project owns that.
 
 ## 2. Repository architecture
 
+### The repository map
+
+All backend, all Python, all under `python-projects/`. No frontend at this stage.
+
+| Repository | Owns | Depends on | Status |
+|---|---|---|---|
+| `quanfire-ml-core` | Config, logging, registry, artefact versioning, training loop, serving base, text preparation | nothing ML | proposed |
+| `quanfire-datasets` | Corpus acquisition, licensing, cleaning, versioned dataset publication | core | proposed |
+| **`quanfire-multilingual-embedding`** | **Text → vectors: tokenizer, vocabulary, encoders, training, evaluation, serving** | core, torch | **exists** |
+| `quanfire-llm` | Text → text: fine-tuning, inference, serving | core, torch | proposed |
+| `quanfire-vision` | Image ↔ text, image generation | core, torch | proposed |
+| `quanfire-speech` | Text ↔ speech | core, torch | proposed |
+
+Three QuanFire repositories already exist alongside this one — `quanfire-ai-backend`,
+`quanfire-ai-models` and `quanfire-mcp`. Their contents have not been examined, and the
+map above may overlap with them. **Reconcile before creating anything**, particularly
+`quanfire-ai-models`, whose name suggests it may already occupy part of this space.
+
+### Scope of this repository
+
+Stated tightly, because scope creep across a modality boundary is how these become
+unmaintainable.
+
+**In scope**
+
+- Tokenizer and vocabulary training
+- Embedding model architectures — static and contextual
+- Training: from scratch, and adaptation from a pretrained checkpoint
+- Pair mining for contrastive objectives
+- Evaluation of embedding quality, per language and per domain
+- Serving vectors
+
+**Out of scope**
+
+| Not here | Where |
+|---|---|
+| The token-embedding table inside a generative model | `quanfire-llm` — learned jointly with the model's other weights, not suppliable from outside |
+| Corpus acquisition, scraping, licensing | `quanfire-datasets` |
+| Generation of any kind | the modality repository that owns it |
+| Authentication, quotas, billing, routing | the API gateway |
+| Vector storage and indexing at scale | a vector database; this repository provides exact search only |
+
+The last one is worth stating plainly: this repository produces vectors and can search
+them exactly, which is correct up to roughly 10⁶. It is not, and should not become, a
+vector database.
+
+### How a request flows
+
+```
+client ──► api.quanfire.ai ──► gateway: auth, quota, routing
+                                   │
+              ┌────────────────────┼────────────────────┐
+              ▼                    ▼                    ▼
+        /v1/embeddings      /v1/completions       /v1/audio/speech
+              │                    │                    │
+        embedding svc          llm svc             speech svc
+              │                    │                    │
+              └──────────── quanfire-ml-core ───────────┘
+                        artefact loading, batching,
+                        versioning, structured logging
+```
+
+Each modality repository ships a serving adapter; the gateway owns auth, quotas and
+routing and is the only public surface. Adopting the de facto industry request and
+response schemas means existing clients migrate by changing a base URL.
+
+The gateway probably belongs with the existing platform rather than being a new
+repository — another reason to reconcile with `quanfire-ai-backend` first.
+
 ### Recommendation: separate repositories, split by team boundary
 
 This was argued both ways before landing here, and the reasoning is recorded because the
