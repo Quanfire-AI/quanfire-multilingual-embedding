@@ -22,6 +22,7 @@ import argparse
 import contextlib
 import json
 import os
+import pathlib
 import platform
 import sys
 import time
@@ -508,6 +509,128 @@ def stage_train_contextual(
 # ----------------------------------------------------------------------
 
 
+def run_contextual(pairs_path: Path) -> None:
+    """
+    Train the transformer, and on CUDA measure what only CUDA can answer.
+
+    The bf16 and gradient-caching claims are the ones no test on a
+    machine without an NVIDIA card can check, so on CUDA this runs the
+    configured shape and then the same shape without either, and reports
+    peak VRAM for both. Without the comparison, a number is just a
+    number.
+    """
+
+    import contextlib
+
+    with contextlib.suppress(ImportError):
+        import torch
+
+        from multilingual_embedding.embedding.neural import resolve_device
+
+        device = str(resolve_device())
+
+        say()
+
+        say("--- contextual training ---")
+
+        run(
+            "train-contextual[smoke]",
+            stage_train_contextual,
+            pairs_path,
+            device,
+            "fp32",
+            16,
+            0,
+            512,
+            2,
+            64,
+        )
+
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+
+            run(
+                "train-contextual[bf16+gradcache]",
+                stage_train_contextual,
+                pairs_path,
+                device,
+                "bf16",
+                256,
+                32,
+                4000,
+                4,
+                256,
+            )
+
+            torch.cuda.reset_peak_memory_stats()
+
+            run(
+                "train-contextual[fp32+nogradcache]",
+                stage_train_contextual,
+                pairs_path,
+                device,
+                "fp32",
+                256,
+                0,
+                4000,
+                4,
+                256,
+            )
+
+
+def finish(started_at: float, work: pathlib.Path) -> int:
+    """Print the results table, the closing banner, and write the report."""
+
+    say()
+
+    say("=" * 68)
+
+    say("RESULTS")
+
+    say("=" * 68)
+
+    for stage in STAGES:
+        mark = "PASS" if stage.ok else "FAIL"
+
+        say(f"[{mark}] {stage.name:34} {duration(stage.seconds):>12}")
+
+        if stage.error:
+            say(f"       {stage.error}")
+
+        for key, value in stage.detail.items():
+            say(f"       {key}: {value}")
+
+        if stage.peak_memory_mb is not None:
+            say(f"       peak_resident_mb: {stage.peak_memory_mb}")
+
+    failures = [stage for stage in STAGES if not stage.ok]
+
+    say()
+
+    say("=" * 68)
+
+    say(f"{len(STAGES) - len(failures)}/{len(STAGES)} stages passed")
+
+    say(f"COMPLETED {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    say(f"TOTAL     {duration(time.time() - started_at)}")
+
+    if failures:
+        say(f"FAILED    {', '.join(stage.name for stage in failures)}")
+
+    say("=" * 68)
+
+    report_path = work / "verification-report.txt"
+
+    report_path.write_text("\n".join(REPORT) + "\n", encoding="utf-8")
+
+    print(f"\nFull report written to {report_path}")
+
+    print("Paste that file back.")
+
+    return 1 if failures else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
 
@@ -523,6 +646,16 @@ def main() -> int:
         type=Path,
         default=Path("verify-output"),
         help="Where intermediates are written",
+    )
+
+    parser.add_argument(
+        "--pairs",
+        type=Path,
+        help=(
+            "Run only the contextual training stages against this pair "
+            "file. For getting the GPU answer out of a machine without "
+            "waiting for the corpus stages to run again"
+        ),
     )
 
     parser.add_argument(
@@ -573,6 +706,15 @@ def main() -> int:
 
     for key, value in environment.items():
         say(f"  {key:22} {value}")
+
+    if arguments.pairs is not None:
+        say()
+
+        say(f"CONTEXTUAL ONLY, against {arguments.pairs}")
+
+        run_contextual(arguments.pairs)
+
+        return finish(started_at, arguments.work)
 
     dumps = sorted(arguments.dumps.glob("*pages-articles*.xml.bz2"))
 
@@ -634,127 +776,14 @@ def main() -> int:
         )
 
     if not arguments.skip_contextual and corpora:
-        with contextlib.suppress(ImportError):
-            import torch
+        language = corpora[0].name.split(".")[0]
 
-            from multilingual_embedding.embedding.neural import resolve_device
+        pairs_path = arguments.work / f"{language}-pairs.jsonl.gz"
 
-            device = str(resolve_device())
+        if pairs_path.exists():
+            run_contextual(pairs_path)
 
-            language = corpora[0].name.split(".")[0]
-
-            pairs_path = arguments.work / f"{language}-pairs.jsonl.gz"
-
-            if pairs_path.exists():
-                say()
-
-                say("--- contextual training ---")
-
-                # fp32 first, then the GPU-shaped configuration, so the
-                # two are comparable on the same data.
-                # Small enough to finish on a laptop CPU. This proves the
-                # path runs; it is not a training run.
-                run(
-                    "train-contextual[smoke]",
-                    stage_train_contextual,
-                    pairs_path,
-                    device,
-                    "fp32",
-                    16,
-                    0,
-                    512,
-                    2,
-                    64,
-                )
-
-                if torch.cuda.is_available():
-                    # The configuration that only a GPU can answer for:
-                    # bf16, a batch large enough for contrastive training
-                    # to be worth doing, and gradient caching holding the
-                    # memory down. None of this is exercised anywhere on
-                    # a machine without CUDA.
-                    torch.cuda.reset_peak_memory_stats()
-
-                    run(
-                        "train-contextual[bf16+gradcache]",
-                        stage_train_contextual,
-                        pairs_path,
-                        device,
-                        "bf16",
-                        256,
-                        32,
-                        4000,
-                        4,
-                        256,
-                    )
-
-                    torch.cuda.reset_peak_memory_stats()
-
-                    # Same shape without either, so the comparison says
-                    # whether they actually bought anything.
-                    run(
-                        "train-contextual[fp32+nogradcache]",
-                        stage_train_contextual,
-                        pairs_path,
-                        device,
-                        "fp32",
-                        256,
-                        0,
-                        4000,
-                        4,
-                        256,
-                    )
-
-    say()
-
-    say("=" * 68)
-
-    say("RESULTS")
-
-    say("=" * 68)
-
-    for stage in STAGES:
-        mark = "PASS" if stage.ok else "FAIL"
-
-        say(f"[{mark}] {stage.name:34} {duration(stage.seconds):>12}")
-
-        if stage.error:
-            say(f"       {stage.error}")
-
-        for key, value in stage.detail.items():
-            say(f"       {key}: {value}")
-
-        if stage.peak_memory_mb is not None:
-            say(f"       peak_resident_mb: {stage.peak_memory_mb}")
-
-    failures = [s for s in STAGES if not s.ok]
-
-    elapsed = time.time() - started_at
-
-    say()
-
-    say("=" * 68)
-
-    say(f"{len(STAGES) - len(failures)}/{len(STAGES)} stages passed")
-
-    say(f"COMPLETED {time.strftime('%Y-%m-%d %H:%M:%S')}")
-
-    say(f"TOTAL     {duration(elapsed)}")
-
-    if failures:
-        say(f"FAILED    {', '.join(stage.name for stage in failures)}")
-
-    say("=" * 68)
-
-    report_path = arguments.work / "verification-report.txt"
-
-    report_path.write_text("\n".join(REPORT) + "\n", encoding="utf-8")
-
-    print(f"\nFull report written to {report_path}")
-
-    print("Paste that file back.")
-
-    return 1 if failures else 0
+    return finish(started_at, arguments.work)
 
 
 if __name__ == "__main__":
