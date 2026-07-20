@@ -123,9 +123,35 @@ class LoRALinear(nn.Module):
 
         self.scaling = config.scaling
 
-        self.lora_down = nn.Linear(base.in_features, config.rank, bias=False)
+        # Created on the base layer's device and dtype, not on the
+        # default one.
+        #
+        # `apply_lora` is normally called *after* a model has been moved
+        # to its device — you load a checkpoint, place it, then adapt it.
+        # New modules default to CPU, so the adapters landed there while
+        # their inputs were on the accelerator, and the forward pass died
+        # with "Placeholder storage has not been allocated on MPS
+        # device!". The same would happen on CUDA.
+        #
+        # Taking the device from the layer being wrapped means adaptation
+        # works whenever it is applied, rather than only before placement.
+        weight = base.weight
 
-        self.lora_up = nn.Linear(config.rank, base.out_features, bias=False)
+        self.lora_down = nn.Linear(
+            base.in_features,
+            config.rank,
+            bias=False,
+            device=weight.device,
+            dtype=weight.dtype,
+        )
+
+        self.lora_up = nn.Linear(
+            config.rank,
+            base.out_features,
+            bias=False,
+            device=weight.device,
+            dtype=weight.dtype,
+        )
 
         self.dropout = nn.Dropout(config.dropout) if config.dropout else nn.Identity()
 

@@ -576,3 +576,49 @@ class TestGradientCachingWithDropout:
                 f"enabled: {worst:.3e}. The random state is not being restored "
                 f"between the two encoding passes."
             )
+
+
+class TestAdaptingAModelAlreadyOnADevice:
+    """
+    `apply_lora` is normally called after placement.
+
+    You load a checkpoint, move it to the accelerator, then adapt it —
+    that is the natural order, and it is the order the adaptation script
+    uses. New modules default to CPU, so the adapters landed there while
+    their inputs were on the device and the forward pass died with
+    "Placeholder storage has not been allocated on MPS device!". The same
+    would have happened on CUDA, which is where it mattered.
+    """
+
+    def test_adapters_are_created_on_the_base_layer_s_device(self) -> None:
+        from multilingual_embedding.embedding.neural.lora import LoRAConfig, apply_lora
+
+        model = nn.Sequential(nn.Linear(8, 8))
+
+        model[0].weight.data = model[0].weight.data.to(torch.float64)
+
+        apply_lora(model, LoRAConfig(rank=2, targets=("0",)))
+
+        layer = model[0]
+
+        assert layer.lora_down.weight.device == layer.base.weight.device
+
+        assert layer.lora_down.weight.dtype == layer.base.weight.dtype, (
+            "adapters must match the base layer's dtype, or the forward "
+            "pass fails on a model loaded in half precision"
+        )
+
+    def test_a_forward_pass_survives_adaptation_after_placement(self) -> None:
+        """The end the user actually hits."""
+
+        from multilingual_embedding.embedding.neural.lora import LoRAConfig, apply_lora
+
+        device = torch.device("cpu")
+
+        model = nn.Sequential(nn.Linear(8, 8)).to(device)
+
+        apply_lora(model, LoRAConfig(rank=2, targets=("0",)))
+
+        output = model(torch.randn(3, 8, device=device))
+
+        assert output.shape == (3, 8)
