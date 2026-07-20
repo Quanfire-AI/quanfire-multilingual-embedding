@@ -100,10 +100,36 @@ and Adam's optimizer state falls from **0.82 GB to 6.8 MB**.
 
 `gradcache.py` — chunked encoding with a cached vector gradient, so the contrastive batch
 is bounded by disk rather than VRAM. Verified gradient-for-gradient identical to a single
-large backward pass, and invariant to chunk size.
+large backward pass, and wired into `ContrastiveTrainer` through
+`compute.gradient_checkpoint_chunk` rather than left as a library nobody calls.
+
+One correction to an earlier claim here, because it was wrong in a way worth recording.
+"Invariant to chunk size" holds **only at `dropout=0`**. Chunked encoding draws different
+dropout masks than unchunked — eight rows in one call is not eight calls of one row — so
+chunk sizes cannot agree with each other once dropout is on, however correct the
+implementation. What must hold, and now does, is that the cached path matches the uncached
+path *at the same chunk size*. Getting there meant fixing a real defect: the two encoding
+passes were not sharing a random state, so the cached gradient was being applied to
+activations it was never computed for, diverging from the truth by 11.3 absolute. It went
+unnoticed because every test used `dropout=0.0`, which is exactly the setting that hides
+it.
+
+Mixed precision — `fp32` or `bf16`, the latter chosen over `fp16` because it shares fp32's
+exponent range and so needs no loss scaling. Honoured by the trainer through autocast on
+the forward pass only.
+
+Compute profiles — a `compute` config section and `--profile`, so one branch and one
+experiment file run on both a development machine and a GPU box. Devices validate by shape
+rather than availability, which is what lets a GPU profile be authored and CI-tested
+without a GPU.
 
 **Still to do.** Adapting an external pretrained checkpoint, hard-negative mining,
 Matryoshka truncation, checkpoint resumption.
+
+**Unverified.** Development happens without an NVIDIA GPU, so the CUDA paths are exercised
+by nothing local. bf16 autocast is genuinely tested on CPU, including that the loss still
+falls, but the memory and throughput claims that justify it are open until a run on real
+hardware.
 
 - **Exit criterion:** a fine-tuned model beats its own base checkpoint on a held-out set
   from the same domain. Beating the base is the honest bar — beating a commercial API is

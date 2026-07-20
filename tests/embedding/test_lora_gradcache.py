@@ -365,6 +365,22 @@ class TestGradientCachingIsExact:
             torch.testing.assert_close(actual, expected, rtol=1e-4, atol=1e-6)
 
     def test_chunk_size_does_not_change_the_result(self) -> None:
+        """
+        Invariance to chunk size, which holds only without dropout.
+
+        The fixture is built with ``dropout=0.0``, and that is a
+        precondition rather than a convenience. Chunked encoding draws
+        different dropout masks than unchunked — eight rows in one call
+        is not eight calls of one row — so with dropout on, two chunk
+        sizes cannot agree however correct the implementation.
+
+        Reading this test as the whole of the exactness claim is what
+        allowed a real bug to sit here undetected. The cached and
+        uncached paths agreeing *at one chunk size*, with dropout on, is
+        the separate and stronger property; see
+        ``TestGradientCachingWithDropout``.
+        """
+
         model, ids, mask = self._fixture()
 
         def gradients_at(chunk_size: int) -> dict[str, torch.Tensor]:
