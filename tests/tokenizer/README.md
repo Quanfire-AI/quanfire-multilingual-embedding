@@ -2,18 +2,18 @@
 
 > Tests for [`multilingual_embedding.tokenizer`](../../src/multilingual_embedding/tokenizer/README.md) — normalizers, pre-tokenizers, SentencePiece.
 
-**172 tests.** Run with `pytest tests/tokenizer -q`.
+**187 tests.** Run with `pytest tests/tokenizer -q`.
 
 ## Files
 
 | File | Covers |
 |---|---|
 | `conftest.py` | Shared fixtures, including a SentencePiece model trained once per module |
-| `test_normalizer.py` | Each normalizer and the composed pipeline |
-| `test_pretokenizer.py` | Each pre-tokenizer, with span correctness across scripts |
-| `test_encoding.py` | The `Encoding` container: length invariants, truncation, padding |
-| `test_tokenizer.py` | SentencePiece and word tokenizers, encode/decode round trips, persistence |
-| `test_trainer.py` | Training, artefact publication, and the two opposite `vocab_size` failures |
+| `test_pretokenizer.py` | Each pre-tokenizer and the registry, with span correctness across scripts |
+| `test_normalizer.py` | Each normalizer, the registry, and the composed pipeline |
+| `test_tokenizer.py` | SentencePiece and word tokenizers, encode-time normalisation, round trips, persistence |
+| `test_encoding.py` | The `Encoding` container: construction, `to_dict`, truncation, padding |
+| `test_trainer.py` | Training, staging and artefact publication, the two opposite `vocab_size` failures, normalizer application, the pre-tokenizer inapplicability report |
 
 ## What matters here
 
@@ -46,7 +46,29 @@ set — opposite problems with opposite fixes. A single generic message would te
 to shrink the vocabulary when they needed to grow it, so each is translated into a
 distinct `ConfigurationError`.
 
+**Normalizers must apply at training *and* encode time.** Applying them only at training
+would be worse than not applying them at all: the model learns pieces of normalised text
+while encode feeds it raw text, and the mismatch never raises — it surfaces as quietly
+degraded results. `TestSentencePieceNormalization` trains on a mixed-case corpus and
+asserts both halves.
+
+**An unhonourable setting must be reported, not dropped.** SentencePiece consumes a raw
+character stream by design, which is the property that lets one model serve scripts with
+no whitespace word boundaries — so there is nowhere to insert a framework pre-tokenizer.
+The setting is still legitimate for `WordTokenizer`, so the trainer cannot reject it; the
+unacceptable outcome is discarding it in silence. `TestPretokenizerIsReportedAsInapplicable`
+asserts a warning is logged, that it names the specific setting being ignored, that a
+bare-string spec (`"script"` rather than a mapping) is understood, and that the default
+whitespace pre-tokenizer stays silent — re-joining whitespace tokens on spaces is the
+identity here, so warning about it would train users to ignore the warning.
+
+**Staging must not reshape the corpus.** SentencePiece reads a line-per-sentence file, so
+a sentence containing an embedded newline would silently become two training examples.
+`TestStaging` asserts newlines are folded to spaces rather than split on, that blank
+sentences are skipped, and that the staging directory does not survive training — a
+leftover temporary corpus in the artefact directory would be shipped alongside the model.
+
 ## Speed
 
 The SentencePiece model is trained once per module via a fixture rather than per test,
-which keeps the whole group under two seconds despite exercising real model training.
+which keeps the whole group around one second despite exercising real model training.

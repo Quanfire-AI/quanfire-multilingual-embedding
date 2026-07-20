@@ -170,7 +170,6 @@ Han than for Latin.
 | `subsample_threshold` | `float` | `0.001` | Frequency above which tokens are randomly discarded. `0` disables | `>= 0` |
 | `batch_size` | `int` | `32` | Documented as "sentences per progress update" | `> 0` — **unused** |
 | `seed` | `int` | `42` | Seed for weight init and sampling | **None — not validated** |
-| `workers` | `int` | `1` | Reserved for future parallel training | `> 0` — **unused** |
 
 `window` is a maximum, not a fixed value: the effective window is redrawn uniformly
 from `[1, window]` per centre token, which weights nearer context more heavily without
@@ -183,11 +182,12 @@ of unrelated meanings. It is also why the trained vocabulary is smaller than
 `min_count: 2` yields 226 embedding rows.
 
 !!! note "Fields that are declared but not used"
-    - **`batch_size`** appears only in `base.py` (declaration, docstring, validation).
-      Nothing in `word2vec.py` or elsewhere reads it. The training loop processes one
-      sentence at a time and reports progress via tqdm.
-    - **`workers`** is documented as "reserved for future parallel training. Currently
-      informational" and is likewise never read. Training is single-threaded.
+    - **`batch_size`** and **`workers`** were once declared here, validated, and read
+      by nothing. Both have been removed rather than left documented as reserved: a
+      setting that silently does nothing reads as a tuning knob and invites someone to
+      spend an afternoon turning it. Naming either one now raises `TypeError` at
+      construction. (`compute.batch_size` is a different setting on a different section,
+      and it is genuinely read.)
     - **`seed`** is the one `EmbeddingConfig` field with no validation rule, so a
       negative value is accepted here even though `ExperimentConfig.seed` rejects one.
 
@@ -220,12 +220,16 @@ means pieces such as `▁cat` rather than `cat`.
 
 ## The precedence chain
 
-Four sources, each overriding the last:
+Five sources, each overriding the last:
 
 ```
-dataclass defaults  →  YAML/JSON file  →  QFME_ environment  →  --set overrides
-     lowest                                                        highest
+dataclass defaults  →  YAML/JSON file  →  compute profile  →  QFME_ environment  →  --set
+     lowest                                                                        highest
 ```
+
+A **compute profile** is a second file carrying the `compute` section — what the machine
+dictates rather than what the experiment decides. See
+[compute profiles](compute-profiles.md).
 
 Nested mappings merge recursively, so overriding `embedding.dimension` leaves the rest
 of the embedding section intact.
@@ -371,9 +375,7 @@ embedding:
   learning_rate: 0.025
   min_learning_rate: 0.0001
   subsample_threshold: 0.001
-  batch_size: 32
   seed: 42
-  workers: 1
 evaluation:
   top_k: 5
   similarity_dataset: null

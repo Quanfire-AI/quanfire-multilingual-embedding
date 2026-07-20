@@ -147,4 +147,4 @@ Consumed by `tokenizer/tokenizer.py` and `tokenizer/trainer.py` (which pins the 
 ## Tests
 - `tests/vocabulary/test_vocabulary.py` — **36 tests**, covering both `Vocabulary` and `VocabularyBuilder`.
 
-The pairing between these ids and the tokenizer is separately covered by `tests/tokenizer/test_trainer.py` (15 tests) and `tests/tokenizer/test_tokenizer.py` (33 tests), and end to end by `tests/integration/test_end_to_end.py`.
+The pairing between these ids and the tokenizer is separately covered by `tests/tokenizer/test_trainer.py` (23 tests) and `tests/tokenizer/test_tokenizer.py` (40 tests), and end to end by `tests/integration/test_end_to_end.py`.

@@ -102,6 +102,22 @@ next to the metrics. A metric without the settings that produced it cannot be co
 against anything, so the two are written together as `report.json` for machines and
 `report.md` for humans.
 
+## What this layer does not yet score
+
+`EmbeddingEvaluator` takes an `EmbeddingMatrix`. That is the right shape for the static
+model and the wrong one for the contextual encoder in `embedding/neural/`, which has no
+per-token table to read — the whole point of `TextEncoder` is that a vector is computed at
+call time. So while `metrics.py` already supplies the primitives a retrieval evaluation
+needs — `ndcg_at_k`, `mean_reciprocal_rank`, `recall_at_k` — nothing here wires them to an
+encoder, and there is no query-passage retrieval evaluator, no per-domain scoring and no
+cross-lingual retrieval measurement.
+
+The last of those is worth naming rather than leaving implicit, because
+`pipelines/search.py` documents the corresponding caveat: a shared multilingual vector
+space does not imply the languages are aligned within it. The honest way to settle that is
+to measure retrieval across languages, and this layer cannot do so today. `ROADMAP.md`
+carries it.
+
 ## Usage
 
 ```python
@@ -165,4 +181,4 @@ Only `pipelines` imports this package. Nothing below it may.
 
 `.venv/bin/python -m pytest tests/evaluation -q` reports **67 passed**. The evaluators are
 additionally exercised against real trained artefacts by
-`tests/integration/test_end_to_end.py` (25 tests).
+`tests/integration/test_end_to_end.py` (29 tests).

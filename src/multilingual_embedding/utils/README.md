@@ -148,7 +148,7 @@ The failed write leaving `"weights"` rather than `"half"` is the atomic guarante
 
 It **must not** import from `config`, `corpus`, `vocabulary`, `tokenizer`, `embedding`, `evaluation` or `pipelines`. All of those may import it, and `config` in particular depends on it heavily — every config validation rule is a `require_*` call, and `to_dict` / `from_dict` are `to_primitive` / `from_primitive`. Adding a domain import here would invert that relationship and create a cycle.
 
-One caveat when importing: `utils/__init__.py` re-exports every public function, but **not** `DEFAULT_DIGEST_SIZE`. Import it from `multilingual_embedding.utils.hashing` if you need it by name.
+`utils/__init__.py` re-exports every public name, `DEFAULT_DIGEST_SIZE` included, so the package root is enough for anything documented here.
 
 Two internal dependencies within the package are worth knowing: `io.py` imports from `filesystem.py` for `atomic_write_path` and `require_file`, and `hashing.py` imports `DEFAULT_ENCODING`. `serialization.py` imports numpy lazily inside `_numpy_to_primitive`, so the module stays usable where the array stack is not needed.
 

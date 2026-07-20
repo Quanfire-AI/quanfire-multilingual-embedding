@@ -28,7 +28,8 @@ vocabulary  the token to id mapping shared by tokenizer and model
    |
 tokenizer   normalisation, pre-tokenisation, subword model, encoding
    |
-embedding   word vectors, sentence vectors, similarity search
+embedding   the text-to-vector contract, word and sentence vectors,
+            the contextual encoder and its training, similarity search
    |
 evaluation  metrics, tokenizer and embedding scoring, reports
    |
@@ -46,9 +47,22 @@ pipelines   end-to-end training and semantic search workflows
 | [corpus](corpus/README.md) | The document tree, sentence segmentation, script and language detection, readers and writers, and streaming statistics. |
 | [vocabulary](vocabulary/README.md) | `Vocabulary`, `VocabularyBuilder` and the special-token block that every layer above indexes against. |
 | [tokenizer](tokenizer/README.md) | Normalizer pipeline, pre-tokenizers, the SentencePiece tokenizer and its trainer, and `Encoding`. |
-| [embedding](embedding/README.md) | Pure numpy skip-gram word2vec, the embedding matrix, sentence encoders and exact cosine search. |
+| [embedding](embedding/README.md) | The `TextEncoder` contract; numpy skip-gram word2vec, the embedding matrix and sentence encoders as the static baseline; a transformer encoder with contrastive training, LoRA and gradient caching under `embedding/neural/`; exact cosine search over either. |
 | [evaluation](evaluation/README.md) | Metric primitives, tokenizer and embedding evaluators, and the evaluation report. |
 | [pipelines](pipelines/README.md) | `TrainingPipeline` and `SemanticSearchPipeline`. |
+
+## One optional dependency
+
+Every layer above runs on the core dependencies — numpy, pandas, pyyaml, sentencepiece,
+tqdm. The single exception is `embedding/neural/`, which needs torch and is installed with
+`uv sync --extra neural`.
+
+The boundary is drawn deliberately rather than by accident. `embedding/__init__.py` does not
+import `neural`, so nothing pulls torch in transitively, and the corpus, tokenizer,
+vocabulary and evaluation layers stay a small install for callers that only need text
+preparation. Importing `multilingual_embedding.embedding.neural` without torch raises an
+`ImportError` naming the extra, rather than a bare `ModuleNotFoundError`. The layering rule
+below is unaffected: `neural` is part of the `embedding` layer and obeys the same ordering.
 
 ## The corpus tree
 
@@ -72,8 +86,8 @@ Everything else is reached through its own package, which keeps this module's im
 cost proportional to what a caller actually uses.
 
 `cli.py` is the entry point for the `qfme` console script, declared in `pyproject.toml`
-as `qfme = "multilingual_embedding.cli:main"`. Its subcommands are `stats`, `train`,
-`search` and `evaluate`.
+as `qfme = "multilingual_embedding.cli:main"`. Its subcommands are `stats`, `validate`,
+`train`, `search` and `evaluate`.
 
 `py.typed` marks the package as typed under PEP 561. Without it, mypy in a downstream
 project silently ignores every annotation this framework provides;

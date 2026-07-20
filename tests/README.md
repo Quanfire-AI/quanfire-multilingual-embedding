@@ -1,6 +1,6 @@
 # tests
 
-> The test suite. 963 tests, 94% statement coverage, mirroring the source layout.
+> The test suite. 1074 tests, 94% statement coverage, mirroring the source layout.
 
 ## Purpose
 
@@ -14,7 +14,10 @@ failure appears:
    drifting between two layers that each pass their own unit tests.
 3. **Architecture tests** (`test_architecture.py`) parse the source and enforce the
    layering rule. Nothing else in the suite would notice a convenience import that
-   quietly introduces a cycle.
+   quietly introduces a cycle. Two of its cases also enforce the encoder contract
+   structurally: every registered encoder must satisfy `TextEncoder`, and the search
+   pipeline must build without an embedding matrix. Those are architectural rather than
+   behavioural, because a contextual encoder has no per-token table to hand over.
 
 ## Layout
 
@@ -22,15 +25,15 @@ failure appears:
 |---|---|---|
 | [`common/`](common/README.md) | 20 | Spans, enums, type aliases, constants, version |
 | [`core/`](core/README.md) | 27 | Registry, factory, logging, exception context |
-| [`config/`](config/README.md) | 30 | Config validation, merging, precedence, persistence |
+| [`config/`](config/README.md) | 87 | Config validation, merging, precedence, compute profiles, persistence |
 | [`utils/`](utils/README.md) | 61 | Validation, hashing, filesystem, I/O, serialization |
-| [`corpus/`](corpus/README.md) | 219 | Scripts, segmentation, nodes, readers, statistics, filters |
+| [`corpus/`](corpus/README.md) | 395 | Scripts, segmentation, nodes, readers, statistics, auditing, the 22 scheduled languages |
 | [`vocabulary/`](vocabulary/README.md) | 36 | Token/id mapping, special tokens, builder, persistence |
-| [`tokenizer/`](tokenizer/README.md) | 172 | Normalizers, pre-tokenizers, encoding, training, round trips |
-| [`embedding/`](embedding/README.md) | 76 | Matrix, word2vec, sentence encoders, similarity index |
+| [`tokenizer/`](tokenizer/README.md) | 187 | Normalizers, pre-tokenizers, encoding, training, round trips |
+| [`embedding/`](embedding/README.md) | 148 | Matrix, word2vec, sentence encoders, index, contextual encoder, LoRA, gradient caching |
 | [`evaluation/`](evaluation/README.md) | 67 | Metric primitives, evaluators, report rendering |
-| [`integration/`](integration/README.md) | 25 | End-to-end training, search and CLI |
-| `test_architecture.py` | 14 | Layering rule, acyclic import graph, `py.typed` marker |
+| [`integration/`](integration/README.md) | 29 | End-to-end training, search and CLI |
+| `test_architecture.py` | 16 | Layering rule, acyclic import graph, `py.typed` marker, encoder contract |
 
 `conftest.py` holds shared fixtures, including the multilingual sample texts used
 throughout. Those are real sentences in each script rather than placeholder text,
@@ -41,15 +44,17 @@ behave differently on genuine text.
 
 ```bash
 pytest                      # everything
-pytest -m "not slow"        # skip the model-training integration tests (763 tests)
+pytest -m "not slow"        # skip the model-training integration tests (1040 tests)
 pytest --cov                # with coverage report
 pytest tests/corpus -q      # one package
 pytest -k segmentation      # by name
 ```
 
 Integration tests are marked `slow` because they train models. They still complete in
-about three seconds, so there is rarely a reason to skip them locally; the marker
-exists so a fast inner loop is available when iterating on a single module.
+about five seconds, so there is rarely a reason to skip them locally; the marker
+exists so a fast inner loop is available when iterating on a single module. `slow` is
+the only marker that deselects anything — all 29 integration tests carry it, and nothing
+else does.
 
 ## Conventions
 
@@ -69,13 +74,20 @@ a regression test: `test_devanagari_words_counted_correctly` guards the fix for
 Python's `\w` not matching Unicode combining marks, which fragmented the phrase into
 five pieces and silently discarded the marks themselves.
 
-**Failure paths are tested as carefully as success paths.** Roughly a third of the
-suite asserts that invalid input raises the right typed exception carrying the right
-context, because a framework that fails obscurely is hard to operate.
+**Failure paths are tested as carefully as success paths.** Over 140 cases assert that
+invalid input raises the right typed exception carrying the right context, because a
+framework that fails obscurely is hard to operate. The CLI's failure paths are asserted
+on exit status rather than exception type, since a shell script can only see the former.
 
 **Tests are fast and hermetic.** Every test that touches disk uses pytest's `tmp_path`.
 Nothing reaches the network. Model-training tests use deliberately small dimensions and
 few epochs.
+
+**Optional dependencies skip rather than fail.** The contextual-encoder tests in
+`embedding/` require torch, which lives behind the `neural` extra. They use
+`pytest.importorskip`, so a checkout with only the core dependencies installed still
+runs green — it simply runs fewer tests. The counts in the table above are for a full
+install; without the extra, `embedding/` collects fewer.
 
 ## Adding tests
 

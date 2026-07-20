@@ -6,7 +6,7 @@ Developing on a laptop and training on a GPU box, from one branch.
 
 ## Why not a branch per machine
 
-The tempting arrangement is a `cpu` branch for the laptop and a `gpu` branch for the
+The tempting arrangement is one branch for the development machine and another for the
 training box. It does not survive contact with use.
 
 Branches diverge. Every fix lands twice, forever, and the divergence is silent — you lose
@@ -32,7 +32,7 @@ A profile supplies only the second. The same experiment file then runs unchanged
 boxes, and two runs stay comparable.
 
 ```bash
-qfme train --config experiments/indic.yaml --profile configs/mac.yaml
+qfme train --config experiments/indic.yaml --profile configs/cpu.yaml
 qfme train --config experiments/indic.yaml --profile configs/gpu.yaml
 ```
 
@@ -50,8 +50,8 @@ changes the result, because in contrastive training it sets how many negatives e
 is contrasted against. A batch of 16 asks the model to pick the right passage from 16
 candidates; a batch of 256 makes it pick from 256, which is a materially harder and more
 useful task. It is therefore the one profile setting that is *not* result-neutral, and it
-is recorded alongside the artefacts for that reason. A laptop profile trains a worse model
-on purpose.
+is recorded alongside the artefacts for that reason. The `cpu` profile trains a worse
+model on purpose.
 
 ## The settings
 
@@ -61,7 +61,6 @@ on purpose.
 | `precision` | `fp32`, or `bf16` for mixed precision. |
 | `batch_size` | Pairs per step, and the negative count. See above. |
 | `gradient_checkpoint_chunk` | Gradient-caching chunk. `0` disables. Peak memory follows the chunk rather than the batch, which is what makes a large batch fit. Mathematically exact either way. |
-| `workers` | Data loading processes. `0` is right on a laptop and usually wrong on a training box. |
 
 **Only bf16 is offered, never fp16.** bf16 has the same exponent range as fp32, so it
 needs no loss scaling — the `GradScaler` machinery fp16 requires exists to stop small
@@ -72,6 +71,18 @@ badly, so it is rejected at config load.
 **bf16 is ignored on Apple Metal**, with a warning. MPS autocast support has been
 incomplete across torch versions, and silently training in a precision nobody asked for is
 worse than declining the request loudly.
+
+## The profiles
+
+`configs/cpu.yaml` encodes "no CUDA-class GPU, small memory budget" — as true of a Windows
+or Linux box without one as of a Mac. Its `device` is `auto` rather than `cpu` despite the
+name, so that Apple Silicon still picks up Metal; the file is named for the constraint, not
+for the device that gets chosen. Pin `cpu` explicitly for a reproducibility run, since GPU
+reductions are not bit-deterministic.
+
+`configs/gpu.yaml` is sized for a single 16GB NVIDIA card. The numbers are a starting
+point, not a measurement — VRAM use depends on model width, depth and sequence length,
+none of which the file knows.
 
 ## Validating a profile on the wrong machine
 
@@ -99,5 +110,7 @@ one GPU, not of this design; a branch would not have helped.
 ## Notes on WSL2
 
 The Windows filesystem is reachable at `/mnt/c`, and crossing that boundary is slow enough
-to dominate a training run. Keep the corpus on the Linux side, under `~`. Raising `workers`
-will not save a pipeline that is reading across the mount.
+to dominate a training run. Keep the corpus on the Linux side, under `~`.
+
+There is deliberately no `workers` setting. Training is single-process, so one would read
+as a tuning knob and do nothing.

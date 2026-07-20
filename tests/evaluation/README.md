@@ -9,7 +9,7 @@
 | File | Covers |
 |---|---|
 | `test_metrics.py` | The metric primitives: cosine, ranking metrics, accuracy, correlation |
-| `test_evaluators.py` | Tokenizer and embedding evaluators, dataset loading, report rendering |
+| `test_evaluators.py` | Tokenizer and embedding evaluators, per-language fairness, dataset loading, report rendering |
 
 ## What matters here
 

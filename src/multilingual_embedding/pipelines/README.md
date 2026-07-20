@@ -16,7 +16,7 @@ embedding trainer, where it would make either of them unusable outside a full ru
 | Module | Responsibility |
 |---|---|
 | `training.py` | `TrainingPipeline`, the `TrainingResult` record of everything one run produced, and the `train` convenience wrapper. |
-| `search.py` | `SemanticSearchPipeline` with its `from_directory` / `from_config` loaders, and the `SearchHit` result record. |
+| `search.py` | `SemanticSearchPipeline` over any `TextEncoder`, with its `from_static` / `from_directory` / `from_config` constructors, and the `SearchHit` result record. |
 
 ## Key design decisions
 
@@ -61,12 +61,27 @@ further down, with a message about vocabulary size rather than about the filter.
 passes scoring requires, and the report records why the metrics are absent by appending
 a note rather than by writing zeros.
 
-**`SemanticSearchPipeline.from_directory` deliberately loads from disk.** It could
-accept in-memory objects from a `TrainingResult`, and the constructor still does. But
-`from_directory` reads `tokenizer/` and `embedding/` back off disk because that is the
-path a deployed service takes, and it is the path that needs exercising. It raises
-`ResourceNotFoundError` naming which of the two subdirectories is missing, rather than
-failing later on a partial load.
+**`SemanticSearchPipeline` depends on `TextEncoder`, not on `EmbeddingMatrix`.** This is
+the decision that keeps the serving path open to the contextual encoder in
+`embedding/neural/`. A matrix is a `vocabulary × dimension` table, which a transformer
+does not have and cannot be given: it computes a vector for the whole input at call time.
+Had the pipeline been written against the matrix, serving a contextual model would have
+meant rewriting everything downstream of it — not for quality reasons but for shape ones.
+
+The consequence is visible in the constructor: `encoder` is required, while `matrix` and
+`tokenizer` are keyword-only and default to `None`. Both are `None` for a contextual model,
+whose tokenizer is internal to it and which has no table. `similar_tokens` is the one method
+that genuinely needs the matrix — inspecting word neighbours is a static-model question —
+and it returns an empty list rather than raising when there is none. `from_static` builds
+the static combination and defaults the encoder to `MeanPoolingEncoder` over the matrix.
+
+**`from_directory` deliberately loads from disk.** It could accept in-memory objects from a
+`TrainingResult`, and the constructor still does. But `from_directory` reads `tokenizer/`
+and `embedding/` back off disk because that is the path a deployed service takes, and it is
+the path that needs exercising. It raises `ResourceNotFoundError` naming which of the two
+subdirectories is missing, rather than failing later on a partial load. It builds the static
+path specifically; a contextual encoder is loaded with `NeuralTextEncoder.load` and passed
+to the constructor directly.
 
 **Zero vectors are skipped rather than indexed.** `index` drops any sentence that encodes
 to an all-zero vector — every token out of vocabulary — because such a vector matches
@@ -83,6 +98,21 @@ extent the training corpus contained parallel or comparable content. Without tha
 the languages occupy separate regions of the same space and cross-lingual retrieval will
 not work, however shared the space is. A shared vector space does not imply alignment;
 the way to know is to measure retrieval across languages, not to assume it.
+
+## The asymmetry between the two pipelines
+
+`SemanticSearchPipeline` already serves both kinds of model. `TrainingPipeline` trains only
+the static one: `_train_embeddings` constructs a `Word2Vec` and nothing in this package
+touches `embedding.neural`, so `ContrastiveTrainer` is driven directly rather than through
+an orchestrated run.
+
+That asymmetry is deliberate for now and not permanent. Contrastive training consumes
+`TextPair`s, and this framework has no pair miner — labelled query-passage pairs will not
+exist for the domains this is aimed at, so they have to be manufactured from document
+structure. Wiring a contrastive stage into `run` before there is anything to feed it would
+produce a stage with no input. `ROADMAP.md` covers the mining work and the `qfme` command
+that will front it; the honest statement until then is that a contextual model is trained by
+calling the trainer, and served by handing the result to `SemanticSearchPipeline`.
 
 ## Usage
 
@@ -173,5 +203,5 @@ There is no `tests/pipelines/` directory. Both pipelines are covered end to end 
 covers loading from a directory, indexing and querying.
 
 `.venv/bin/python -m pytest tests/integration/test_end_to_end.py -q` reports
-**25 passed**. The rule that nothing below may import this package is enforced by
-`tests/test_architecture.py` (14 tests).
+**29 passed**. The rule that nothing below may import this package is enforced by
+`tests/test_architecture.py` (16 tests).

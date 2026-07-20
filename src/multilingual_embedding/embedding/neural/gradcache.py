@@ -27,6 +27,20 @@ the cost of a second forward pass:
 The gradients this produces are mathematically identical to those from a
 single large batch. It is not an approximation.
 
+That identity has a precondition which is easy to miss and silent when
+violated: **the two passes must encode each chunk identically.** Any
+randomness inside the model — dropout above all — would otherwise draw
+different masks the second time, and the cached gradient would then be
+applied to activations it was never computed for. Nothing raises. The
+gradients are simply wrong, and wrong by a wide margin rather than a
+rounding margin.
+
+So the random state is captured per chunk during the first pass and
+restored before that chunk is re-encoded in the second. This module is
+correct with dropout enabled; without that handling it would be correct
+only at ``dropout=0``, which is exactly the configuration a test is most
+likely to use.
+
 The cost is close to one extra forward pass, so roughly 1.5 to 1.7 times
 the wall-clock of an unconstrained batch of the same size — which would
 not fit at all.
@@ -35,6 +49,7 @@ not fit at all.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from typing import NamedTuple
 
 import torch
 from torch import Tensor, nn
@@ -52,6 +67,51 @@ EncodeChunk = Callable[[Sequence[int]], Tensor]
 
 # Given the full stacked vectors, produce a scalar loss.
 LossFromVectors = Callable[[Tensor], Tensor]
+
+
+class _RandomState(NamedTuple):
+    """
+    Enough random state to replay a forward pass exactly.
+
+    CPU state is always captured. The CUDA generator is captured only
+    when the model is on a CUDA device, because reading it forces
+    initialisation of a context that may not exist.
+    """
+
+    cpu: Tensor
+
+    cuda: Tensor | None
+
+
+def _device_of(model: nn.Module) -> torch.device:
+    """
+    Where the model's parameters live.
+
+    Falls back to CPU for a model with no parameters, which is only
+    really a test construction but should not raise here.
+    """
+
+    for parameter in model.parameters():
+        return parameter.device
+
+    return torch.device("cpu")
+
+
+def _capture_random_state(device: torch.device) -> _RandomState:
+    """Record the generator state driving dropout."""
+
+    cuda = torch.cuda.get_rng_state(device) if device.type == "cuda" else None
+
+    return _RandomState(cpu=torch.get_rng_state(), cuda=cuda)
+
+
+def _restore_random_state(state: _RandomState, device: torch.device) -> None:
+    """Rewind the generators to a captured point."""
+
+    torch.set_rng_state(state.cpu)
+
+    if state.cuda is not None:
+        torch.cuda.set_rng_state(state.cuda, device)
 
 
 def cached_contrastive_backward(
@@ -119,10 +179,23 @@ def cached_contrastive_backward(
         positions[start : start + chunk_size] for start in range(0, len(positions), chunk_size)
     ]
 
+    device = _device_of(model)
+
     # Pass one: vectors only. The graph for each chunk is discarded as
     # soon as the chunk is done, which is the whole point.
+    #
+    # The random state is recorded per chunk, not once for the batch,
+    # because the second pass re-encodes chunks one at a time and each
+    # must resume from exactly the state its first encoding began with.
+    states: list[_RandomState] = []
+
     with torch.no_grad():
-        cached = [encode(chunk) for chunk in chunks]
+        cached = []
+
+        for chunk in chunks:
+            states.append(_capture_random_state(device))
+
+            cached.append(encode(chunk))
 
     stacked = torch.cat(cached, dim=0).detach().requires_grad_(True)
 
@@ -144,7 +217,12 @@ def cached_contrastive_backward(
     # Each chunk's activations exist only while that chunk is processed.
     offset = 0
 
-    for chunk in chunks:
+    for chunk, state in zip(chunks, states, strict=True):
+        # Rewind to the state this chunk was first encoded under, so
+        # dropout draws the same mask and the cached gradient lands on
+        # the activations it was computed for.
+        _restore_random_state(state, device)
+
         vectors = encode(chunk)
 
         incoming = vector_gradients[offset : offset + len(chunk)]

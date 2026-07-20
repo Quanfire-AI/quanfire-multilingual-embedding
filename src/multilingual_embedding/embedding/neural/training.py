@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterator, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -38,9 +39,10 @@ from torch.nn import functional as F
 from multilingual_embedding.config.base import ComputeConfig
 from multilingual_embedding.core.exceptions import ValidationError
 from multilingual_embedding.core.logging import get_logger
-from multilingual_embedding.utils.validation import require_positive
+from multilingual_embedding.utils.validation import require_non_negative, require_positive
 
 from .encoder import NeuralTextEncoder, autocast_for
+from .gradcache import cached_contrastive_backward
 
 __all__ = ["ContrastiveConfig", "ContrastiveTrainer", "TextPair", "TrainingReport"]
 
@@ -110,6 +112,13 @@ class ContrastiveConfig:
         experiment-shaped: it belongs to whichever box the run lands on,
         which is why it is normally supplied by a compute profile rather
         than written into an experiment by hand.
+
+    gradient_checkpoint_chunk:
+        Examples encoded at once under gradient caching. ``0`` disables
+        it and encodes each batch in one pass. When set, peak memory
+        follows the chunk rather than the batch, which is what makes a
+        batch size the card could not otherwise hold reachable. The
+        gradients are identical either way.
     """
 
     epochs: int = 3
@@ -130,6 +139,8 @@ class ContrastiveConfig:
 
     precision: str = "fp32"
 
+    gradient_checkpoint_chunk: int = 0
+
     def __post_init__(self) -> None:
         require_positive(self.epochs, name="epochs")
 
@@ -144,6 +155,11 @@ class ContrastiveConfig:
                 "warmup_ratio must lie in [0, 1)",
                 warmup_ratio=self.warmup_ratio,
             )
+
+        require_non_negative(
+            self.gradient_checkpoint_chunk,
+            name="gradient_checkpoint_chunk",
+        )
 
         # Checked here as well as in `autocast_for`, so a typo in a
         # profile fails when the config is built rather than after the
@@ -187,6 +203,7 @@ class ContrastiveConfig:
         return cls(
             batch_size=compute.batch_size,
             precision=compute.precision,
+            gradient_checkpoint_chunk=compute.gradient_checkpoint_chunk,
             **settings,
         )
 
@@ -334,19 +351,31 @@ class ContrastiveTrainer:
             epoch_losses: list[float] = []
 
             for batch in self._batches(pairs, generator):
-                # The forward pass runs under autocast; the backward pass
-                # deliberately does not. Autograd replays each operation
-                # in the dtype autocast chose for it, so wrapping the
-                # backward would be redundant at best, and torch
-                # documents it as unsupported.
-                with precision:
-                    loss = self._step(model, batch, device)
-
+                # Zeroed before the step rather than after the forward,
+                # because gradient caching backpropagates internally and
+                # accumulates into whatever is already there.
                 optimizer.zero_grad(set_to_none=True)
 
-                # torch's Tensor.backward carries no annotations, so a
-                # strict checker sees an untyped call in typed context.
-                loss.backward()  # type: ignore[no-untyped-call]
+                if config.gradient_checkpoint_chunk:
+                    loss = self._cached_step(
+                        model,
+                        batch,
+                        device,
+                        precision,
+                        config.gradient_checkpoint_chunk,
+                    )
+                else:
+                    # The forward pass runs under autocast; the backward
+                    # pass deliberately does not. Autograd replays each
+                    # operation in the dtype autocast chose for it, so
+                    # wrapping the backward would be redundant at best,
+                    # and torch documents it as unsupported.
+                    with precision:
+                        loss = self._step(model, batch, device)
+
+                    # torch's Tensor.backward carries no annotations, so a
+                    # strict checker sees an untyped call in typed context.
+                    loss.backward()  # type: ignore[no-untyped-call]
 
                 nn.utils.clip_grad_norm_(model.parameters(), config.max_gradient_norm)
 
@@ -417,6 +446,60 @@ class ContrastiveTrainer:
         targets = torch.arange(len(batch), device=device)
 
         return F.cross_entropy(logits, targets)
+
+    def _cached_step(
+        self,
+        model: nn.Module,
+        batch: Sequence[TextPair],
+        device: torch.device,
+        precision: AbstractContextManager[None],
+        chunk_size: int,
+    ) -> Tensor:
+        """
+        One InfoNCE step whose batch is larger than memory allows.
+
+        Identical in result to :meth:`_step`, and it backpropagates
+        rather than returning a tensor to backpropagate — gradient
+        caching has to own the backward pass to do its job.
+
+        Anchors and positives are laid out as one list, anchors first, so
+        that chunk boundaries are ordinary slices and the stacked vectors
+        split back into halves by position.
+
+        Normalisation happens inside the loss rather than inside the
+        encode, because gradient caching caches raw model outputs and
+        takes the loss gradient with respect to those. Normalising early
+        would put the operation on the wrong side of the cache.
+        """
+
+        texts = [pair.anchor for pair in batch] + [pair.positive for pair in batch]
+
+        def encode(chunk: Sequence[int]) -> Tensor:
+            # internal to the encoder; the trainer is its only other caller.
+            ids, mask = self._encoder._prepare([texts[index] for index in chunk])
+
+            with precision:
+                # nn.Module.__call__ is untyped, so the result widens to Any.
+                vectors: Tensor = model(ids, mask)
+
+            return vectors
+
+        def loss_fn(vectors: Tensor) -> Tensor:
+            normalised = F.normalize(vectors, dim=-1)
+
+            anchor_vectors, positive_vectors = normalised.chunk(2, dim=0)
+
+            logits = anchor_vectors @ positive_vectors.T / self._config.temperature
+
+            return F.cross_entropy(logits, torch.arange(len(batch), device=device))
+
+        return cached_contrastive_backward(
+            model,
+            range(len(texts)),
+            encode,
+            loss_fn,
+            chunk_size=chunk_size,
+        )
 
     def _batches(
         self,

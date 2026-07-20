@@ -415,10 +415,12 @@ class ComputeConfig:
         rather than the batch, which is what allows a batch size the
         card could not otherwise hold. Mathematically exact either way.
 
-    workers:
-        Data loading processes. ``0`` loads in the main process, which
-        is the right choice on a laptop and usually wrong on a training
-        box.
+
+    Note what is deliberately absent. There is no ``workers`` setting,
+    because training is single-process and nothing would read one. A
+    config field that silently does nothing is worse than a missing
+    one — it reads as a tuning knob and invites someone to spend an
+    afternoon turning it. It belongs here the day a data loader does.
     """
 
     device: str = "auto"
@@ -429,8 +431,6 @@ class ComputeConfig:
 
     gradient_checkpoint_chunk: int = 0
 
-    workers: int = 0
-
     def __post_init__(self) -> None:
         require_positive(self.batch_size, name="batch_size")
 
@@ -438,8 +438,6 @@ class ComputeConfig:
             self.gradient_checkpoint_chunk,
             name="gradient_checkpoint_chunk",
         )
-
-        require_non_negative(self.workers, name="workers")
 
         if self.precision not in _PRECISIONS:
             raise ConfigurationError(

@@ -28,7 +28,7 @@ compute:
   # Raise it if VRAM is spare — fewer, larger chunks run faster.
   gradient_checkpoint_chunk: 32
 
-  # WSL2 shares the Windows filesystem, and crossing that boundary is
-  # slow. Keep the corpus on the Linux side of the mount, under ~, rather
-  # than /mnt/c, or this setting will not save you.
-  workers: 4
+# Note: no `workers` setting. Training is single-process, so one would do
+# nothing. Under WSL2 the thing that actually costs you is the Windows
+# filesystem boundary — keep the corpus on the Linux side, under ~,
+# rather than /mnt/c.

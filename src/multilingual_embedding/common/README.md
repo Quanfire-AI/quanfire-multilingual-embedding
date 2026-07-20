@@ -96,7 +96,7 @@ Note `overlaps` and `touches` disagreeing on the same pair: that is the half-ope
 
 `tests/test_architecture.py::test_foundation_layers_have_no_internal_dependencies` asserts this directly, by parsing the source and requiring that the set of framework imports made from `common` is empty.
 
-One caveat when importing: `common/__init__.py` re-exports the constants, enums, type aliases and `__version__`, but **not** `Span`. Import it from its module, `multilingual_embedding.common.span`.
+`common/__init__.py` re-exports everything public — the constants, both enums, the type aliases, `Span` and `__version__` — so `from multilingual_embedding.common import Span` and the fully qualified `multilingual_embedding.common.span` both work.
 
 ## Tests
 

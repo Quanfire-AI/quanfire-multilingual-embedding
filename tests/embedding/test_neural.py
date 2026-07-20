@@ -518,3 +518,95 @@ class TestPrecision:
     def test_an_invalid_precision_is_caught_when_the_config_is_built(self) -> None:
         with pytest.raises(ValidationError):
             ContrastiveConfig(precision="fp16")
+
+
+class TestGradientCachingInTheTrainer:
+    """
+    The trainer's use of gradient caching, which is what makes the GPU
+    profile's batch size reachable.
+
+    Worth its own tests because the wiring is easy to get subtly wrong in
+    ways that still train: zeroing gradients at the wrong point, or
+    normalising on the wrong side of the cache.
+    """
+
+    def _pairs(self) -> list[TextPair]:
+        words = ["rain", "storm", "cloud", "wind", "thunder", "drizzle"]
+
+        return [
+            TextPair(f"{words[i % 6]} {words[(i + 2) % 6]}", f"{words[(i + 2) % 6]} today")
+            for i in range(16)
+        ]
+
+    def test_caching_trains_the_same_model_as_not_caching(self) -> None:
+        """
+        The claim gradient caching makes: same result, less memory.
+
+        Dropout is off here deliberately. Chunked encoding draws
+        different dropout masks than unchunked — eight rows in one call
+        is not eight calls of one row — so with dropout on, the two runs
+        could not agree however correct the implementation. That property
+        is covered separately, against a reference that shares the
+        chunking.
+        """
+
+        pairs = self._pairs()
+
+        def train(chunk: int) -> list[float]:
+            encoder = build_encoder(dropout=0.0)
+
+            report = ContrastiveTrainer(
+                encoder,
+                ContrastiveConfig(
+                    epochs=3,
+                    batch_size=8,
+                    learning_rate=3e-3,
+                    seed=1,
+                    gradient_checkpoint_chunk=chunk,
+                ),
+            ).train(pairs)
+
+            return report.losses
+
+        plain = train(0)
+
+        cached = train(4)
+
+        for epoch, (expected, found) in enumerate(zip(plain, cached, strict=True)):
+            assert found == pytest.approx(expected, abs=1e-4), (
+                f"epoch {epoch}: caching changed the loss, {expected} vs {found}"
+            )
+
+    def test_caching_still_learns(self) -> None:
+        encoder = build_encoder(dropout=0.0)
+
+        report = ContrastiveTrainer(
+            encoder,
+            ContrastiveConfig(
+                epochs=6,
+                batch_size=8,
+                learning_rate=3e-3,
+                seed=1,
+                gradient_checkpoint_chunk=2,
+            ),
+        ).train(self._pairs())
+
+        assert report.improved, f"cached loss did not fall: {report.losses}"
+
+    def test_a_chunk_larger_than_the_batch_is_harmless(self) -> None:
+        """Degenerates to a single chunk rather than failing."""
+
+        encoder = build_encoder(dropout=0.0)
+
+        report = ContrastiveTrainer(
+            encoder,
+            ContrastiveConfig(
+                epochs=2,
+                batch_size=8,
+                learning_rate=3e-3,
+                seed=1,
+                gradient_checkpoint_chunk=1024,
+            ),
+        ).train(self._pairs())
+
+        assert report.steps > 0

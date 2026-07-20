@@ -18,6 +18,8 @@ would be invisible against the noise of training.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import pytest
 
 torch = pytest.importorskip("torch", reason="requires the neural extra")
@@ -465,3 +467,96 @@ class TestTogether:
         assert with_gradients
 
         assert all(".lora_down." in n or ".lora_up." in n for n in with_gradients), with_gradients
+
+
+class TestGradientCachingWithDropout:
+    """
+    The exactness claim, under the condition that actually breaks it.
+
+    Every other gradient-caching test builds its model with
+    ``dropout=0.0``. That is the one setting under which the claim holds
+    for free, because the two passes cannot disagree if nothing is
+    random. Real encoders default to ``dropout=0.1``.
+
+    Gradient caching encodes each chunk twice. Without the random state
+    being rewound between the passes, the second draws different dropout
+    masks, and the cached vector gradient is then applied to activations
+    it was never computed for. Nothing raises; the gradients are simply
+    wrong, and measured wrong by about 11.3 absolute rather than by a
+    rounding margin.
+    """
+
+    def _model(self) -> nn.Module:
+        torch.manual_seed(0)
+
+        return nn.Sequential(nn.Linear(8, 8), nn.Dropout(0.3), nn.Linear(8, 8))
+
+    def _loss(self, vectors: torch.Tensor) -> torch.Tensor:
+        anchors, positives = vectors.chunk(2, dim=0)
+
+        anchors = F.normalize(anchors, dim=-1)
+
+        positives = F.normalize(positives, dim=-1)
+
+        return F.cross_entropy(anchors @ positives.T / 0.05, torch.arange(len(anchors)))
+
+    def test_matches_the_uncached_gradient_with_dropout_on(self) -> None:
+        """
+        The reference keeps every chunk's graph alive and backpropagates
+        once. It therefore sees the same dropout masks as gradient
+        caching's first pass, which makes it the true gradient of the
+        loss that was actually computed.
+
+        Comparing against an *unchunked* run would be the wrong test:
+        dropout over eight rows in one call draws a different mask than
+        eight calls of one row, so chunk sizes cannot agree with each
+        other by construction. What must agree is cached against uncached
+        at the same chunk size.
+        """
+
+        model = self._model()
+
+        data = torch.randn(8, 8)
+
+        def encode(chunk: Sequence[int]) -> torch.Tensor:
+            return model(data[list(chunk)])
+
+        def gradients(chunk_size: int, *, cached: bool) -> list[torch.Tensor]:
+            torch.manual_seed(42)
+
+            model.zero_grad(set_to_none=True)
+
+            if cached:
+                cached_contrastive_backward(
+                    model, range(8), encode, self._loss, chunk_size=chunk_size
+                )
+            else:
+                positions = list(range(8))
+
+                chunks = [
+                    positions[start : start + chunk_size] for start in range(0, 8, chunk_size)
+                ]
+
+                self._loss(torch.cat([encode(chunk) for chunk in chunks], dim=0)).backward()
+
+            return [
+                parameter.grad.clone()
+                for parameter in model.parameters()
+                if parameter.grad is not None
+            ]
+
+        for chunk_size in (1, 2, 4, 8):
+            reference = gradients(chunk_size, cached=False)
+
+            actual = gradients(chunk_size, cached=True)
+
+            worst = max(
+                (expected - found).abs().max().item()
+                for expected, found in zip(reference, actual, strict=True)
+            )
+
+            assert worst < 1e-5, (
+                f"gradient caching diverged at chunk_size={chunk_size} with dropout "
+                f"enabled: {worst:.3e}. The random state is not being restored "
+                f"between the two encoding passes."
+            )

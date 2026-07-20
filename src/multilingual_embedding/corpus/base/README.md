@@ -22,7 +22,7 @@
 
 **Container nodes store their own `text` rather than deriving it from their children.** `ContainerNode` has both `text` (inherited from `TextNode`) and `children`, and the two are redundant views of the same content — almost. The material *between* children is not: whitespace, punctuation and markup separating one sentence from the next are part of the source and are covered by the parent's `text` but by no child's span. Deriving `text` by joining `child_texts()` would silently discard it, and a document could not survive a round trip through segmentation unchanged. `offsets.invert_spans` recovers that between-material precisely because it is still there to recover. The cost of storing both is that they can drift apart, which is what the next decision addresses.
 
-**`verify_children()` checks the two views agree.** It walks the children in order against the parent's `text` and raises `CorpusError` on the first inconsistency. There are three distinct failure modes, each with its own message and its own meaning:
+**`verify_children()` checks the two views agree.** It walks the children in order against the parent's `text` and raises `CorpusError` on the first inconsistency. Every one of the three carries the offending `child_index` and the `node` type it was found on, because the same message on a `Sentence` and on a `Document` points at different bugs. The three failure modes each have their own message and their own meaning:
 
 - *"Child span falls outside parent text"* — a child's span starts below zero or ends past `len(self.text)`. This almost always means a child was built with an absolute offset where a relative one was expected, or the parent's text was replaced with a shorter string after segmentation.
 - *"Child spans overlap or are out of order"* — a child starts before the previous child ended. A segmenter emitted units that are not a partition, or children were appended out of document order. `offsets.spans_are_ordered` tests the same property on a bare span list.
@@ -67,7 +67,7 @@ character_count: 13 is_blank: False
 language: hi
 child_texts: ['नमस्ते', 'दुनिया']
 verify_children: ok
-CorpusError: Child text does not match the slice its span designates (actual='दुनिया', child_index=1, expected=' दुनिय')
+CorpusError: Child text does not match the slice its span designates (actual='दुनिया', child_index=1, expected=' दुनिय', node='Sentence')
 ```
 
 The expected slice begins with the separating space — exactly the kind of one-character drift the diagnostic exists to make visible. Note also that `character_count` is 13 for two six-character words: the Devanagari text counts as Unicode codepoints, combining marks included.
@@ -80,4 +80,4 @@ Nothing below the corpus layer may import it. Within the corpus layer it is impo
 ## Tests
 - `tests/corpus/base/test_text_node.py` — 5 tests.
 
-`ContainerNode.verify_children` and the node hierarchy as a whole are covered more heavily through the concrete classes, chiefly in `tests/corpus/test_nodes.py` (22 tests) and `tests/corpus/test_corpus.py` (19 tests). The whole `tests/corpus` tree is 196 tests.
+`ContainerNode.verify_children` and the node hierarchy as a whole are covered more heavily through the concrete classes, chiefly in `tests/corpus/test_nodes.py` (22 tests) and `tests/corpus/test_corpus.py` (19 tests). The whole `tests/corpus` tree is 395 tests.

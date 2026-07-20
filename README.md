@@ -1,15 +1,20 @@
 # QuanFire Multilingual Embedding
 
-**A production-grade framework for turning multilingual text into searchable embeddings.**
+**QuanFire's own embedding models: corpus in, trained embedding model out.**
 
-Raw text in, semantic search out — with the corpus handling, tokenization, vocabulary
-management and evaluation in between built to be inspected, configured and reproduced.
+Turns a multilingual corpus into meaningful vectors — generic, or adapted to a specific
+domain — with the corpus handling, tokenization, vocabulary management, training and
+evaluation in between built to be inspected, configured and reproduced.
 
 ```
-corpus  ->  tokenizer  ->  vocabulary  ->  embeddings  ->  evaluation  ->  search
+corpus  ->  tokenizer  ->  vocabulary  ->  embedding model  ->  evaluation  ->  search
 ```
 
-**963 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
+Two model families share that pipeline: a **static** word2vec baseline in pure numpy, and
+a **contextual** transformer encoder trained contrastively, which needs the optional
+`neural` extra. The static model is the floor the contextual one is measured against.
+
+**1074 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
 
 ---
 
@@ -24,6 +29,7 @@ corpus  ->  tokenizer  ->  vocabulary  ->  embeddings  ->  evaluation  ->  searc
 - [Quick start](#quick-start)
 - [What makes it multilingual](#what-makes-it-multilingual)
 - [Architecture](#architecture)
+- [The two model families](#the-two-model-families)
 - [Design decisions worth knowing](#design-decisions-worth-knowing)
 - [Configuration](#configuration)
 - [Running in production](#running-in-production)
@@ -31,16 +37,14 @@ corpus  ->  tokenizer  ->  vocabulary  ->  embeddings  ->  evaluation  ->  searc
 - [Development](#development)
 - [Limitations](#limitations)
 
-> **Where this is going:** [ROADMAP.md](ROADMAP.md) sets out the path to an embedding
-> model factory — corpus in, trained and evaluated model out, generic or adapted to a
-> specific domain. The word2vec model below is the static baseline that future encoders
-> are measured against. [ECOSYSTEM.md](ECOSYSTEM.md) places this repository within the
-> wider QuanFire AI stack and explains which modalities are worth training rather than
-> integrating.
+> **Where this is going:** [ROADMAP.md](ROADMAP.md) tracks the remaining phases — pair
+> mining from unlabelled text, a serving API, and from-scratch pretraining.
+> [ECOSYSTEM.md](ECOSYSTEM.md) places this repository within the wider QuanFire AI stack;
+> everything outside embeddings lives there and nowhere in this README.
 
 > **Looking for the full reference?**
 > [`knowledge-base/QuanFire-Multilingual-Embedding-Handbook.pdf`](knowledge-base/QuanFire-Multilingual-Embedding-Handbook.pdf)
-> is a 47-page handbook covering purpose, design, architecture, components, usage, local
+> is a 43-page handbook covering purpose, design, architecture, components, usage, local
 > and production operation, benefits, and an honest pros-and-cons assessment. Read that
 > if you want the whole picture in one document; read on for the quick version.
 
@@ -73,20 +77,28 @@ languages rather than hiding it behind an average.
 
 ## Objective
 
-Provide a **complete, self-contained, production-quality pipeline** that takes a
-multilingual corpus and produces a trained tokenizer, a vocabulary, an embedding
-matrix, an evaluation report and a working semantic search interface — with no
-external model downloads, no API keys, and no deep-learning runtime.
+Be the place QuanFire's **embedding models** are built: a corpus goes in, a trained,
+evaluated, reproducible embedding model comes out — generic, or adapted to a specific
+domain. The vectors it produces are the input other systems build on, whether that is
+retrieval, semantic search, clustering, or a downstream model consuming the embedding
+layer.
 
 Concretely, the framework must be able to:
 
 1. Read a corpus from plain text or JSON Lines, on disk or gzipped, larger than memory.
-2. Segment it correctly across Latin, Devanagari, Tamil, Han, Kana, Arabic and more.
-3. Train a subword tokenizer and a shared vocabulary over it.
-4. Train word vectors on the tokenizer's own output.
-5. Score the result — including per-language fairness — and write a report.
-6. Answer semantic queries against the trained model, in any language it was trained on.
-7. Do all of the above from a single command, or from a Python API, deterministically.
+2. Audit that corpus and refuse to train on one that is broken.
+3. Segment it correctly across Latin, Devanagari, Tamil, Han, Kana, Arabic and more.
+4. Train a subword tokenizer and a shared vocabulary over it.
+5. Train an embedding model on the tokenizer's own output — static word vectors, or a
+   contextual transformer encoder fitted with a contrastive objective.
+6. Adapt an existing model to a domain cheaply, without a full fine-tune.
+7. Score the result — including per-language fairness — and write a report.
+8. Answer semantic queries against the trained model, in any language it was trained on.
+9. Do all of the above from a single command, or from a Python API, deterministically,
+   on a development machine or a GPU box without changing anything but a profile.
+
+**Scope.** This repository does embeddings. Nothing else. The other modalities in the
+QuanFire stack are separate repositories and are described in [ECOSYSTEM.md](ECOSYSTEM.md).
 
 ## Goals
 
@@ -105,12 +117,18 @@ Concretely, the framework must be able to:
 
 Stated up front, because a framework that claims everything is useful for nothing:
 
-- **Not a deep learning framework.** No autograd, no GPU, no PyTorch. See [Status](#status).
+- **Not a general deep learning framework.** There is a transformer and a training loop,
+  but they exist to produce embeddings. torch is an optional extra, not a foundation —
+  the corpus, tokenizer and vocabulary layers install and run without it.
+- **Not a generative model.** No decoder, no text generation. Embeddings only.
 - **Not an approximate nearest-neighbour engine.** Search is exact brute-force cosine.
+  Adequate to a few hundred thousand vectors; past that, export to a vector database.
 - **Not a language identification library.** Language inference is script-based and
   deliberately returns `None` where a script is shared across languages.
 - **Not a general text-cleaning toolkit.** Filtering is conservative by design;
-  over-aggressive cleaning silently destroys valid non-Latin text.
+  over-aggressive cleaning silently destroys valid non-Latin text. `qfme validate`
+  *reports* extraction damage rather than repairing it, because a corpus that needs
+  repairing should be re-extracted.
 
 ---
 
@@ -119,17 +137,30 @@ Stated up front, because a framework that claims everything is useful for nothin
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Foundation — errors, logging, registries, config, utilities | **Implemented** |
-| 2 | Corpus — document tree, segmentation, readers/writers, statistics | **Implemented** |
+| 2 | Corpus — document tree, segmentation, readers/writers, statistics, auditing | **Implemented** |
 | 3 | Tokenization — normalizers, pre-tokenizers, SentencePiece | **Implemented** |
 | 4 | Vocabulary — token/id mapping, special tokens, persistence | **Implemented** |
-| 5 | Embeddings — word2vec, sentence encoders, similarity search | **Implemented** |
-| 6 | Transformer encoder, contrastive learning, fine-tuning | **Not implemented** — planned in [ROADMAP.md](ROADMAP.md) |
+| 5 | Static embeddings — word2vec, sentence encoders, similarity search | **Implemented** |
+| A | Transformer encoder, contrastive InfoNCE training | **Implemented** |
+| B | LoRA adaptation, gradient caching, mixed precision | **Implemented** — external checkpoint adaptation outstanding |
+| C–E | Pair mining, serving API, from-scratch pretraining | **Planned** — see [ROADMAP.md](ROADMAP.md) |
 
-Phase 6 is deliberately absent rather than stubbed. The dependency set is
-`numpy`, `pandas`, `pyyaml`, `sentencepiece`, `tqdm` — there is **no PyTorch**, and
-embedding training is pure numpy (skip-gram with negative sampling). Adding a
-transformer means adding a deep learning runtime, which is a decision about the
-project's dependency posture, not a missing function body.
+**The dependency split is deliberate.** The base install is `numpy`, `pandas`, `pyyaml`,
+`sentencepiece`, `tqdm` — no torch. Everything through vocabulary and static embeddings
+runs on that alone, which keeps text preparation a small install for callers that need
+nothing else. The transformer lives behind an optional extra:
+
+```bash
+uv sync --extra neural        # adds torch
+```
+
+Skipping it costs you the contextual encoder and nothing else; the suite skips those
+tests rather than failing.
+
+**Honest limit on verification.** Development happens on a machine with no NVIDIA GPU, so
+**the CUDA paths are not exercised by local testing**. bf16 autocast is verified on CPU,
+including that the loss still falls, but the speed and memory claims that motivate it are
+unverified until a run on GPU hardware. Device-specific bugs will surface there first.
 
 ---
 
@@ -142,11 +173,16 @@ project's dependency posture, not a missing function body.
 | Python | 3.12.x | Pinned to `>=3.12,<3.13` in `pyproject.toml` |
 | [uv](https://docs.astral.sh/uv/) | latest | Dependency and environment management |
 | OS | Linux, macOS, Windows | Pure Python plus SentencePiece wheels; no compiler needed |
-| Disk | ~200 MB | Virtual environment and dependencies |
-| RAM | 1 GB is enough for the sample corpus | Training streams, so requirements scale with vocabulary size and not corpus size |
+| Disk | ~200 MB base, ~3 GB with `neural` | torch dominates the second figure |
+| RAM | 1 GB for the sample corpus | Training streams, so requirements scale with vocabulary size and not corpus size |
+| GPU | **Optional** | Not needed for anything in the base install. Contextual training runs on CPU, and will be slow. |
 
-There is no GPU requirement and no external service to configure. Nothing is
-downloaded at runtime beyond the Python dependencies.
+**No GPU is required** and no external service needs configuring. Nothing is downloaded at
+runtime beyond the Python dependencies — no model weights, no API keys.
+
+A GPU changes what is *practical*, not what runs. Contextual training on CPU works and is
+how the tests verify it; producing a model worth serving wants a card. See
+[compute profiles](#running-on-more-than-one-machine).
 
 ### Setup
 
@@ -208,6 +244,28 @@ Tamil, Japanese, Arabic, French — 150 documents, 750 sentences).
 ```bash
 qfme stats --source data/sample/corpus.jsonl
 ```
+
+### Check a corpus before training on it
+
+```bash
+qfme validate --source data/wikipedia/hi.jsonl.gz
+```
+
+Extraction pipelines fail quietly. Markup that survived cleaning, a wrong encoding guess,
+the same article ingested twice, an unpopulated language column — none of those raise.
+They produce a corpus that loads, trains, and yields a worse model for reasons that are
+invisible by the time anyone reads the metrics.
+
+`validate` names them, each with a count, examples and a remedy, and exits non-zero on
+errors so a data pipeline can gate on it:
+
+```bash
+qfme validate --source "$OUT" || exit 1              # blocks on errors
+qfme validate --source "$OUT" --strict || exit 1     # blocks on warnings too
+```
+
+The format an extraction must produce is specified in
+[`docs/data-format.md`](docs/data-format.md).
 
 ### Train
 
@@ -349,7 +407,7 @@ pipelines        training and search workflows
     |
 evaluation       metrics, scoring, reports
     |
-embedding        word2vec, sentence encoders, similarity index
+embedding        word2vec, transformer encoder, contrastive training, similarity index
     |
 tokenizer        normalizers, pre-tokenizers, SentencePiece
     |
@@ -376,7 +434,7 @@ example:
 | [`corpus`](src/multilingual_embedding/corpus/README.md) | Document tree, segmentation, readers, statistics |
 | [`vocabulary`](src/multilingual_embedding/vocabulary/README.md) | Token/id mapping, special tokens |
 | [`tokenizer`](src/multilingual_embedding/tokenizer/README.md) | Normalizers, pre-tokenizers, SentencePiece |
-| [`embedding`](src/multilingual_embedding/embedding/README.md) | word2vec, sentence encoders, similarity index |
+| [`embedding`](src/multilingual_embedding/embedding/README.md) | word2vec, transformer encoder, contrastive training, LoRA, similarity index |
 | [`evaluation`](src/multilingual_embedding/evaluation/README.md) | Metrics, scoring, reports |
 | [`pipelines`](src/multilingual_embedding/pipelines/README.md) | Training and search workflows |
 
@@ -395,6 +453,47 @@ because the material *between* children (whitespace, punctuation, markup) is par
 the source and would be lost. `verify()` checks the two views agree.
 
 See [`docs/architecture.md`](docs/architecture.md) for the full walkthrough.
+
+---
+
+## The two model families
+
+Both are trained by this repository, on the same corpus, tokenizer and vocabulary. They
+differ in what a vector can represent.
+
+| | Static (`word2vec`) | Contextual (transformer) |
+|---|---|---|
+| Vector per | token type | token occurrence, pooled to a text |
+| Runtime | pure numpy | torch (`neural` extra) |
+| Training | skip-gram, negative sampling | contrastive InfoNCE, in-batch negatives |
+| Needs pairs | no — raw text is enough | yes — anchor/positive pairs |
+| Trains on CPU | comfortably | slowly, but yes |
+
+**The static model has a structural ceiling, and it is worth seeing rather than reading
+about.** In `river bank` and `savings bank`, word2vec assigns `bank` one vector — the two
+are byte-identical, because the model has one row per token type and no notion of
+context. No amount of data fixes it. That limitation is the entire reason the contextual
+encoder exists, and it is why the static model is kept as a *baseline* rather than
+retired: a contextual model that cannot beat it has not learned anything.
+
+The transformer is written out in this repository rather than imported — pre-norm
+residuals, fused scaled dot-product attention, GELU, learned positions, mean pooling over
+the true mask. Pre-norm trains more stably, at one real cost: most published encoders are
+post-norm, so external weights do not transfer directly. Adapting an external checkpoint
+is the outstanding piece of Phase B.
+
+**Adapting a model to a domain does not require retraining it.** LoRA freezes the base
+and learns a low-rank update. Measured at BERT-base shape: **0.80% of parameters
+trainable**, a 3.4 MB adapter against a 419 MB model, and optimiser state falling from
+0.82 GB to 6.8 MB. That is what makes one base model plus several domain adapters
+practical on a single card.
+
+**Batch size is a quality parameter here, not just a throughput one.** Contrastive
+training contrasts each query against every other passage in the batch, so a batch of 256
+poses a far harder task than a batch of 16. Gradient caching is what makes a large batch
+fit: it encodes in chunks and caches the vector gradients, so peak memory follows the
+chunk rather than the batch. It is mathematically exact — verified gradient-for-gradient
+identical to one large backward pass, and invariant to chunk size.
 
 ---
 
@@ -429,8 +528,8 @@ corpus supports says so, and says what the corpus supports.
 
 ## Configuration
 
-Precedence, lowest to highest: dataclass defaults → config file → `QFME_`
-environment variables → `--set` overrides.
+Precedence, lowest to highest: dataclass defaults → config file → compute profile →
+`QFME_` environment variables → `--set` overrides.
 
 ```bash
 export QFME_EMBEDDING__DIMENSION=256          # double underscore nests
@@ -438,8 +537,31 @@ qfme train --config experiment.yaml --set embedding.epochs=20
 ```
 
 Every value is validated at load time against the dataclass that owns it, so a bad
-setting fails immediately rather than an hour into training. Full field reference in
+setting fails immediately rather than an hour into training. An error also records which
+of those layers introduced it, because a value that is fine in the file and broken by a
+profile is otherwise hard to place. Full field reference in
 [`docs/configuration.md`](docs/configuration.md).
+
+### Running on more than one machine
+
+A configuration has two halves. The **experiment** — corpus, tokenizer, embedding,
+evaluation — determines the result. The **machine** — device, precision, batch size,
+gradient-cache chunking — determines what fits and how fast it runs. Only the
+second differs between a laptop and a training box, so only the second lives in a profile:
+
+```bash
+qfme train --config experiments/indic.yaml --profile configs/cpu.yaml   # development
+qfme train --config experiments/indic.yaml --profile configs/gpu.yaml   # training box
+```
+
+One branch, one experiment file, one set of code. The alternative — a branch per machine —
+makes every fix land twice and quietly destroys the guarantee that the code you tested is
+the code that trained.
+
+One wrinkle worth knowing: `batch_size` is machine-shaped but *not* result-neutral,
+because in contrastive training it sets how many negatives each query is contrasted
+against. The `cpu` profile trains a worse model on purpose. Full treatment in
+[`docs/compute-profiles.md`](docs/compute-profiles.md).
 
 ---
 
@@ -525,8 +647,7 @@ embedding matrices are `2 × vocab_size × dimension × 4` bytes. A 32k vocabula
 dimensions is roughly 77 MB. Serving needs one matrix plus your indexed vectors.
 
 **Concurrency.** `SemanticSearchPipeline` is read-only after `index()` and safe to
-share across threads. Training is single-process; the `workers` setting is currently
-informational.
+share across threads. Training is single-process.
 
 **Determinism.** Pin the seed and the artefact version. Given both, a run reproduces
 byte-identically.
@@ -561,10 +682,12 @@ nearest-neighbour library or vector database without conversion.
 quanfire-multilingual-embedding/
 ├── src/multilingual_embedding/     the framework (see the package table above)
 │   ├── common/  core/  config/  utils/
-│   ├── corpus/  vocabulary/  tokenizer/  embedding/  evaluation/  pipelines/
+│   ├── corpus/  vocabulary/  tokenizer/  evaluation/  pipelines/
+│   ├── embedding/                  word2vec, and neural/ for the transformer
 │   ├── cli.py                      the `qfme` command
 │   └── py.typed                    marks the package as typed for consumers
-├── tests/                          963 tests mirroring the source layout
+├── tests/                          1074 tests mirroring the source layout
+├── configs/                        compute profiles — cpu.yaml, gpu.yaml
 ├── examples/                       runnable end-to-end example
 ├── data/sample/                    six-language sample corpus
 ├── docs/                           MkDocs documentation
@@ -641,8 +764,12 @@ Stated plainly, because knowing where a tool stops is part of using it well.
   training corpus contained parallel or comparable content.
 - **Language inference is script-based**, not statistical, and returns `None` for
   scripts shared across languages.
-- **Training is single-process.** The `workers` setting is reserved and currently
-  informational.
+- **Training is single-process.** There is no data-loader parallelism and no
+  distributed training; a run is bounded by one process on one device.
+- **External pretrained checkpoints cannot yet be adapted.** The encoder is pre-norm and
+  most published ones are post-norm, so their weights do not transfer directly.
+- **CUDA is unverified by local testing.** Development happens without an NVIDIA GPU, so
+  bf16 and device-specific paths are exercised on CPU only.
 
 ---
 

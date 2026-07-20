@@ -1,0 +1,37 @@
+# Compute profile: development machine, no discrete GPU.
+#
+# Not Mac-specific. The constraint this profile encodes is "no
+# CUDA-class GPU and a small memory budget", which is equally true of a
+# Windows or Linux box without one.
+#
+# For writing code, running the tests, and confirming a pipeline is wired
+# up correctly on a small corpus. Not for producing a model anyone uses —
+# a batch of 16 gives each query only 15 negatives to be contrasted
+# against, which is far too easy a task to train a good encoder.
+#
+# Overlay onto an experiment:
+#
+#     qfme train --config experiments/indic.yaml --profile configs/cpu.yaml
+
+compute:
+  # Despite the filename, this is `auto` rather than `cpu`.
+  #
+  # On Apple Silicon it resolves Metal, which is a real speedup and worth
+  # taking; on anything else here it lands on CPU anyway. The file is
+  # named for the constraint it encodes, not for the device that ends up
+  # being chosen.
+  #
+  # Set `cpu` explicitly to force it — worth doing for a reproducibility
+  # run, since GPU reductions are not bit-deterministic.
+  device: auto
+
+  # fp32 deliberately. Metal's autocast support is incomplete, so a bf16
+  # request is declined there anyway — see `autocast_for`. On a CPU-only
+  # box bf16 would be honoured but is rarely a win.
+  precision: fp32
+
+  batch_size: 16
+
+  # Off. Gradient caching earns its overhead when memory is the binding
+  # constraint, and at this batch size it is not.
+  gradient_checkpoint_chunk: 0

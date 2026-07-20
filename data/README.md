@@ -60,9 +60,10 @@ Sentences are generated from per-language subject/verb/object templates. This ma
 corpus balanced, licence-free and small enough to commit, and it means a tokenizer
 trained on it produces clean, inspectable output.
 
-It also means the corpus has almost no lexical diversity — a type/token ratio around
-0.07 — so models trained on it have a collapsed embedding space and near-identical
-similarity scores. **Use it to verify the pipeline runs, never to judge model quality.**
+It also means the corpus has almost no lexical diversity: 3,050 whitespace-separated
+tokens draw on only 137 distinct types. Models trained on it therefore have a collapsed
+embedding space and near-identical similarity scores — the example's top hits all score
+above 0.99. **Use it to verify the pipeline runs, never to judge model quality.**
 
 ### Regenerating
 
@@ -72,16 +73,52 @@ documentation, since both quote real output from it.
 
 ## Bringing your own corpus
 
-Two formats are supported, selected automatically by file extension:
+Three readers are available, named by `--format`. The default, `auto`, picks one by file
+extension:
 
-**Plain text** (`.txt`, `.txt.gz`) — one file becomes one document; paragraphs come
-from blank lines and sentences from the segmenter.
+**Plain text** (`.txt`, `.text`, `.txt.gz`) — one file becomes one document; paragraphs
+come from blank lines and sentences from the segmenter.
 
 **JSON Lines** (`.jsonl`, `.jsonl.gz`, `.ndjson`) — one record becomes one document.
 Only a text field is required; `id` and `language` are used when present, and any other
 keys are carried through into document metadata.
 
+**One sentence per line** — `--format lines`. This one has to be named. Extension
+sniffing cannot tell a sentence-per-line file from prose, and reading it as prose would
+re-segment text that is already segmented.
+
 Point `--source` at a directory to read every matching file, visited in sorted order so
-runs are reproducible. Gzip is handled transparently. If your corpus is already one
-sentence per line, use `--format lines` so the framework does not re-segment text that
-is already segmented.
+runs are reproducible. Gzip is handled transparently.
+
+[`docs/data-format.md`](../docs/data-format.md) is the full contract: every field, the
+rules an extraction must satisfy, and notes on Wikipedia dumps specifically.
+
+## Audit before you train
+
+```bash
+qfme validate --source /data/corpora/my-corpus.jsonl.gz
+```
+
+`qfme validate` reads a corpus and reports the problems it can identify — leftover
+markup, encoding damage, empty or duplicated documents, missing language codes,
+suspicious fragments — each with an example and a remedy, alongside the document and
+sentence counts and the language and script distribution.
+
+It is worth running because the failures it catches are the ones that do not announce
+themselves. A corpus with wiki markup still in the body text trains a tokenizer on syntax
+rather than on language, and nothing about the aggregate statistics looks wrong; you find
+out from a poor model weeks later. Empty records are skipped by the JSON Lines reader
+without a count, so a pipeline that silently emits blanks loses them invisibly.
+
+Findings are graded `ERROR` (unusable as it stands), `WARNING` (will train, but something
+was probably lost upstream) and `INFO` (context worth having). The command exits non-zero
+on errors, so a data pipeline can gate on it:
+
+```bash
+qfme validate --source "$OUTPUT" || exit 1              # blocks on errors
+qfme validate --source "$OUTPUT" --strict || exit 1     # blocks on warnings too
+qfme validate --source "$OUTPUT" --output audit.json    # machine-readable
+```
+
+`qfme stats` remains the lighter option when you only want counts and distributions and
+not a judgement.

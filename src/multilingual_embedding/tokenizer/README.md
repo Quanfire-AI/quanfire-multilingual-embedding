@@ -8,7 +8,7 @@ The embedding model consumes integer ids and nothing else. Getting from a string
 ## Modules
 | Module | Responsibility |
 |---|---|
-| `normalizer.py` | `Normalizer` base, the `NORMALIZERS` registry, seven single-purpose normalisers, and `NormalizerPipeline`. |
+| `normalizer.py` | `Normalizer` base, the `NORMALIZERS` registry, eight single-purpose normalisers, and `NormalizerPipeline`. |
 | `pretokenizer.py` | `PreTokenizer` base, the `PRETOKENIZERS` registry, and the whitespace, character, punctuation and script-aware implementations. |
 | `tokenizer.py` | `Tokenizer` base, the `TOKENIZERS` registry, `SentencePieceTokenizer` and `WordTokenizer`, with save/load. |
 | `encoding.py` | `Encoding` — ids, surface pieces, spans and attention mask, with `truncate` and `pad_to`. |
@@ -59,7 +59,7 @@ The whitespace collapsing itself uses `" ".join(cleaned.split())`. Bare `str.spl
 
 ### Normalisers are small and composed, not one class with flags
 
-The registry holds seven single-purpose normalisers assembled into a `NormalizerPipeline` by configuration. The alternative — one monolithic normaliser with a dozen booleans — would hide the fact that **order is significant**. Case folding before accent stripping is not the same operation as the reverse. Making the chain an ordered list forces that order to be stated rather than inherited from the order the flags happen to be checked in.
+The registry holds eight single-purpose normalisers — `nfkc`, `nfc`, `nfd`, `nfkd`, `lowercase`, `whitespace`, `strip_accents` and `digits` — assembled into a `NormalizerPipeline` by configuration. The alternative — one monolithic normaliser with a dozen booleans — would hide the fact that **order is significant**. Case folding before accent stripping is not the same operation as the reverse. Making the chain an ordered list forces that order to be stated rather than inherited from the order the flags happen to be checked in.
 
 `StripAccentsNormalizer` carries a matching warning: it drops every `Mn` codepoint, which is desirable for European accents and Arabic harakat but destructive for Indic vowel signs and the virama, since those share the category. It is meant to be enabled per language, not globally.
 
@@ -200,13 +200,13 @@ Must **not** import `embedding`, `evaluation` or `pipelines`. Enforced by `tests
 Consumed by `pipelines/training.py`, `pipelines/search.py` and `cli.py`.
 
 ## Tests
-Package total: **172 tests** across `tests/tokenizer`.
+Package total: **187 tests** across `tests/tokenizer`.
 
 - `tests/tokenizer/test_pretokenizer.py` — 57 tests
 - `tests/tokenizer/test_normalizer.py` — 44 tests
-- `tests/tokenizer/test_tokenizer.py` — 33 tests
+- `tests/tokenizer/test_tokenizer.py` — 40 tests
 - `tests/tokenizer/test_encoding.py` — 23 tests
-- `tests/tokenizer/test_trainer.py` — 15 tests
+- `tests/tokenizer/test_trainer.py` — 23 tests
 - `tests/tokenizer/conftest.py` — shared fixtures, no tests of its own
 
 The full pipeline is additionally exercised by `tests/integration/test_end_to_end.py`, and the tokenizer's own quality metrics live in `evaluation/tokenizer_eval.py` with tests in `tests/evaluation/test_evaluators.py`.

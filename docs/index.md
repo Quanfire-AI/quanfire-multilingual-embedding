@@ -78,18 +78,27 @@ Implemented and tested end to end:
 | Evaluation | Tokenizer compression/fertility/unknown-rate metrics with a per-language fairness breakdown, structural embedding metrics (isotropy, effective dimensions), optional similarity and analogy datasets |
 | Interfaces | `qfme` CLI (`stats`, `train`, `search`, `evaluate`) and a Python API |
 
-**Not implemented.** These are absent rather than stubbed, and nothing in the code
-pretends otherwise:
+**Behind an optional extra.** The contextual encoder — a transformer, contrastive
+InfoNCE training, LoRA adaptation and gradient caching — lives in
+`embedding/neural/` and needs torch:
 
-- **No transformer.** No encoder, no attention, no positional encoding.
-- **No subword-averaging model.** There is no character n-gram embedding model; word2vec operates on
-  SentencePiece pieces, which is a different thing.
-- **No contrastive learning** and no fine-tuning of any kind.
-- **No PyTorch, and no deep learning runtime at all.** The full dependency set is
-  `numpy`, `pandas`, `pyyaml`, `sentencepiece`, `tqdm`. Embedding training is
-  hand-written numpy. Adding a transformer would mean adopting a deep learning
-  dependency, which is a decision about the project's dependency posture rather than
-  a missing function body.
+```bash
+uv sync --extra neural
+```
+
+The base install is `numpy`, `pandas`, `pyyaml`, `sentencepiece`, `tqdm`. Everything
+through vocabulary and static word2vec runs on that alone, which keeps text preparation
+a small install for callers that need nothing more. Skipping the extra costs the
+contextual encoder and nothing else; its tests skip rather than fail.
+
+**Still absent.** These are missing rather than stubbed:
+
+- **No subword-averaging model.** There is no character n-gram embedding model; word2vec
+  operates on SentencePiece pieces, which is a different thing.
+- **No decoder and no generation.** This produces embeddings, not text.
+- **No adaptation of external pretrained checkpoints yet.** The encoder here is pre-norm
+  while most published encoders are post-norm, so their weights do not transfer
+  directly. See [ROADMAP.md](https://github.com/quanfire/quanfire-multilingual-embedding/blob/main/ROADMAP.md).
 
 Further limits worth knowing before you rely on the framework:
 

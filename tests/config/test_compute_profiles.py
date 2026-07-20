@@ -89,6 +89,41 @@ class TestComputeConfig:
         with pytest.raises(ConfigurationError):
             ExperimentConfig(compute={"precision": "fp8"})
 
+    def test_every_setting_is_actually_read_by_something(self) -> None:
+        """
+        No dead knobs.
+
+        This section was written with a ``workers`` field that nothing
+        consumed — training is single-process and there is no data
+        loader — which reads as a tuning knob and silently does nothing.
+        The same defect had already been fixed once in EmbeddingConfig
+        (see ``test_removed_fields_are_not_silently_accepted``), so this
+        pins the rule rather than trusting it to be remembered.
+
+        The check is deliberately crude: each field name must appear
+        somewhere in the source outside the config package. That catches
+        a field wired to nothing, which is the failure that actually
+        happened, without pretending to prove reachability.
+        """
+
+        from dataclasses import fields
+
+        import multilingual_embedding
+
+        root = Path(multilingual_embedding.__file__).parent
+
+        sources = [
+            path.read_text(encoding="utf-8")
+            for path in root.rglob("*.py")
+            if "config" not in path.parts
+        ]
+
+        for field in fields(ComputeConfig):
+            assert any(field.name in text for text in sources), (
+                f"ComputeConfig.{field.name} is read by nothing outside the "
+                f"config package; either wire it up or remove it"
+            )
+
     def test_survives_a_round_trip(self) -> None:
         """The resolved config is persisted beside the artefacts."""
 
@@ -141,7 +176,10 @@ class TestProfileOverlay:
 
         base = tmp_path / "base.yaml"
 
-        base.write_text("compute:\n  batch_size: 128\n  workers: 4\n", encoding="utf-8")
+        base.write_text(
+            "compute:\n  batch_size: 128\n  gradient_checkpoint_chunk: 8\n",
+            encoding="utf-8",
+        )
 
         profile = tmp_path / "p.yaml"
 
@@ -151,7 +189,7 @@ class TestProfileOverlay:
 
         assert config.compute.batch_size == 128
 
-        assert config.compute.workers == 4
+        assert config.compute.gradient_checkpoint_chunk == 8
 
         assert config.compute.precision == "bf16"
 
@@ -193,7 +231,7 @@ class TestShippedProfiles:
     ever runs on the machine furthest from a debugger.
     """
 
-    @pytest.mark.parametrize("name", ["mac.yaml", "gpu.yaml"])
+    @pytest.mark.parametrize("name", ["cpu.yaml", "gpu.yaml"])
     def test_profile_loads(self, name: str) -> None:
         config = load_config(profile=CONFIGS / name, use_environment=False)
 
@@ -207,11 +245,11 @@ class TestShippedProfiles:
         it.
         """
 
-        mac = load_config(profile=CONFIGS / "mac.yaml", use_environment=False).compute
+        cpu = load_config(profile=CONFIGS / "cpu.yaml", use_environment=False).compute
 
         gpu = load_config(profile=CONFIGS / "gpu.yaml", use_environment=False).compute
 
-        assert gpu.batch_size > mac.batch_size
+        assert gpu.batch_size > cpu.batch_size
 
         assert gpu.precision == "bf16"
 
