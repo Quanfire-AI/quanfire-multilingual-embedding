@@ -350,3 +350,57 @@ class TestFileHandling:
         assert documents[0].identifier == "1"
 
         assert documents[0].metadata.base.language == "mni"
+
+
+class TestExtractionCannotBeStalledByOneArticle:
+    """
+    Real dumps contain malformed markup, and a regex that backtracks on
+    it turns one bad article into a stalled extraction.
+
+    The media-link pattern originally carried a nested quantifier —
+    ``(\\|[^\\[\\]]*)*`` after ``[^\\[\\]]*`` — which is the classic
+    catastrophic shape. On an unclosed media link the engine tries every
+    way of splitting the pipes between the two quantifiers: 22 pipes took
+    8.5 seconds, and each further pipe roughly quadrupled it.
+
+    Nothing raised, no test failed, and Tamil extracted 4.6 times slower
+    per article than Hindi.
+    """
+
+    def test_an_unclosed_media_link_with_many_pipes_is_fast(self) -> None:
+        import time
+
+        from multilingual_embedding.corpus.wikipedia import _strip_markup
+
+        # Under the old pattern this input alone took several minutes.
+        wikitext = "[[File:x.jpg" + "|thumb" * 40 + " and it never closes " + PROSE
+
+        started = time.perf_counter()
+
+        _strip_markup(wikitext)
+
+        elapsed = time.perf_counter() - started
+
+        assert elapsed < 1.0, (
+            f"stripping one malformed media link took {elapsed:.1f}s; "
+            f"the media-link pattern is backtracking again"
+        )
+
+    def test_media_links_are_still_removed(self) -> None:
+        """The fix must not have been to stop matching."""
+
+        from multilingual_embedding.corpus.wikipedia import _strip_markup
+
+        for markup in (
+            "[[File:photo.jpg|thumb|300px|A caption]]",
+            "[[Category:Cities of India]]",
+            "[[Image:map.svg|left]]",
+        ):
+            assert _strip_markup(markup).strip() == "", f"{markup} survived"
+
+    def test_ordinary_wikilinks_keep_their_text(self) -> None:
+        """A link without a colon is prose, not a media embed."""
+
+        from multilingual_embedding.corpus.wikipedia import _strip_markup
+
+        assert "the state" in _strip_markup("[[Maharashtra|the state]]")

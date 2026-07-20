@@ -94,7 +94,22 @@ _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 # The prefix varies, so this matches the shape rather than the word: a
 # bracketed link whose target contains a colon and which carries caption
 # pipes is a media embed, not a wikilink.
-_MEDIA_LINK = re.compile(r"\[\[[^\[\]]*:[^\[\]]*(\|[^\[\]]*)*\]\]")
+#
+# Written without a nested quantifier, deliberately. The first version was
+#
+#     \[\[[^\[\]]*:[^\[\]]*(\|[^\[\]]*)*\]\]
+#
+# whose trailing group is both redundant — `[^\[\]]` already matches `|` —
+# and catastrophic. On a media link that never closes, which real dumps
+# contain, the engine tries every way of splitting the pipes between the
+# two quantifiers: 22 pipes took 8.5 seconds, and each further pipe
+# roughly quadrupled it. That is a single article able to stall an
+# extraction for minutes, and it is the likeliest explanation for Tamil
+# extracting 4.6x slower per article than Hindi.
+#
+# The form below matches exactly the same text in linear time: the same
+# 22-pipe input now takes 7 microseconds.
+_MEDIA_LINK = re.compile(r"\[\[[^\[\]]*:[^\[\]]*\]\]")
 
 _HEADING = re.compile(r"^\s*(={2,6})\s*(.+?)\s*\1\s*$", re.MULTILINE)
 
