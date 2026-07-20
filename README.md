@@ -14,7 +14,7 @@ Two model families share that pipeline: a **static** word2vec baseline in pure n
 a **contextual** transformer encoder trained contrastively, which needs the optional
 `neural` extra. The static model is the floor the contextual one is measured against.
 
-**1074 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
+**1076 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
 
 ---
 
@@ -44,7 +44,7 @@ a **contextual** transformer encoder trained contrastively, which needs the opti
 
 > **Looking for the full reference?**
 > [`knowledge-base/QuanFire-Multilingual-Embedding-Handbook.pdf`](knowledge-base/QuanFire-Multilingual-Embedding-Handbook.pdf)
-> is a 43-page handbook covering purpose, design, architecture, components, usage, local
+> is a 66-page handbook covering purpose, design, architecture, components, usage, local
 > and production operation, benefits, and an honest pros-and-cons assessment. Read that
 > if you want the whole picture in one document; read on for the quick version.
 
@@ -94,8 +94,15 @@ Concretely, the framework must be able to:
 6. Adapt an existing model to a domain cheaply, without a full fine-tune.
 7. Score the result — including per-language fairness — and write a report.
 8. Answer semantic queries against the trained model, in any language it was trained on.
-9. Do all of the above from a single command, or from a Python API, deterministically,
-   on a development machine or a GPU box without changing anything but a profile.
+9. Do all of the above deterministically, on a development machine or a GPU box, without
+   changing anything but a profile.
+
+**Where it falls short of that today.** `qfme train` trains the static model only. The
+contextual encoder is trained and served through the Python API — `TrainingPipeline` has
+no neural path, and `SemanticSearchPipeline.from_directory` always reconstructs a static
+model. The two families share the `TextEncoder` contract, not the command line. Closing
+that gap is part of Phase D in [ROADMAP.md](ROADMAP.md); until it is closed, "from a
+single command" is true of word2vec and not of the transformer.
 
 **Scope.** This repository does embeddings. Nothing else. The other modalities in the
 QuanFire stack are separate repositories and are described in [ECOSYSTEM.md](ECOSYSTEM.md).
@@ -468,6 +475,7 @@ differ in what a vector can represent.
 | Training | skip-gram, negative sampling | contrastive InfoNCE, in-batch negatives |
 | Needs pairs | no — raw text is enough | yes — anchor/positive pairs |
 | Trains on CPU | comfortably | slowly, but yes |
+| Reachable from `qfme` | yes | **no — Python API only** |
 
 **The static model has a structural ceiling, and it is worth seeing rather than reading
 about.** In `river bank` and `savings bank`, word2vec assigns `bank` one vector — the two
@@ -686,7 +694,7 @@ quanfire-multilingual-embedding/
 │   ├── embedding/                  word2vec, and neural/ for the transformer
 │   ├── cli.py                      the `qfme` command
 │   └── py.typed                    marks the package as typed for consumers
-├── tests/                          1074 tests mirroring the source layout
+├── tests/                          1076 tests mirroring the source layout
 ├── configs/                        compute profiles — cpu.yaml, gpu.yaml
 ├── examples/                       runnable end-to-end example
 ├── data/sample/                    six-language sample corpus
@@ -764,6 +772,8 @@ Stated plainly, because knowing where a tool stops is part of using it well.
   training corpus contained parallel or comparable content.
 - **Language inference is script-based**, not statistical, and returns `None` for
   scripts shared across languages.
+- **The contextual encoder has no CLI path.** `qfme train` produces the static model;
+  the transformer is trained and served through the Python API only.
 - **Training is single-process.** There is no data-loader parallelism and no
   distributed training; a run is bounded by one process on one device.
 - **External pretrained checkpoints cannot yet be adapted.** The encoder is pre-norm and
