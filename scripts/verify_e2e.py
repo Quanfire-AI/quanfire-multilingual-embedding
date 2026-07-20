@@ -137,7 +137,11 @@ def run(name: str, function: Any, *args: Any, **kwargs: Any) -> Any:
     except Exception as error:
         stage.error = f"{type(error).__name__}: {error}"
 
-        stage.detail = {"traceback": traceback.format_exc().splitlines()[-3:]}
+        # The whole traceback, not a tail. A three-line excerpt names the
+        # line that raised and hides the import chain that caused it,
+        # which is precisely what matters for an error arriving from a
+        # compiled dependency rather than from this code.
+        stage.detail = {"traceback": traceback.format_exc().splitlines()}
 
         say(f"  [{clock()}] {name} FAILED: {stage.error}")
 
