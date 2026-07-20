@@ -7,22 +7,97 @@ ships with the repository. Numbers are real, not illustrative.
 
 ## Install
 
-Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
+### What you need first
+
+| | | |
+|---|---|---|
+| Python 3.12 | `python3 --version` | Pinned to `>=3.12,<3.13` |
+| [uv](https://docs.astral.sh/uv/) | `uv --version` | Installs everything else |
+
+If `uv` is missing:
 
 ```bash
-uv sync
-source .venv/bin/activate
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-This installs the `qfme` command. Check it:
+You do **not** need to install Python yourself, create a virtual environment, or run
+`pip`. `uv` does all three.
+
+### Install the project
 
 ```bash
-qfme --version
+cd quanfire-multilingual-embedding
+uv sync --extra neural --extra wikipedia
+```
+
+That creates `.venv/`, installs the dependencies, and registers the `qfme` command.
+Expect roughly a minute the first time, mostly downloading PyTorch.
+
+**Pass the extras.** They are optional, and plain `uv sync` does not merely skip them —
+it *removes* them if they are already there:
+
+```
+$ uv sync
+ - mwparserfromhell==0.7.2
+ - torch==2.2.2
+```
+
+Those minus signs are uninstalls. The contextual encoder and the Wikipedia extractor
+would stop working, with nothing to explain why.
+
+| Extra | Adds | Without it |
+|---|---|---|
+| `neural` | PyTorch | No transformer encoder; its tests skip rather than fail |
+| `wikipedia` | mwparserfromhell | `qfme extract` refuses to run |
+
+Everything else — corpus handling, tokenizer, vocabulary, word2vec, search, evaluation —
+works on the base install alone.
+
+### Check it worked
+
+```bash
+uv run qfme --version
 ```
 
 ```
 qfme 0.1.0
 ```
+
+### Running `qfme`
+
+`qfme` is not a system-wide command. It lives inside the project's virtual environment at
+`.venv/bin/qfme`, so a fresh terminal will not find it:
+
+```
+$ qfme --version
+zsh: command not found: qfme
+```
+
+**That is expected, not a broken install.** Three ways to run it, all equivalent:
+
+```bash
+# 1. Explicit path — always works, nothing to remember
+.venv/bin/qfme --version
+
+# 2. uv run — uv locates the environment itself
+uv run qfme --version
+
+# 3. Activate once, then use it plainly for the whole session
+source .venv/bin/activate
+qfme --version
+```
+
+Use the third for a working session; your prompt gains a `(.venv)` prefix, and
+`deactivate` leaves. The rest of this page assumes it.
+
+### If something is wrong
+
+| Symptom | Cause and fix |
+|---|---|
+| `command not found: qfme` | The environment is not active. Use one of the three forms above. |
+| `qfme extract` says it needs the `wikipedia` extra | Run `uv sync --extra neural --extra wikipedia`. Plain `uv sync` removed it. |
+| Neural tests are skipped | Same cause — the `neural` extra is not installed. |
+| `No solution found` during sync | Python is not 3.12. Check `python3 --version`; `uv python install 3.12` fixes it. |
 
 ---
 

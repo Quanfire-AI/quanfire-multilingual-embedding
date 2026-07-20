@@ -1,21 +1,26 @@
 # Walkthrough — seeing the project work
 
-Eight steps, about fifteen minutes, entirely on this machine. Every command and every
+Nine steps, about twenty minutes, entirely on this machine. Every command and every
 output below was executed on an Intel MacBook with no GPU; nothing here is predicted.
 
 The point is not that commands run. It is that you can **check the claims yourself** —
 that the vectors mean something, that the model actually learns, and that the parts which
 do not yet work say so.
 
+---
+
+## 1. Install, and confirm it
+
+Needs Python 3.12 and [uv](https://docs.astral.sh/uv/) — nothing else. If `uv` is
+missing: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+
 ```bash
-cd /path/to/quanfire-multilingual-embedding
-uv sync --extra neural        # the extra is needed from step 5 onward
+cd quanfire-multilingual-embedding
+uv sync --extra neural --extra wikipedia
 source .venv/bin/activate
 ```
 
----
-
-## 1. Confirm the install
+About a minute the first time, mostly PyTorch. Then:
 
 ```bash
 qfme --version
@@ -27,7 +32,17 @@ qfme 0.1.0
 torch 2.2.2
 ```
 
-If `torch` fails to import, steps 1–4 still work. Only the contextual model needs it.
+**Two things that trip people up.**
+
+`qfme` is not a system-wide command — it lives at `.venv/bin/qfme`. A terminal that has
+not activated the environment says `command not found: qfme`, which is expected. Either
+activate as above, or prefix every command with `uv run` (`uv run qfme --version`), or
+call it by path (`.venv/bin/qfme --version`).
+
+And **pass both extras**. Plain `uv sync` does not merely skip them, it uninstalls them —
+you would lose the contextual encoder used in step 7 and the extractor used in step 9, with no error explaining why.
+
+Steps 2–6 work without either extra, so a torch-free install is a valid way to start.
 
 ---
 
@@ -269,12 +284,71 @@ This is what makes the domain-specific plan affordable: one frozen base model pl
 
 ---
 
+## 9. Extract real text, and see what a dump is really like
+
+Everything above ran on 150 synthetic templated documents. This is how you get real text.
+
+Start with a small wiki so the whole loop takes a minute. Meetei Mayek is 5 MB:
+
+```bash
+curl -O https://dumps.wikimedia.org/mniwiki/latest/mniwiki-latest-pages-articles.xml.bz2
+
+qfme extract --dump mniwiki-latest-pages-articles.xml.bz2 \
+             --output data/wikipedia/mni.jsonl.gz --language mni
+```
+
+```
+WARNING  Dropped duplicate articles, usually template-generated stubs
+WARNING  Dropped articles whose source markup was malformed beyond repair
+Wrote 2444 articles to data/wikipedia/mni.jsonl.gz
+Next: qfme validate --source data/wikipedia/mni.jsonl.gz
+```
+
+About sixteen seconds. Then do what it tells you:
+
+```bash
+qfme validate --source data/wikipedia/mni.jsonl.gz
+```
+
+```
+documents  2444
+sentences  45059
+languages  mni
+scripts    Beng, Deva, Latn, Mtei
+```
+
+No errors — the extractor is held to the standard the audit sets.
+
+**Look at what was thrown away**, because it is most of the file:
+
+| | Pages |
+|---|---:|
+| Seen in the dump | 15,514 |
+| Redirects and non-article namespaces | −4,348 |
+| Shorter than 200 characters | −8,547 |
+| Malformed markup | −24 |
+| Duplicates | −151 |
+| **Written** | **2,444** |
+
+**84% of a dump is not article prose.** Size a corpus from what survives, not from the
+page count. Those 151 duplicates are one boilerplate sentence repeated across 118 country
+stubs — left in, they would inflate every token in that sentence by two orders of
+magnitude.
+
+Use `--limit 500` to try a dump before committing to it. For a real corpus, Hindi and
+Tamil are 227 MB and 258 MB, and take a few minutes each.
+
+Note the four scripts in a Meetei Mayek wiki: real text is messier than the sample corpus,
+and the audit is how you find that out rather than discovering it in a model.
+
+---
+
 ## What this does and does not show
 
-**Shown, end to end:** corpus preparation, auditing that catches real extraction damage,
-tokenizer and vocabulary training, two families of embedding model, retrieval in three
-scripts, per-language fairness reporting, evidence the contextual model learns, and the
-economics of domain adaptation.
+**Shown, end to end:** installation, corpus preparation, auditing that catches real
+extraction damage, tokenizer and vocabulary training, two families of embedding model,
+retrieval in three scripts, per-language fairness reporting, evidence the contextual model
+learns, the economics of domain adaptation, and extraction of a real Wikipedia dump.
 
 **Not shown, because it does not work yet:**
 

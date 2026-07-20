@@ -197,9 +197,19 @@ how the tests verify it; producing a model worth serving wants a card. See
 git clone <repository-url>
 cd quanfire-multilingual-embedding
 
-uv sync                       # create .venv and install everything, including dev tools
-source .venv/bin/activate     # Windows: .venv\Scripts\activate
+uv sync --extra neural --extra wikipedia   # create .venv and install
+source .venv/bin/activate                  # Windows: .venv\Scripts\activate
 ```
+
+**Name the extras.** Plain `uv sync` does not merely skip them, it *uninstalls* them — you
+would silently lose the contextual encoder and `qfme extract`. Omit them deliberately if
+you want the small install: everything through vocabulary, word2vec, search and evaluation
+works without either.
+
+`qfme` lives in `.venv/bin/` rather than on the system path, so an unactivated terminal
+reports `command not found: qfme`. That is expected. Use `uv run qfme …`, or
+`.venv/bin/qfme …`, or activate as above. Full detail, including what breaks without each
+extra, is in [`docs/getting-started.md`](docs/getting-started.md).
 
 ### Verify the installation
 

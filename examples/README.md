@@ -5,8 +5,16 @@
 ## Purpose
 
 Documentation drifts; a script that must run does not. Everything here executes against
-the bundled sample corpus with no setup beyond `uv sync`, so an example that has rotted
-fails visibly rather than quietly misleading a reader.
+the bundled sample corpus, so an example that has rotted fails visibly rather than quietly
+misleading a reader.
+
+`train_and_search.py` and the first six walkthrough steps need only the base install
+(`uv sync`). The walkthrough's contextual-encoder and LoRA steps need `--extra neural`,
+and its extraction step needs `--extra wikipedia`:
+
+```bash
+uv sync --extra neural --extra wikipedia
+```
 
 ## Contents
 
