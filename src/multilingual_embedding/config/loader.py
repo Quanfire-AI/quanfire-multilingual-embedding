@@ -5,8 +5,9 @@ Precedence, lowest to highest:
 
 1. dataclass defaults
 2. the YAML or JSON file
-3. environment variables prefixed ``QFME_``
-4. explicit overrides passed by the caller
+3. the compute profile, when one is named
+4. environment variables prefixed ``QFME_``
+5. explicit overrides passed by the caller
 
 Later sources win, so a deployment can adjust one value through the
 environment without editing a file, and a developer can adjust one value
@@ -48,6 +49,7 @@ _logger = get_logger(__name__)
 def load_config(
     path: str | Path | None = None,
     *,
+    profile: str | Path | None = None,
     overrides: dict[str, Any] | None = None,
     use_environment: bool = True,
 ) -> ExperimentConfig:
@@ -58,6 +60,13 @@ def load_config(
     ----------
     path:
         YAML or JSON file. When omitted, defaults are used as the base.
+
+    profile:
+        A second file, deep-merged over the first. Intended to carry
+        the ``compute`` section — the settings a machine dictates —
+        so that one experiment file runs unchanged on a laptop and on
+        a training box. Nothing restricts it to that section, but
+        keeping it to that is what makes the split meaningful.
 
     overrides:
         Nested mapping applied last. Highest precedence.
@@ -85,6 +94,17 @@ def load_config(
 
     with _configuration_errors(path, stage="file"):
         config = ExperimentConfig.from_dict(data)
+
+    if profile is not None:
+        profile_data = _read_config_file(Path(profile))
+
+        _logger.info(
+            "Applying compute profile",
+            extra={"profile": str(profile), "sections": sorted(profile_data)},
+        )
+
+        with _configuration_errors(profile, stage="profile"):
+            config = config.merged(profile_data)
 
     if use_environment:
         environment_overrides = config_from_env()
@@ -120,13 +140,23 @@ def _configuration_errors(path: str | Path | None, *, stage: str) -> Iterator[No
     file but broken by an environment variable is otherwise very hard to
     place.
 
-    ``ConfigurationError`` passes through untouched, so an error raised
-    by a section's own ``__post_init__`` is not double-wrapped.
+    A ``ConfigurationError`` keeps its own message rather than being
+    wrapped in a second one, but it is still annotated with where it came
+    from. Provenance matters most exactly when it is absent: with a
+    profile in play there are two files that could have carried the bad
+    value, and "Unsupported precision" alone does not say which to open.
+
+    The annotation does not overwrite. An error that already names a
+    stage was raised by an inner load and knows better than this frame.
     """
 
     try:
         yield
-    except ConfigurationError:
+    except ConfigurationError as error:
+        error.context.setdefault("config_path", str(path) if path is not None else None)
+
+        error.context.setdefault("config_stage", stage)
+
         raise
     except (SerializationError, ValidationError) as error:
         # The original context is carried through flattened so it stays

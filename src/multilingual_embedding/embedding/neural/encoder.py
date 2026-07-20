@@ -16,6 +16,7 @@ makes vectors from differently-sized models directly comparable.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -32,7 +33,7 @@ from multilingual_embedding.utils.serialization import from_primitive, to_primit
 
 from .architecture import EncoderConfig, TransformerEncoderModel
 
-__all__ = ["NeuralTextEncoder", "Tokenizes", "resolve_device"]
+__all__ = ["NeuralTextEncoder", "Tokenizes", "autocast_for", "resolve_device"]
 
 _logger = get_logger(__name__)
 
@@ -66,9 +67,12 @@ def resolve_device(preference: str | None = None) -> torch.device:
     preference is honoured without checking, so that a caller can force
     CPU for a reproducibility run — GPU reductions are not
     bit-deterministic across runs.
+
+    ``"auto"`` is spelled out because it is what a configuration file
+    carries; it means the same as no preference at all.
     """
 
-    if preference:
+    if preference and preference != "auto":
         return torch.device(preference)
 
     if torch.cuda.is_available():
@@ -78,6 +82,63 @@ def resolve_device(preference: str | None = None) -> torch.device:
         return torch.device("mps")
 
     return torch.device("cpu")
+
+
+def autocast_for(device: torch.device, precision: str) -> AbstractContextManager[None]:
+    """
+    Return the mixed-precision context a run should train under.
+
+    ``"fp32"`` yields a null context, so the ordinary path carries no
+    autocast machinery at all.
+
+    Only bfloat16 is offered. It shares fp32's exponent range, so it
+    needs no loss scaling — the ``GradScaler`` dance that fp16 requires
+    exists to stop small gradients flushing to zero, and bf16 does not
+    have that failure. It trades mantissa bits instead, which training
+    tolerates well.
+
+    Apple Metal is deliberately excluded. MPS autocast support has been
+    incomplete across torch versions, and silently training in a
+    precision the caller did not ask for is worse than ignoring the
+    request loudly, so this warns and falls back to fp32.
+
+    Raises
+    ------
+    ValidationError
+        If ``precision`` names something unsupported. Configuration
+        catches this earlier; the check is here so the function is safe
+        to call directly.
+    """
+
+    if precision == "fp32":
+        return nullcontext()
+
+    if precision != "bf16":
+        raise ValidationError(
+            "Unsupported precision",
+            precision=precision,
+            supported=["fp32", "bf16"],
+        )
+
+    if device.type == "mps":
+        _logger.warning(
+            "Ignoring bf16 request: autocast is unreliable on Apple Metal",
+            extra={"device": str(device), "precision": precision},
+        )
+
+        return nullcontext()
+
+    # torch ships no annotations for this one, so a strict checker sees an
+    # untyped call in typed context.
+    if device.type == "cuda" and not torch.cuda.is_bf16_supported():  # type: ignore[no-untyped-call]
+        _logger.warning(
+            "Ignoring bf16 request: this GPU does not support bfloat16",
+            extra={"device": str(device)},
+        )
+
+        return nullcontext()
+
+    return torch.autocast(device_type=device.type, dtype=torch.bfloat16)
 
 
 class NeuralTextEncoder:

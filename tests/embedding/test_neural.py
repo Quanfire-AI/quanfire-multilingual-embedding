@@ -400,3 +400,121 @@ class TestServesThroughTheExistingPipeline:
         pipeline.index(["rain storm today", "bank loan today", "cloud wind today"])
 
         assert pipeline.search("bank loan today", top_k=1)[0].text == "bank loan today"
+
+
+class TestPrecision:
+    """
+    Mixed precision, and the join between a machine profile and a run.
+
+    Everything here executes on CPU. bf16 *autocast* is exercised
+    genuinely — the ops really do run in bfloat16 — but CUDA kernel
+    selection and the speed and memory claims that motivate bf16 are not
+    reachable from this machine and remain unverified until a run happens
+    on the GPU box.
+    """
+
+    def _pairs(self) -> list[TextPair]:
+        words = ["rain", "storm", "cloud", "wind", "thunder", "drizzle"]
+
+        return [
+            TextPair(f"{words[i % 6]} {words[(i + 2) % 6]}", f"{words[(i + 2) % 6]} today")
+            for i in range(16)
+        ]
+
+    def test_autocast_selects_bfloat16_on_cpu(self) -> None:
+        """The context is real, not a no-op that quietly does nothing."""
+
+        from multilingual_embedding.embedding.neural.encoder import autocast_for
+
+        with autocast_for(torch.device("cpu"), "bf16"):
+            product = torch.randn(4, 4) @ torch.randn(4, 4)
+
+        assert product.dtype is torch.bfloat16
+
+    def test_fp32_context_is_inert(self) -> None:
+        from multilingual_embedding.embedding.neural.encoder import autocast_for
+
+        with autocast_for(torch.device("cpu"), "fp32"):
+            product = torch.randn(4, 4) @ torch.randn(4, 4)
+
+        assert product.dtype is torch.float32
+
+    def test_autocast_state_is_restored_after_the_block(self) -> None:
+        """
+        One context object is reused for every step of a run rather than
+        rebuilt, so it has to leave the global autocast state as it found
+        it. A leak here would silently put inference in bf16 too.
+        """
+
+        from multilingual_embedding.embedding.neural.encoder import autocast_for
+
+        context = autocast_for(torch.device("cpu"), "bf16")
+
+        for _ in range(3):
+            with context:
+                assert torch.is_autocast_cpu_enabled()
+
+            assert not torch.is_autocast_cpu_enabled()
+
+    def test_bf16_training_still_learns(self) -> None:
+        """
+        The claim that matters. bf16 trades mantissa bits, and the
+        question is whether the loss still falls — if it did not, the GPU
+        profile would train a worse model than the laptop one and the
+        whole split would be unsound.
+        """
+
+        encoder = build_encoder()
+
+        # Load-bearing, and easy to lose. On Metal this trainer falls back
+        # to fp32 by design, so an encoder that resolved to MPS would make
+        # this a second fp32 test wearing a bf16 name.
+        assert encoder.device.type == "cpu", "this test only means anything off Metal"
+
+        report = ContrastiveTrainer(
+            encoder,
+            ContrastiveConfig(epochs=6, batch_size=8, learning_rate=3e-3, seed=1, precision="bf16"),
+        ).train(self._pairs())
+
+        assert report.improved, f"bf16 loss did not fall: {report.losses}"
+
+    def test_bf16_is_requested_but_ignored_on_metal(self) -> None:
+        """
+        Ignoring it is deliberate. Metal's autocast support is uneven, and
+        falling back loudly beats training in a precision nobody chose.
+        """
+
+        from multilingual_embedding.embedding.neural.encoder import autocast_for
+
+        context = autocast_for(torch.device("mps"), "bf16")
+
+        with context:
+            product = torch.randn(4, 4) @ torch.randn(4, 4)
+
+        assert product.dtype is torch.float32
+
+    def test_for_compute_joins_machine_to_experiment(self) -> None:
+        """
+        The machine supplies batch size and precision; the experiment
+        supplies everything that determines the result.
+        """
+
+        from multilingual_embedding.config.base import ComputeConfig
+
+        config = ContrastiveConfig.for_compute(
+            ComputeConfig(batch_size=256, precision="bf16"),
+            epochs=9,
+            temperature=0.02,
+        )
+
+        assert config.batch_size == 256
+
+        assert config.precision == "bf16"
+
+        assert config.epochs == 9
+
+        assert config.temperature == 0.02
+
+    def test_an_invalid_precision_is_caught_when_the_config_is_built(self) -> None:
+        with pytest.raises(ValidationError):
+            ContrastiveConfig(precision="fp16")

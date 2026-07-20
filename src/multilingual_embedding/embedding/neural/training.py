@@ -29,16 +29,18 @@ from __future__ import annotations
 import math
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
+from multilingual_embedding.config.base import ComputeConfig
 from multilingual_embedding.core.exceptions import ValidationError
 from multilingual_embedding.core.logging import get_logger
 from multilingual_embedding.utils.validation import require_positive
 
-from .encoder import NeuralTextEncoder
+from .encoder import NeuralTextEncoder, autocast_for
 
 __all__ = ["ContrastiveConfig", "ContrastiveTrainer", "TextPair", "TrainingReport"]
 
@@ -102,6 +104,12 @@ class ContrastiveConfig:
 
     seed:
         Seeds shuffling and dropout, so a run reproduces.
+
+    precision:
+        ``"fp32"`` or ``"bf16"``. Machine-shaped rather than
+        experiment-shaped: it belongs to whichever box the run lands on,
+        which is why it is normally supplied by a compute profile rather
+        than written into an experiment by hand.
     """
 
     epochs: int = 3
@@ -120,6 +128,8 @@ class ContrastiveConfig:
 
     seed: int = 42
 
+    precision: str = "fp32"
+
     def __post_init__(self) -> None:
         require_positive(self.epochs, name="epochs")
 
@@ -134,6 +144,51 @@ class ContrastiveConfig:
                 "warmup_ratio must lie in [0, 1)",
                 warmup_ratio=self.warmup_ratio,
             )
+
+        # Checked here as well as in `autocast_for`, so a typo in a
+        # profile fails when the config is built rather than after the
+        # model has been placed on the device.
+        if self.precision not in {"fp32", "bf16"}:
+            raise ValidationError(
+                "Unsupported precision",
+                precision=self.precision,
+                supported=["bf16", "fp32"],
+            )
+
+    @classmethod
+    def for_compute(
+        cls,
+        compute: ComputeConfig,
+        **settings: Any,
+    ) -> ContrastiveConfig:
+        """
+        Build a training config from an experiment plus a machine.
+
+        This is the join between the two halves of a configuration. The
+        keyword arguments carry the experiment — epochs, learning rate,
+        temperature, the things a result depends on — while ``compute``
+        supplies what the machine dictates. Running the same experiment
+        on another box means changing only the second argument.
+
+        ``batch_size`` is the one setting that appears in both and is
+        taken from ``compute``, because memory decides it. It does change
+        the result, since it sets how many negatives each query is
+        contrasted against, which is why a report records it.
+
+        Example
+        -------
+        ::
+
+            config = ContrastiveConfig.for_compute(
+                experiment.compute, epochs=3, learning_rate=2e-5
+            )
+        """
+
+        return cls(
+            batch_size=compute.batch_size,
+            precision=compute.precision,
+            **settings,
+        )
 
 
 @dataclass(slots=True)
@@ -271,11 +326,21 @@ class ContrastiveTrainer:
 
         step = 0
 
+        # Resolved once rather than per step. It also emits a warning when
+        # the request cannot be honoured, which should be said once.
+        precision = autocast_for(device, config.precision)
+
         for epoch in range(config.epochs):
             epoch_losses: list[float] = []
 
             for batch in self._batches(pairs, generator):
-                loss = self._step(model, batch, device)
+                # The forward pass runs under autocast; the backward pass
+                # deliberately does not. Autograd replays each operation
+                # in the dtype autocast chose for it, so wrapping the
+                # backward would be redundant at best, and torch
+                # documents it as unsupported.
+                with precision:
+                    loss = self._step(model, batch, device)
 
                 optimizer.zero_grad(set_to_none=True)
 

@@ -5,6 +5,7 @@ Typed configuration for every stage of the framework.
 from __future__ import annotations
 
 from .base import (
+    ComputeConfig,
     CorpusConfig,
     EmbeddingConfig,
     EvaluationConfig,
@@ -21,6 +22,7 @@ from .loader import (
 
 __all__ = [
     "ENV_PREFIX",
+    "ComputeConfig",
     "CorpusConfig",
     "EmbeddingConfig",
     "EvaluationConfig",

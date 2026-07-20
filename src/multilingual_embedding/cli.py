@@ -152,6 +152,16 @@ def _add_common_config_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
     parser.add_argument(
+        "--profile",
+        type=Path,
+        help=(
+            "Compute profile merged over the configuration, e.g. "
+            "configs/gpu.yaml. Carries the settings the machine dictates, "
+            "so one experiment runs unchanged on a laptop and a GPU box"
+        ),
+    )
+
+    parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
@@ -470,8 +480,8 @@ def _resolve_config(args: argparse.Namespace) -> ExperimentConfig:
     Build the experiment configuration from file, flags and overrides.
 
     Explicit flags such as ``--source`` are folded in as overrides so
-    that precedence stays in one place: file, then environment, then
-    ``--set``, then named flags.
+    that precedence stays in one place: file, then profile, then
+    environment, then ``--set``, then named flags.
     """
 
     overrides: dict[str, Any] = {}
@@ -493,7 +503,7 @@ def _resolve_config(args: argparse.Namespace) -> ExperimentConfig:
     if corpus_overrides:
         _merge(overrides, {"corpus": corpus_overrides})
 
-    config = load_config(args.config, overrides=overrides)
+    config = load_config(args.config, profile=args.profile, overrides=overrides)
 
     if config.corpus.source is None:
         raise MultilingualEmbeddingError(

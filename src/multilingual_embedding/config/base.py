@@ -33,6 +33,7 @@ from multilingual_embedding.utils.validation import (
 )
 
 __all__ = [
+    "ComputeConfig",
     "CorpusConfig",
     "EmbeddingConfig",
     "EvaluationConfig",
@@ -373,6 +374,102 @@ class EvaluationConfig:
 
 
 @dataclass(slots=True)
+class ComputeConfig:
+    """
+    Settings that describe the machine rather than the experiment.
+
+    These are the values that legitimately differ between a laptop and a
+    training box: which device, what numeric precision, how much can be
+    held in memory at once. Keeping them in their own section is what
+    lets one experiment run unchanged on both — the science lives in the
+    other sections and stays fixed, while this section is swapped.
+
+    Nothing here changes what is computed, only how much of it fits and
+    how fast it runs. A result should be reproducible across profiles up
+    to floating-point tolerance and the batch size, which does change
+    the number of in-batch negatives and therefore the outcome. That one
+    exception is why ``batch_size`` is recorded alongside the artefacts.
+
+    Attributes
+    ----------
+    device:
+        ``"auto"`` resolves CUDA, then Apple MPS, then CPU. Name one
+        explicitly to pin it — most usefully ``"cpu"`` on a GPU machine,
+        to tell a real bug apart from a device-specific one.
+
+    precision:
+        ``"fp32"`` everywhere, or ``"bf16"`` for mixed precision on
+        hardware that supports it. ``bf16`` roughly halves activation
+        memory and is materially faster on recent NVIDIA parts. It has
+        the same exponent range as fp32, so unlike fp16 it does not need
+        loss scaling.
+
+    batch_size:
+        Pairs per step. In contrastive training this doubles as the
+        number of negatives each query is contrasted against, so it is
+        the single knob most worth raising on a larger card.
+
+    gradient_checkpoint_chunk:
+        Chunk size for gradient caching. ``0`` disables it and encodes
+        the batch in one pass. When set, peak memory follows the chunk
+        rather than the batch, which is what allows a batch size the
+        card could not otherwise hold. Mathematically exact either way.
+
+    workers:
+        Data loading processes. ``0`` loads in the main process, which
+        is the right choice on a laptop and usually wrong on a training
+        box.
+    """
+
+    device: str = "auto"
+
+    precision: str = "fp32"
+
+    batch_size: int = 16
+
+    gradient_checkpoint_chunk: int = 0
+
+    workers: int = 0
+
+    def __post_init__(self) -> None:
+        require_positive(self.batch_size, name="batch_size")
+
+        require_non_negative(
+            self.gradient_checkpoint_chunk,
+            name="gradient_checkpoint_chunk",
+        )
+
+        require_non_negative(self.workers, name="workers")
+
+        if self.precision not in _PRECISIONS:
+            raise ConfigurationError(
+                "Unsupported precision",
+                precision=self.precision,
+                supported=sorted(_PRECISIONS),
+            )
+
+        # Devices are validated by shape rather than against what this
+        # machine happens to have. A GPU profile must survive being read
+        # on the laptop that wrote it — to be diffed, validated in CI, or
+        # committed — and rejecting "cuda" here would make that
+        # impossible. An unavailable device fails later, at the point of
+        # use, where the error can say so precisely.
+        root = self.device.split(":", 1)[0]
+
+        if root not in _DEVICES:
+            raise ConfigurationError(
+                "Unsupported device",
+                device=self.device,
+                supported=sorted(_DEVICES),
+            )
+
+
+_PRECISIONS = frozenset({"fp32", "bf16"})
+
+_DEVICES = frozenset({"auto", "cpu", "cuda", "mps"})
+
+
+@dataclass(slots=True)
 class ExperimentConfig:
     """
     Root configuration binding every stage of one experiment.
@@ -392,6 +489,11 @@ class ExperimentConfig:
 
     corpus, tokenizer, embedding, evaluation:
         Per stage configuration.
+
+    compute:
+        Machine-shaped settings. The section a profile swaps, and
+        the only one expected to differ between a laptop and a
+        training box.
     """
 
     name: str = "default"
@@ -407,6 +509,8 @@ class ExperimentConfig:
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
 
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
+
+    compute: ComputeConfig = field(default_factory=ComputeConfig)
 
     def __post_init__(self) -> None:
         # See CorpusConfig.__post_init__: YAML supplies this as a string.
@@ -426,6 +530,8 @@ class ExperimentConfig:
         self.embedding = _coerced_section(self.embedding, EmbeddingConfig, name="embedding")
 
         self.evaluation = _coerced_section(self.evaluation, EvaluationConfig, name="evaluation")
+
+        self.compute = _coerced_section(self.compute, ComputeConfig, name="compute")
 
         require_non_negative(self.seed, name="seed")
 
