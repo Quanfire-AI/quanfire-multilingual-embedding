@@ -341,3 +341,54 @@ class TestFormatNamesAgree:
                     assert not missing, f"{name} --format omits {sorted(missing)}"
 
         assert checked, "no subcommand exposed --format; the test found nothing to check"
+
+
+class TestTheCliDocstringMatchesTheCli:
+    """
+    The module docstring of ``cli.py`` is the first thing a reader sees,
+    and it drifted: it said "Four subcommands" for as long as there were
+    five, having never been revisited when ``validate`` was added.
+
+    This is the same failure as ``TestFormatNamesAgree`` above — a second
+    place restating a fact that only one place owns — so it gets the same
+    treatment rather than a promise to remember.
+    """
+
+    def test_every_subcommand_appears_in_the_docstring(self) -> None:
+        import multilingual_embedding.cli as cli
+
+        parser = cli.build_parser()
+
+        registered = {
+            name
+            for action in parser._subparsers._group_actions  # type: ignore[union-attr]
+            for name in action.choices  # type: ignore[attr-defined]
+        }
+
+        docstring = cli.__doc__ or ""
+
+        missing = {name for name in registered if f"qfme {name}" not in docstring}
+
+        assert not missing, (
+            f"registered subcommands absent from the cli.py docstring: {sorted(missing)}"
+        )
+
+    def test_the_docstring_does_not_advertise_a_subcommand_that_is_gone(self) -> None:
+        import re
+
+        import multilingual_embedding.cli as cli
+
+        parser = cli.build_parser()
+
+        registered = {
+            name
+            for action in parser._subparsers._group_actions  # type: ignore[union-attr]
+            for name in action.choices  # type: ignore[attr-defined]
+        }
+
+        advertised = set(re.findall(r"qfme (\w+)", cli.__doc__ or ""))
+
+        assert advertised <= registered, (
+            f"the docstring advertises subcommands that do not exist: "
+            f"{sorted(advertised - registered)}"
+        )

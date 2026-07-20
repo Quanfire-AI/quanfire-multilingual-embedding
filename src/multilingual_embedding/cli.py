@@ -1,18 +1,23 @@
 """
 Command line interface.
 
-Installed as ``qfme``. Four subcommands cover the lifecycle::
+Installed as ``qfme``. Five subcommands cover the lifecycle::
 
     qfme stats    --source data/corpus.jsonl
+    qfme validate --source data/corpus.jsonl
     qfme train    --config experiments/demo.yaml
     qfme search   --experiment artifacts/demo --query "machine learning"
     qfme evaluate --experiment artifacts/demo --source data/corpus.jsonl
 
-Every subcommand accepts ``--set key.path=value`` for ad hoc
-configuration overrides, so an experiment can be varied without editing
-a file:
+``validate`` audits a corpus before anything is trained on it and exits
+non-zero when the corpus is unusable, so a data pipeline can gate on it.
+
+Every config-driven subcommand accepts ``--set key.path=value`` for ad
+hoc overrides, and ``--profile`` for the settings a machine dictates, so
+one experiment runs unchanged on a laptop and a GPU box:
 
     qfme train --config demo.yaml --set embedding.dimension=256
+    qfme train --config demo.yaml --profile configs/gpu.yaml
 
 Exit codes: ``0`` success, ``1`` a framework error the user can act on,
 ``130`` interrupted. Framework errors are reported as a single readable
