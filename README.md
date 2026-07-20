@@ -34,7 +34,9 @@ corpus  ->  tokenizer  ->  vocabulary  ->  embeddings  ->  evaluation  ->  searc
 > **Where this is going:** [ROADMAP.md](ROADMAP.md) sets out the path to an embedding
 > model factory — corpus in, trained and evaluated model out, generic or adapted to a
 > specific domain. The word2vec model below is the static baseline that future encoders
-> are measured against.
+> are measured against. [ECOSYSTEM.md](ECOSYSTEM.md) places this repository within the
+> wider QuanFire AI stack and explains which modalities are worth training rather than
+> integrating.
 
 > **Looking for the full reference?**
 > [`knowledge-base/QuanFire-Multilingual-Embedding-Handbook.pdf`](knowledge-base/QuanFire-Multilingual-Embedding-Handbook.pdf)
