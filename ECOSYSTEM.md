@@ -42,23 +42,75 @@ when an LLM is trained, and a separate project owns that.
 
 ## 2. Repository architecture
 
-### Recommendation: shared core, separate modality repositories
+### Recommendation: one repository, as a uv workspace
 
-**Not one repository.** The dependency sets conflict, the install sizes are large and
-unrelated, the compute profiles differ, and CI would become unusable. Someone who wants
-text segmentation should not install video libraries.
+An earlier draft argued for separate repositories on the grounds that the dependency
+sets conflict and that a caller wanting text segmentation should not be made to install
+video libraries. **That objection is wrong, and was tested rather than assumed.**
 
-**Not fully independent either**, or configuration, logging, artefact handling and
-serving get reimplemented four times, inconsistently.
+A uv workspace gives each package its own dependencies inside a single repository.
+Syncing one package installs only what that package declares:
 
 ```
-quanfire-ml-core          shared foundations, no ML dependencies
-        │
-        ├── quanfire-multilingual-embedding   text embeddings   ← this repository
-        ├── quanfire-llm                      text-to-text
-        ├── quanfire-vision                   image generation and understanding
-        └── quanfire-speech                   text-to-speech, speech-to-text
+$ uv sync --package qf-core
+ + pyyaml==6.0.3
+ + qf-core==0
+
+$ uv run --package qf-core python -c "..."
+pyyaml: True
+numpy : False        # declared by a sibling package, correctly absent
 ```
+
+With the main objection removed, the balance favours a monorepo decisively for a small
+team:
+
+| | Monorepo | Separate repositories |
+|---|---|---|
+| Change core and every consumer | One commit, one CI run | Coordinated pull requests across repos |
+| Internal versioning | None needed | Publish and pin every package |
+| Dependency isolation | ✅ per-package via workspace | ✅ inherent |
+| Refactor across a boundary | Trivial | Painful |
+| Independent open-sourcing | Harder | Easy |
+| Independent access control | Harder | Easy |
+
+Only the last two favour separation, and neither applies yet.
+
+**The decisive argument is asymmetry.** Splitting a monorepo later is a mechanical
+history-preserving operation. Merging separate repositories later loses history or
+requires surgery. Start together; split when there is a concrete reason, such as
+open-sourcing one component or handing it to a different team.
+
+```
+quanfire-ai/                        one repository, uv workspace
+├── pyproject.toml                  workspace root
+├── uv.lock                         single lockfile, all packages
+└── packages/
+    ├── core/       config, logging, registry, artefacts   no ML dependencies
+    ├── text/       corpus, tokenizer, vocabulary          no ML dependencies
+    ├── embedding/  encoders, training, evaluation         torch
+    ├── llm/        text-to-text                           torch, transformers
+    ├── vision/     image generation and understanding     torch, diffusers
+    └── speech/     text-to-speech, speech-to-text         torch, audio stack
+```
+
+### The split points already exist
+
+This repository's layer graph maps onto the package boundaries without redesign, which
+is the payoff from having enforced it:
+
+| Package | Current layers |
+|---|---|
+| `core` | `common`, `core`, `utils`, `config` |
+| `text` | `corpus`, `tokenizer`, `vocabulary` |
+| `embedding` | `embedding`, `evaluation`, `pipelines` |
+
+The architecture test that forbids upward imports is what guarantees these cut cleanly.
+
+### When to do it
+
+**Not yet.** A workspace containing one package is ceremony. Restructure when the second
+package is created — most likely when `core` is extracted for the LLM or speech work.
+Doing it then costs the same as doing it now and avoids speculative churn.
 
 ### What belongs in the shared core
 
@@ -74,8 +126,9 @@ Most of it already exists here and would be extracted rather than written:
 | Corpus and text preparation | Built — text modalities only |
 | Serving base — batching, versioning, standard schema | To build |
 
-The text-preparation layer stays in the embedding repository but is importable, since
-LLM and TTS work both need correct segmentation and script handling.
+Text preparation is its own package rather than part of `embedding`, because the LLM and
+speech work both need correct segmentation and script handling and should not pull in a
+training stack to get it.
 
 ---
 
@@ -266,15 +319,15 @@ the last thing to add and the first thing to drop.
 
 Each step should produce something usable before the next begins.
 
-| Order | Work | Repository |
+| Order | Work | Package |
 |---|---|---|
-| 1 | Finish the embedding factory — Phases A–D | this repo |
-| 2 | Extract the shared core | `quanfire-ml-core` |
-| 3 | Integrate TTS behind a service, with Indian text normalisation | `quanfire-speech` |
-| 4 | Fine-tune an LLM for document extraction and summarisation | `quanfire-llm` |
-| 5 | Fine-tune a VLM for document understanding | `quanfire-vision` |
-| 6 | Integrate image generation | `quanfire-vision` |
-| 7 | Integrate video, if still wanted | `quanfire-vision` |
+| 1 | Finish the embedding factory — Phases A–D | `packages/embedding` |
+| 2 | Restructure into a workspace; extract `core` and `text` | `packages/core`, `packages/text` |
+| 3 | Integrate TTS behind a service, with Indian text normalisation | `packages/speech` |
+| 4 | Fine-tune an LLM for document extraction and summarisation | `packages/llm` |
+| 5 | Fine-tune a VLM for document understanding | `packages/vision` |
+| 6 | Integrate image generation | `packages/vision` |
+| 7 | Integrate video, if still wanted | `packages/vision` |
 
 Steps 4 and 5 depend on **retaining paired training data from DocPro now** — documents
 alongside their extracted output. That data is being generated already; if it is not being
