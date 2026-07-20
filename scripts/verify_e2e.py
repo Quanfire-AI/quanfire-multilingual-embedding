@@ -555,36 +555,89 @@ def run_contextual(pairs_path: Path) -> None:
             64,
         )
 
-        if torch.cuda.is_available():
-            torch.cuda.reset_peak_memory_stats()
+        if not torch.cuda.is_available():
+            return
 
-            run(
-                "train-contextual[bf16+gradcache]",
-                stage_train_contextual,
-                pairs_path,
-                device,
-                "bf16",
-                256,
-                32,
-                4000,
-                4,
-                256,
-            )
+        # A full 2x2, not two opposite corners.
+        #
+        # The first version compared bf16+gradcache against
+        # fp32+nogradcache and measured a 16.9x reduction in peak VRAM on
+        # a 4070 Ti SUPER. The number was real and unattributable: two
+        # variables moved at once, so it could have been almost all
+        # gradient caching, almost all bf16, or any split between them.
+        # Measuring the two middle cells costs ten seconds and is the
+        # difference between a number and a claim.
+        for precision in ("fp32", "bf16"):
+            for chunk in (0, 32):
+                label = f"{precision}+{'gradcache' if chunk else 'nocache'}"
 
-            torch.cuda.reset_peak_memory_stats()
+                torch.cuda.empty_cache()
 
-            run(
-                "train-contextual[fp32+nogradcache]",
-                stage_train_contextual,
-                pairs_path,
-                device,
-                "fp32",
-                256,
-                0,
-                4000,
-                4,
-                256,
-            )
+                torch.cuda.reset_peak_memory_stats()
+
+                run(
+                    f"ablation[{label}]",
+                    stage_train_contextual,
+                    pairs_path,
+                    device,
+                    precision,
+                    256,
+                    chunk,
+                    4000,
+                    4,
+                    256,
+                )
+
+        summarise_ablation()
+
+
+def summarise_ablation() -> None:
+    """
+    Lay the 2x2 out, so attribution is read rather than inferred.
+
+    Printing four numbers in a list leaves the reader doing the division
+    that decides which feature earned its place.
+    """
+
+    cells = {
+        stage.name[len("ablation[") : -1]: stage.detail
+        for stage in STAGES
+        if stage.name.startswith("ablation[") and stage.ok
+    }
+
+    if len(cells) < 4:
+        return
+
+    say()
+
+    say("  ABLATION — peak VRAM in GB, batch 256, identical model and data")
+
+    say(f"  {'':10}{'no gradcache':>16}{'gradcache':>14}")
+
+    for precision in ("fp32", "bf16"):
+        plain = cells.get(f"{precision}+nocache", {}).get("peak_vram_gb")
+
+        cached = cells.get(f"{precision}+gradcache", {}).get("peak_vram_gb")
+
+        say(f"  {precision:10}{plain!s:>16}{cached!s:>14}")
+
+    baseline = cells.get("fp32+nocache", {}).get("peak_vram_gb")
+
+    if baseline:
+        say()
+
+        for label in ("bf16+nocache", "fp32+gradcache", "bf16+gradcache"):
+            value = cells.get(label, {}).get("peak_vram_gb")
+
+            if value:
+                say(f"  {label:16} {baseline / value:5.1f}x less than fp32+nocache")
+
+    say()
+
+    say("  Final losses, which should barely differ if the maths holds:")
+
+    for label, detail in sorted(cells.items()):
+        say(f"    {label:16} {detail.get('final_loss')}   {detail.get('seconds', '')}")
 
 
 def finish(started_at: float, work: pathlib.Path) -> int:
