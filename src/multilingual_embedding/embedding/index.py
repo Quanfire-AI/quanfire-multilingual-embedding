@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 
 from multilingual_embedding.core.exceptions import (
     ResourceNotFoundError,
@@ -126,7 +127,7 @@ class SimilarityIndex:
     @classmethod
     def build(
         cls,
-        items: Iterable[tuple[str, np.ndarray]],
+        items: Iterable[tuple[str, NDArray[np.float32]]],
         encoder: SentenceEncoder | None = None,
         dimension: int | None = None,
     ) -> SimilarityIndex:
@@ -182,7 +183,7 @@ class SimilarityIndex:
 
         return index
 
-    def add(self, items: Iterable[tuple[str, np.ndarray]]) -> int:
+    def add(self, items: Iterable[tuple[str, NDArray[np.float32]]]) -> int:
         """
         Append labelled vectors to the index.
 
@@ -199,7 +200,7 @@ class SimilarityIndex:
 
         labels: list[str] = []
 
-        rows: list[np.ndarray] = []
+        rows: list[NDArray[np.float32]] = []
 
         for label, vector in items:
             row = np.asarray(vector, dtype=np.float32).reshape(-1)
@@ -229,7 +230,7 @@ class SimilarityIndex:
     # Query
     # ------------------------------------------------------------------
 
-    def search(self, query: str | np.ndarray, top_k: int = 10) -> list[SearchResult]:
+    def search(self, query: str | NDArray[np.float32], top_k: int = 10) -> list[SearchResult]:
         """
         Return the ``top_k`` most similar items.
 
@@ -297,7 +298,7 @@ class SimilarityIndex:
         return list(self._labels)
 
     @property
-    def vectors(self) -> np.ndarray:
+    def vectors(self) -> NDArray[np.float32]:
         """The normalised vectors, shape ``(size, dimension)``."""
 
         return self._vectors
@@ -398,7 +399,7 @@ class SimilarityIndex:
     # Internals
     # ------------------------------------------------------------------
 
-    def _resolve_query(self, query: str | np.ndarray) -> np.ndarray:
+    def _resolve_query(self, query: str | NDArray[np.float32]) -> NDArray[np.float32]:
         """Return a unit-length query vector."""
 
         if isinstance(query, str):
@@ -425,11 +426,11 @@ class SimilarityIndex:
         return (vector / max(norm, _NORM_EPSILON)).astype(np.float32)
 
 
-def _normalize_rows(vectors: np.ndarray) -> np.ndarray:
+def _normalize_rows(vectors: NDArray[np.float32]) -> NDArray[np.float32]:
     """Scale each row to unit length, leaving zero rows at zero."""
 
     norms = np.linalg.norm(vectors, axis=1, keepdims=True)
 
-    scaled: np.ndarray = vectors / np.maximum(norms, _NORM_EPSILON)
+    scaled: NDArray[np.float32] = vectors / np.maximum(norms, _NORM_EPSILON)
 
     return scaled.astype(np.float32)

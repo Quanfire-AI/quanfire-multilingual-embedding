@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+from numpy.typing import NDArray
 
 from multilingual_embedding.config.base import ExperimentConfig
 from multilingual_embedding.core.exceptions import ResourceNotFoundError
@@ -255,7 +256,7 @@ class SemanticSearchPipeline:
 
         texts: list[str] = []
 
-        vectors: list[np.ndarray] = []
+        vectors: list[NDArray[np.float32]] = []
 
         for sentence in sentences:
             if not sentence.strip():

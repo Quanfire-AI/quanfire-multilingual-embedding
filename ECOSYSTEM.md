@@ -8,6 +8,75 @@ pipeline in this repository.
 
 ---
 
+## 0. What this ecosystem is, and what it is not
+
+**Infrastructure, data and compute are three separate problems.** Conflating them is the
+main way this plan can go wrong.
+
+| | What it is | How it is obtained |
+|---|---|---|
+| **Infrastructure** | The code that trains, evaluates, versions and serves a model | Engineering — within our control |
+| **Data** | Corpora, pairs, labelled examples | Collection and money |
+| **Compute** | GPU hours | Money |
+
+Model *quality* is mostly a function of data and compute. Pipeline *correctness* is a
+function of engineering. The second does not wait on the first: the same code that trains
+a toy model correctly trains a production model correctly, differing only in
+configuration and volume.
+
+**The objective is therefore the infrastructure**, proven to work, ready to scale when
+data and compute arrive. Not a competitive model — a machine that makes models.
+
+### What "proven" means here
+
+A modality counts as supported when, at deliberately small scale:
+
+1. The model **demonstrably learns** — loss falls and a held-out metric improves against
+   an untrained baseline.
+2. The run is **reproducible** — the same seed gives the same result.
+3. The artefact **round-trips** — saves, loads, and serves identically.
+4. It is **the same code path** a full-scale run would take, differing only in config.
+
+Point 4 is what makes the proof meaningful. A separate "toy mode" proves nothing.
+
+This bar costs no data budget and no GPU rental. The existing word2vec implementation
+already meets it: a synthetic two-topic corpus, with a test asserting within-topic
+similarity exceeds cross-topic similarity by a clear margin.
+
+### Design constraints
+
+- **Minimal.** Build the training and serving spine; integrate anything that is a
+  commodity. The spine is what must be owned.
+- **Independent.** No vendor lock-in, no mandatory external service, runs on-premise.
+- **Manageable.** Small enough for a small team to hold in their heads. Every component
+  earns its place or is removed.
+
+### The spine, and what plugs into it
+
+Almost everything is shared across modalities. Only four things are not.
+
+| Shared — belongs in core | Modality-specific — a plugin |
+|---|---|
+| Configuration, validation, precedence | Model architecture |
+| Structured logging | Loss function |
+| Registry and factory | Data preprocessing |
+| Streaming data abstractions | Evaluation metrics |
+| Training loop — checkpointing, resumption, mixed precision, accumulation | |
+| Artefact persistence and versioning | |
+| Evaluation and reporting harness | |
+| Serving — batching, versioning, standard schema | |
+
+A modality is therefore a thin plugin over a common spine, not a separate system. That is
+what keeps the ecosystem manageable at minimum size.
+
+### Data collection is a separate concern
+
+Corpus collection, licensing, cleaning and storage have a different lifecycle from
+training code and should live in their own repository. The training side consumes a
+prepared dataset; it does not scrape.
+
+---
+
 ## 1. Two different things called "embedding"
 
 This distinction determines what belongs in which project, so it comes first.

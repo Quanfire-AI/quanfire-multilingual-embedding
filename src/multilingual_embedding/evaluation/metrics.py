@@ -24,6 +24,7 @@ import math
 from collections.abc import Sequence
 
 import numpy as np
+from numpy.typing import NDArray
 
 from multilingual_embedding.utils.validation import require_positive
 
@@ -43,7 +44,7 @@ __all__ = [
 ]
 
 
-def cosine_similarity(first: np.ndarray, second: np.ndarray) -> float:
+def cosine_similarity(first: NDArray[np.float32], second: NDArray[np.float32]) -> float:
     """
     Cosine similarity between two vectors.
 
@@ -61,7 +62,9 @@ def cosine_similarity(first: np.ndarray, second: np.ndarray) -> float:
     return float(np.dot(first, second) / (first_norm * second_norm))
 
 
-def cosine_similarity_matrix(vectors: np.ndarray, other: np.ndarray | None = None) -> np.ndarray:
+def cosine_similarity_matrix(
+    vectors: NDArray[np.float32], other: NDArray[np.float32] | None = None
+) -> NDArray[np.float32]:
     """
     Pairwise cosine similarity between two sets of row vectors.
 
@@ -84,7 +87,7 @@ def cosine_similarity_matrix(vectors: np.ndarray, other: np.ndarray | None = Non
 
     right = _row_normalized(target)
 
-    similarities: np.ndarray = left @ right.T
+    similarities: NDArray[np.float32] = left @ right.T
 
     return similarities
 
@@ -293,7 +296,7 @@ def _average_ranks(values: Sequence[float]) -> list[float]:
     return ranks
 
 
-def _row_normalized(vectors: np.ndarray) -> np.ndarray:
+def _row_normalized(vectors: NDArray[np.float32]) -> NDArray[np.float32]:
     """L2 normalise rows, leaving zero rows as zero rather than NaN."""
 
     array = np.asarray(vectors, dtype=np.float64)
@@ -303,6 +306,6 @@ def _row_normalized(vectors: np.ndarray) -> np.ndarray:
 
     norms = np.linalg.norm(array, axis=1, keepdims=True)
 
-    normalized: np.ndarray = array / np.maximum(norms, 1e-12)
+    normalized: NDArray[np.float32] = array / np.maximum(norms, 1e-12)
 
     return normalized

@@ -27,6 +27,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 
 import numpy as np
+from numpy.typing import NDArray
 
 from multilingual_embedding.core.exceptions import ValidationError
 from multilingual_embedding.core.logging import get_logger
@@ -89,11 +90,11 @@ class SentenceEncoder(ABC):
         return self._matrix.dimension
 
     @abstractmethod
-    def encode(self, text: str) -> np.ndarray:
+    def encode(self, text: str) -> NDArray[np.float32]:
         """Encode one string."""
 
     @abstractmethod
-    def encode_batch(self, texts: Sequence[str]) -> np.ndarray:
+    def encode_batch(self, texts: Sequence[str]) -> NDArray[np.float32]:
         """Encode a sequence of strings into an ``(n, dimension)`` array."""
 
     def _known_ids(self, text: str) -> list[int]:
@@ -131,7 +132,7 @@ class MeanPoolingEncoder(SentenceEncoder):
 
     __slots__ = ()
 
-    def encode(self, text: str) -> np.ndarray:
+    def encode(self, text: str) -> NDArray[np.float32]:
         """
         Encode one string.
 
@@ -147,9 +148,11 @@ class MeanPoolingEncoder(SentenceEncoder):
         if not ids:
             return np.zeros(self.dimension, dtype=np.float32)
 
-        return self._matrix.vectors[ids].mean(axis=0).astype(np.float32)
+        pooled: NDArray[np.float32] = self._matrix.vectors[ids].mean(axis=0).astype(np.float32)
 
-    def encode_batch(self, texts: Sequence[str]) -> np.ndarray:
+        return pooled
+
+    def encode_batch(self, texts: Sequence[str]) -> NDArray[np.float32]:
         """
         Encode a sequence of strings.
 
@@ -221,7 +224,7 @@ class SifEncoder(SentenceEncoder):
 
         self._weights = _sif_weights(matrix, alpha)
 
-        self._component: np.ndarray | None = None
+        self._component: NDArray[np.float32] | None = None
 
     @property
     def alpha(self) -> float:
@@ -235,7 +238,7 @@ class SifEncoder(SentenceEncoder):
 
         return self._component is not None
 
-    def encode(self, text: str) -> np.ndarray:
+    def encode(self, text: str) -> NDArray[np.float32]:
         """
         Encode one string.
 
@@ -252,11 +255,11 @@ class SifEncoder(SentenceEncoder):
 
         encoded = self._remove_component(self._weighted_average(text).reshape(1, -1))
 
-        row: np.ndarray = encoded[0]
+        row: NDArray[np.float32] = encoded[0]
 
         return row
 
-    def encode_batch(self, texts: Sequence[str]) -> np.ndarray:
+    def encode_batch(self, texts: Sequence[str]) -> NDArray[np.float32]:
         """
         Encode a sequence of strings, fitting the common component from it.
 
@@ -275,7 +278,7 @@ class SifEncoder(SentenceEncoder):
 
         return self._remove_component(averages)
 
-    def _weighted_average(self, text: str) -> np.ndarray:
+    def _weighted_average(self, text: str) -> NDArray[np.float32]:
         """SIF-weighted mean of the in-vocabulary token vectors."""
 
         ids = self._known_ids(text)
@@ -290,13 +293,13 @@ class SifEncoder(SentenceEncoder):
         if total <= 0.0:
             return np.zeros(self.dimension, dtype=np.float32)
 
-        selected: np.ndarray = self._matrix.vectors[ids]
+        selected: NDArray[np.float32] = self._matrix.vectors[ids]
 
-        averaged: np.ndarray = (weights @ selected) / total
+        averaged: NDArray[np.float32] = (weights @ selected) / total
 
         return averaged.astype(np.float32)
 
-    def _fit_component(self, averages: np.ndarray) -> None:
+    def _fit_component(self, averages: NDArray[np.float32]) -> None:
         """Estimate the leading singular direction of a batch of averages."""
 
         if averages.shape[0] < 2 or not np.any(averages):
@@ -310,7 +313,7 @@ class SifEncoder(SentenceEncoder):
 
         _logger.debug("Fitted SIF common component", extra={"batch": int(averages.shape[0])})
 
-    def _remove_component(self, vectors: np.ndarray) -> np.ndarray:
+    def _remove_component(self, vectors: NDArray[np.float32]) -> NDArray[np.float32]:
         """Project out the fitted common component, if there is one."""
 
         if self._component is None:
@@ -321,7 +324,7 @@ class SifEncoder(SentenceEncoder):
         return (vectors - np.outer(projection, self._component)).astype(np.float32)
 
 
-def _sif_weights(matrix: EmbeddingMatrix, alpha: float) -> np.ndarray:
+def _sif_weights(matrix: EmbeddingMatrix, alpha: float) -> NDArray[np.float32]:
     """Per-id SIF weight ``alpha / (alpha + p(token))``."""
 
     frequencies = np.asarray(matrix.vocabulary.frequencies(), dtype=np.float64)

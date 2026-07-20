@@ -6,11 +6,33 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 
 dependencies = [
-    "numpy>=2.0,<3.0",
+    "numpy>=1.26,<3.0",
     "pandas>=2.0,<3.0",
     "pyyaml>=6.0,<7.0",
     "sentencepiece>=0.2,<0.3",
     "tqdm>=4.67,<5.0",
+]
+
+[project.optional-dependencies]
+# Neural training and inference. Kept optional so that the corpus,
+# tokenizer, vocabulary and evaluation layers remain a small install for
+# callers that only need text preparation — which the LLM and speech work
+# will, without wanting a training stack.
+#
+#     uv sync --extra neural
+#
+# The version is pinned differently on Intel macOS: torch stopped shipping
+# x86_64 macOS wheels after 2.2, so a development machine of that kind caps
+# there. Training hosts (Linux and Windows with CUDA) take the current
+# release. The split keeps one lockfile resolvable on both.
+neural = [
+    "torch>=2.2,<2.3; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "torch>=2.2; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    # That last Intel macOS build of torch predates NumPy 2 and its interop
+    # fails outright — `tensor.numpy()` raises "Numpy is not available" — so
+    # NumPy is held below 2 on that platform alone. Verified: the full suite
+    # passes on 1.26, so the previous >=2.0 floor was incidental.
+    "numpy<2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
 ]
 
 [project.scripts]

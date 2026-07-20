@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 
 from multilingual_embedding.core.logging import get_logger
 from multilingual_embedding.embedding.matrix import EmbeddingMatrix
@@ -381,7 +382,7 @@ class EmbeddingEvaluator:
 
         return int(np.sum(np.all(self._matrix.vectors == 0.0, axis=1)))
 
-    def _informative_vectors(self) -> np.ndarray:
+    def _informative_vectors(self) -> NDArray[np.float32]:
         """Return non-special, non-zero rows."""
 
         special_count = self._matrix.vocabulary.special_tokens.count
@@ -393,7 +394,9 @@ class EmbeddingEvaluator:
 
         non_zero = ~np.all(vectors == 0.0, axis=1)
 
-        return vectors[non_zero]
+        informative: NDArray[np.float32] = vectors[non_zero]
+
+        return informative
 
 
 def load_similarity_dataset(path: str | Path) -> list[SimilarityPair]:

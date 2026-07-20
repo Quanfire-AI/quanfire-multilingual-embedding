@@ -34,6 +34,7 @@ from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
 import numpy as np
+from numpy.typing import NDArray
 
 __all__ = ["TextEncoder", "encoder_dimension"]
 
@@ -76,11 +77,11 @@ class TextEncoder(Protocol):
         """Length of a vector produced by this encoder."""
         ...
 
-    def encode(self, text: str) -> np.ndarray:
+    def encode(self, text: str) -> NDArray[np.float32]:
         """Encode one string into a vector of length :attr:`dimension`."""
         ...
 
-    def encode_batch(self, texts: Sequence[str]) -> np.ndarray:
+    def encode_batch(self, texts: Sequence[str]) -> NDArray[np.float32]:
         """Encode several strings into a ``(n, dimension)`` array."""
         ...
 

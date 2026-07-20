@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 
 from multilingual_embedding.config.base import EmbeddingConfig
 from multilingual_embedding.core.exceptions import NotFittedError, ValidationError
@@ -120,13 +121,13 @@ class Word2Vec(EmbeddingModel):
         # would quietly produce an unreproducible run.
         self._rng = np.random.default_rng(self._config.resolved_seed)
 
-        self._input_weights: np.ndarray | None = None
+        self._input_weights: NDArray[np.float32] | None = None
 
-        self._output_weights: np.ndarray | None = None
+        self._output_weights: NDArray[np.float32] | None = None
 
-        self._noise_cumulative: np.ndarray | None = None
+        self._noise_cumulative: NDArray[np.float64] | None = None
 
-        self._keep_probabilities: np.ndarray | None = None
+        self._keep_probabilities: NDArray[np.float64] | None = None
 
     # ------------------------------------------------------------------
     # Introspection
@@ -178,7 +179,7 @@ class Word2Vec(EmbeddingModel):
 
     def most_similar(
         self,
-        token_or_vector: str | np.ndarray,
+        token_or_vector: str | NDArray[np.float32],
         top_k: int = 10,
         exclude_special: bool = True,
     ) -> list[tuple[str, float]]:
@@ -406,9 +407,9 @@ class Word2Vec(EmbeddingModel):
 
     def _subsample_probabilities(
         self,
-        frequencies: np.ndarray,
+        frequencies: NDArray[np.float64],
         vocabulary: Vocabulary,
-    ) -> np.ndarray | None:
+    ) -> NDArray[np.float64] | None:
         """
         Per-id probability of keeping an occurrence.
 
@@ -436,7 +437,9 @@ class Word2Vec(EmbeddingModel):
 
         keep[~np.isfinite(keep)] = 1.0
 
-        return np.clip(keep, 0.0, 1.0)
+        clipped: NDArray[np.float64] = np.clip(keep, 0.0, 1.0)
+
+        return clipped
 
     def _select_ids(self, tokens: list[str], vocabulary: Vocabulary) -> list[int]:
         """
@@ -596,12 +599,20 @@ class Word2Vec(EmbeddingModel):
             )
         )
 
-    def _sample_negatives(self, count: int) -> np.ndarray:
-        """Draw ids from the dampened unigram distribution."""
+    def _sample_negatives(self, count: int) -> NDArray[np.int64]:
+        """
+        Draw ids from the dampened unigram distribution.
+
+        Returns indices rather than vectors, so the dtype is integral.
+        """
 
         assert self._noise_cumulative is not None
 
-        return np.searchsorted(self._noise_cumulative, self._rng.random(count))
+        drawn: NDArray[np.int64] = np.searchsorted(
+            self._noise_cumulative, self._rng.random(count)
+        ).astype(np.int64)
+
+        return drawn
 
     def _learning_rate(self, completed: int, expected_updates: int) -> float:
         """

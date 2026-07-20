@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 
 from multilingual_embedding.core.exceptions import (
     ResourceNotFoundError,
@@ -82,7 +83,7 @@ class EmbeddingMatrix:
 
     __slots__ = ("_vectors", "_vocabulary")
 
-    def __init__(self, vocabulary: Vocabulary, vectors: np.ndarray) -> None:
+    def __init__(self, vocabulary: Vocabulary, vectors: NDArray[np.float32]) -> None:
         array = np.asarray(vectors, dtype=np.float32)
 
         if array.ndim != 2:
@@ -114,7 +115,7 @@ class EmbeddingMatrix:
         return self._vocabulary
 
     @property
-    def vectors(self) -> np.ndarray:
+    def vectors(self) -> NDArray[np.float32]:
         """The underlying array, shape ``(size, dimension)``."""
 
         return self._vectors
@@ -138,7 +139,7 @@ class EmbeddingMatrix:
     # Lookup
     # ------------------------------------------------------------------
 
-    def vector_for(self, token: str) -> np.ndarray:
+    def vector_for(self, token: str) -> NDArray[np.float32]:
         """
         Return the vector for a token.
 
@@ -147,11 +148,11 @@ class EmbeddingMatrix:
         not a defect.
         """
 
-        row: np.ndarray = self._vectors[self._vocabulary.id_of(token)]
+        row: NDArray[np.float32] = self._vectors[self._vocabulary.id_of(token)]
 
         return row
 
-    def vector_for_id(self, token_id: int) -> np.ndarray:
+    def vector_for_id(self, token_id: int) -> NDArray[np.float32]:
         """
         Return the vector for a token id.
 
@@ -168,7 +169,7 @@ class EmbeddingMatrix:
                 size=len(self),
             )
 
-        row: np.ndarray = self._vectors[token_id]
+        row: NDArray[np.float32] = self._vectors[token_id]
 
         return row
 
@@ -209,7 +210,7 @@ class EmbeddingMatrix:
 
     def most_similar(
         self,
-        token_or_vector: str | np.ndarray,
+        token_or_vector: str | NDArray[np.float32],
         top_k: int = 10,
         exclude_special: bool = True,
     ) -> list[tuple[str, float]]:
@@ -416,7 +417,9 @@ class EmbeddingMatrix:
     # Internals
     # ------------------------------------------------------------------
 
-    def _resolve_query(self, token_or_vector: str | np.ndarray) -> tuple[np.ndarray, set[int]]:
+    def _resolve_query(
+        self, token_or_vector: str | NDArray[np.float32]
+    ) -> tuple[NDArray[np.float32], set[int]]:
         """Return the query vector and the ids to suppress from results."""
 
         if isinstance(token_or_vector, str):
@@ -435,7 +438,7 @@ class EmbeddingMatrix:
 
     def _rank(
         self,
-        query: np.ndarray,
+        query: NDArray[np.float32],
         *,
         top_k: int,
         excluded: set[int],
@@ -472,17 +475,17 @@ class EmbeddingMatrix:
         return [(self._vocabulary.token_of(int(index)), float(scores[index])) for index in ordered]
 
 
-def _normalize_rows(vectors: np.ndarray) -> np.ndarray:
+def _normalize_rows(vectors: NDArray[np.float32]) -> NDArray[np.float32]:
     """Scale each row to unit length, leaving zero rows at zero."""
 
     norms = np.linalg.norm(vectors, axis=1, keepdims=True)
 
-    scaled: np.ndarray = vectors / np.maximum(norms, _NORM_EPSILON)
+    scaled: NDArray[np.float32] = vectors / np.maximum(norms, _NORM_EPSILON)
 
     return scaled.astype(np.float32)
 
 
-def _unit(vector: np.ndarray) -> np.ndarray:
+def _unit(vector: NDArray[np.float32]) -> NDArray[np.float32]:
     """Scale a single vector to unit length, leaving a zero vector at zero."""
 
     norm = float(np.linalg.norm(vector))
@@ -490,7 +493,7 @@ def _unit(vector: np.ndarray) -> np.ndarray:
     return (vector / max(norm, _NORM_EPSILON)).astype(np.float32)
 
 
-def _cosine(a: np.ndarray, b: np.ndarray) -> float:
+def _cosine(a: NDArray[np.float32], b: NDArray[np.float32]) -> float:
     """Cosine similarity, defined as zero when either side has no length."""
 
     denominator = float(np.linalg.norm(a)) * float(np.linalg.norm(b))
