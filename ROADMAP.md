@@ -95,8 +95,10 @@ The two techniques that make a 568M model trainable on a 16 GB card.
 
 **Delivered.** `lora.py` — adapters over frozen weights, with merging, adapter-only
 checkpoints, and a refusal when the target names match nothing. At BERT-base shape the
-trainable share is **0.80%**, the adapter checkpoint is **3.4 MB against a 419 MB model**,
-and Adam's optimizer state falls from **0.82 GB to 6.8 MB**.
+trainable share **at rank 16** is **0.81%**, the adapter checkpoint is **3.4 MB against a
+415 MB model**, and Adam's optimizer state falls from **0.81 GB to 6.8 MB**. The rank is
+load-bearing and was missing from this claim until it was measured again: at rank 8 the
+same model gives 0.40% and a 1.7 MB adapter.
 
 `gradcache.py` — chunked encoding with a cached vector gradient, so the contrastive batch
 is bounded by disk rather than VRAM. Verified gradient-for-gradient identical to a single

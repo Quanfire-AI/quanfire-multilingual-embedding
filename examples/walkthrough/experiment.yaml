@@ -1,0 +1,10 @@
+name: demo
+seed: 42
+output_directory: artifacts
+corpus:
+  source: data/sample/corpus.jsonl
+tokenizer:
+  vocab_size: 300
+embedding:
+  dimension: 64
+  epochs: 20

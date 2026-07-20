@@ -212,6 +212,14 @@ pytest                        # full suite including end-to-end training
 The full suite trains real tokenizers and embedding models on small fixtures and
 completes in under twenty seconds.
 
+### See it work, step by step
+
+[`examples/walkthrough/`](examples/walkthrough/README.md) is a fifteen-minute tour with
+real commands and their real output: auditing a damaged corpus, training, searching in
+three scripts, per-language fairness, the static model's structural ceiling, proof the
+contextual encoder learns, and the cost of domain adaptation. It also states plainly
+what does not work yet.
+
 ### Run the worked example
 
 ```bash
@@ -491,9 +499,10 @@ post-norm, so external weights do not transfer directly. Adapting an external ch
 is the outstanding piece of Phase B.
 
 **Adapting a model to a domain does not require retraining it.** LoRA freezes the base
-and learns a low-rank update. Measured at BERT-base shape: **0.80% of parameters
-trainable**, a 3.4 MB adapter against a 419 MB model, and optimiser state falling from
-0.82 GB to 6.8 MB. That is what makes one base model plus several domain adapters
+and learns a low-rank update. Measured at BERT-base shape **with rank 16** — the rank is
+what sets these numbers, so a figure quoted without it means nothing: **0.81% of
+parameters trainable**, a 3.4 MB adapter against a 415 MB model, and optimiser state
+falling from 0.81 GB to 6.8 MB. Halving the rank halves all three. That is what makes one base model plus several domain adapters
 practical on a single card.
 
 **Batch size is a quality parameter here, not just a throughput one.** Contrastive

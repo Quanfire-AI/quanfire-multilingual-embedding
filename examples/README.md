@@ -58,3 +58,13 @@ model quality.
 Keep it runnable with no arguments and no external data, prefer the bundled sample
 corpus, and write output to a gitignored directory. If an example needs settings that
 would be wrong for real use, say so in the script where the setting appears.
+
+## Walkthrough
+
+[`walkthrough/`](walkthrough/README.md) is a step-by-step tour of the whole project —
+corpus stats, auditing a damaged extraction, training, multilingual search, per-language
+fairness, the static model's structural limit, evidence that the contextual encoder
+learns, and what domain adaptation costs.
+
+Every command and every output in it was executed rather than predicted, and the numbers
+reproduce.
