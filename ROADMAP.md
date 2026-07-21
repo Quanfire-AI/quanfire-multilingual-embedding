@@ -166,7 +166,13 @@ untrained contrastive model must show, and independent evidence the objective is
   |---|---:|---:|
   | low `<0.3` | +145.5% | +126.7% |
   | mid `0.3–0.7` | +39.6% | +56.9% |
-  | high `>0.7` | +7.9% | +21.6% |
+  | high `>0.7` | *not significant* | +21.6% |
+
+  Hindi's high-overlap band moved 0.5828 to 0.6290, which reads as +7.9% and is 29 extra
+  correct answers out of 628 with overlapping confidence intervals. It was reported as a
+  gain here before the counts were checked; it is not one. The correction sharpens the
+  finding rather than weakening it — for Hindi the gain is confined to the bands where
+  string matching does not help.
 
   A model memorising surface form improves most where strings already match. Neither does.
   One language could have been an accident; two unrelated ones make it a property of the

@@ -37,6 +37,7 @@ scoring, and the count of what was removed is reported.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -141,6 +142,39 @@ class RetrievalScores:
         return 1.0 / self.candidates if self.candidates else 0.0
 
     @property
+    def confidence_interval(self) -> tuple[float, float]:
+        """
+        A 95% interval on ``recall_at_1``, by the Wilson method.
+
+        Reported because a percentage hides how few queries produced it.
+        Hindi's high-overlap band moved from 0.5828 to 0.6290 — a
+        confident-sounding +7.9% — which is 366 of 628 against 395 of
+        628, and those intervals overlap. The low-overlap band moved 22
+        of 155 to 54 of 155, which does not.
+
+        Wilson rather than the normal approximation because the
+        interesting bands are small and their rates are near the ends,
+        where the normal interval misbehaves and can even leave [0, 1].
+        """
+
+        if not self.queries:
+            return (0.0, 0.0)
+
+        z = 1.96
+
+        n = self.queries
+
+        centre = (self.recall_at_1 + z * z / (2 * n)) / (1 + z * z / n)
+
+        spread = (
+            z
+            * math.sqrt(self.recall_at_1 * (1 - self.recall_at_1) / n + z * z / (4 * n * n))
+            / (1 + z * z / n)
+        )
+
+        return (max(0.0, centre - spread), min(1.0, centre + spread))
+
+    @property
     def lift_over_chance(self) -> float:
         """
         How many times better than chance recall@1 is.
@@ -160,6 +194,8 @@ class RetrievalScores:
             "queries": self.queries,
             "candidates": self.candidates,
             "recall_at_1": round(self.recall_at_1, 4),
+            "recall_at_1_hits": round(self.recall_at_1 * self.queries),
+            "recall_at_1_ci95": [round(bound, 4) for bound in self.confidence_interval],
             "recall_at_5": round(self.recall_at_5, 4),
             "recall_at_10": round(self.recall_at_10, 4),
             "mrr": round(self.mrr, 4),

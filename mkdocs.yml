@@ -30,6 +30,7 @@ nav:
   - Configuration: configuration.md
   - Data format: data-format.md
   - Compute profiles: compute-profiles.md
+  - Reading results: reading-results.md
 
 # docs/README.md documents this directory for anyone browsing the repository
 # on GitHub. MkDocs would otherwise treat it as a second index page and
