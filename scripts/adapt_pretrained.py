@@ -137,6 +137,34 @@ def prefixed(examples: list[Example], query: str, passage: str) -> list[Example]
     ]
 
 
+def only_kinds(examples: list[Example], kinds: str) -> list[Example]:
+    """
+    Keep the named pair kinds, or everything when none are named.
+
+    Training on one kind and scoring on another is how a domain result is
+    told apart from a task result. The mined kinds differ in shape while
+    covering the same text: `adjacent` retrieves the paragraph following a
+    paragraph, `title_lead` retrieves a lead from a title. A model that
+    learned retrieval transfers between them; one that learned the mining
+    scheme does not.
+    """
+
+    wanted = {kind.strip() for kind in kinds.split(",") if kind.strip()}
+
+    if not wanted:
+        return examples
+
+    kept = [example for example in examples if example.kind in wanted]
+
+    if not kept:
+        raise SystemExit(
+            f"no pairs of kind {sorted(wanted)}; the file holds "
+            f"{sorted({e.kind for e in examples if e.kind})}"
+        )
+
+    return kept
+
+
 def report(label: str, scores: Any) -> None:
     print(f"  {label:24} recall@1 {scores.recall_at_1:.4f}   MRR {scores.mrr:.4f}")
 
@@ -192,6 +220,23 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=0)
 
     parser.add_argument("--output", type=Path, help="Write the comparison as JSON")
+
+    parser.add_argument(
+        "--train-kinds",
+        default="",
+        help=(
+            "Comma-separated pair kinds to train on, e.g. 'adjacent'. "
+            "Empty uses all. Set this and --eval-kinds to different values "
+            "to test whether the adaptation generalises across task shapes "
+            "or only learned the one it was shown"
+        ),
+    )
+
+    parser.add_argument(
+        "--eval-kinds",
+        default="",
+        help="Comma-separated pair kinds to score on. Empty uses all",
+    )
 
     parser.add_argument(
         "--save-adapter",
@@ -250,16 +295,33 @@ def main() -> int:
     train_pool = [example for example in examples if example.positive not in held_texts]
 
     train = prefixed(
-        train_pool[: arguments.train_pairs], arguments.query_prefix, arguments.passage_prefix
+        only_kinds(train_pool, arguments.train_kinds)[: arguments.train_pairs],
+        arguments.query_prefix,
+        arguments.passage_prefix,
     )
 
-    held = prefixed(evaluation, arguments.query_prefix, arguments.passage_prefix)
+    held = prefixed(
+        only_kinds(evaluation, arguments.eval_kinds),
+        arguments.query_prefix,
+        arguments.passage_prefix,
+    )
 
     languages = sorted({e.language for e in held if e.language})
 
     print(f"\ntrain {len(train):,} pairs   held out {len(held):,} pairs")
 
     print(f"languages in the held-out set: {', '.join(languages) or '<none recorded>'}")
+
+    train_kinds = sorted({e.kind for e in train if e.kind})
+
+    eval_kinds = sorted({e.kind for e in held if e.kind})
+
+    print(f"trained on kinds: {', '.join(train_kinds)}")
+
+    print(f"scored on kinds:  {', '.join(eval_kinds)}")
+
+    if train_kinds and eval_kinds and not set(train_kinds) & set(eval_kinds):
+        print("  -> disjoint: this measures whether the adaptation generalises across task shapes")
 
     if arguments.eval_pairs_file:
         print(f"scored against {evaluation_source} (held fixed)")
@@ -419,6 +481,8 @@ def main() -> int:
                     "trained_on": str(arguments.pairs),
                     "scored_against": str(evaluation_source),
                     "held_out_languages": languages,
+                    "train_kinds": train_kinds,
+                    "eval_kinds": eval_kinds,
                     "settings": vars(arguments) | {"pairs": str(arguments.pairs)},
                     "before": before.to_dict(),
                     "after": after.to_dict(),
