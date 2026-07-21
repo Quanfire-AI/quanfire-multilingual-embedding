@@ -150,22 +150,31 @@ untrained contrastive model must show, and independent evidence the objective is
 
 - **Exit criterion — met, 21 July 2026.** `intfloat/multilingual-e5-small` adapted with
   LoRA on 20,000 mined Hindi Wikipedia pairs, scored against 1,994 held-out pairs it never
-  saw:
+  saw. Two configurations, same baseline:
 
-  | | published | adapted | |
+  | | published | rank 16, 1 epoch | rank 32, 2 epochs |
   |---|---:|---:|---:|
-  | recall@1 | 0.4238 | **0.5100** | +20.3% |
-  | recall@10 | 0.6690 | 0.7523 | +12.5% |
-  | MRR | 0.5136 | 0.5959 | +16.0% |
+  | recall@1 | 0.4238 | 0.5100 (+20.3%) | **0.5451 (+28.6%)** |
+  | recall@10 | 0.6690 | 0.7523 (+12.5%) | 0.7929 (+18.5%) |
+  | MRR | 0.5136 | 0.5959 (+16.0%) | 0.6364 (+23.9%) |
 
-  **0.25% of parameters trained**, rank 16 on query and value, one epoch, on a 4070 Ti
-  SUPER.
+  **0.50% of parameters trained** at rank 32, on a 4070 Ti SUPER.
 
-  The breakdown matters more than the headline. Gains run *inversely* to lexical overlap —
-  **+86.4%** where the anchor shares under 30% of its words with the passage, +30.2% in the
-  middle band, +4.1% where overlap exceeds 70%. The model improved most exactly where
-  string matching cannot help, which is the opposite of the failure this project has been
-  guarding against.
+  The breakdown is the result, not the headline. Gains run *inversely* to lexical overlap,
+  and the pattern strengthens with capacity rather than inverting:
+
+  | overlap band | published | rank 16 | rank 32 |
+  |---|---:|---:|---:|
+  | low `<0.3` | 0.1419 | +86.4% | **+145.5%** |
+  | mid `0.3–0.7` | 0.3774 | +30.2% | +39.6% |
+  | high `>0.7` | 0.5828 | +4.1% | +7.9% |
+
+  A model memorising surface form would improve most where strings already match. This does
+  the opposite, twice, and more strongly with more capacity — which is the evidence that it
+  learned meaning. The lexical-leakage concern that shaped pair mining has now served as a
+  control the adaptation passed rather than a caveat on it.
+
+  More capacity has not yet cost anything, so the ceiling is above rank 32.
 
   Stated with its limits: one language, a 1,994-candidate pool rather than a production
   index, and held-out pairs drawn from the same distribution as training. It measures
