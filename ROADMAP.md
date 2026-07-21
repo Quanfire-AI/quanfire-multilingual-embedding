@@ -3,8 +3,9 @@
 > An embedding model factory: corpus in, trained and evaluated model out — generic or
 > domain-specific.
 
-**Status:** Phases 0, A and B complete — a published checkpoint adapted on real Indic text
-beats itself by 20.3% on held-out retrieval. Phases C–E planned.
+**Status:** Phases 0, A and B complete. A published checkpoint adapted on real Indic text
+beats itself by **28.6% (Hindi)** and **40.9% (Tamil)** on held-out retrieval, training 0.50%
+of its parameters. Phases C–E planned.
 
 ---
 
@@ -149,36 +150,42 @@ untrained contrastive model must show, and independent evidence the objective is
 0.29 GB of a 16 GB card says nothing about where the ceiling sits for a 100M+ encoder.
 
 - **Exit criterion — met, 21 July 2026.** `intfloat/multilingual-e5-small` adapted with
-  LoRA on 20,000 mined Hindi Wikipedia pairs, scored against 1,994 held-out pairs it never
-  saw. Two configurations, same baseline:
+  LoRA on 20,000 mined Wikipedia pairs per language, scored against ~2,000 held-out pairs
+  it never saw. Rank 32, two epochs, **0.50% of parameters trained**, on a 4070 Ti SUPER.
 
-  | | published | rank 16, 1 epoch | rank 32, 2 epochs |
-  |---|---:|---:|---:|
-  | recall@1 | 0.4238 | 0.5100 (+20.3%) | **0.5451 (+28.6%)** |
-  | recall@10 | 0.6690 | 0.7523 (+12.5%) | 0.7929 (+18.5%) |
-  | MRR | 0.5136 | 0.5959 (+16.0%) | 0.6364 (+23.9%) |
+  | | Hindi base | Hindi adapted | Tamil base | Tamil adapted |
+  |---|---:|---:|---:|---:|
+  | recall@1 | 0.4238 | **0.5451** (+28.6%) | 0.3219 | **0.4535** (+40.9%) |
+  | recall@10 | 0.6690 | 0.7929 (+18.5%) | 0.5269 | 0.6966 (+32.2%) |
+  | MRR | 0.5136 | 0.6364 (+23.9%) | 0.3931 | 0.5397 (+37.3%) |
 
-  **0.50% of parameters trained** at rank 32, on a 4070 Ti SUPER.
+  **The control replicates across language families.** Gains run inversely to lexical
+  overlap in both, and Tamil is Dravidian while Hindi is Indo-Aryan:
 
-  The breakdown is the result, not the headline. Gains run *inversely* to lexical overlap,
-  and the pattern strengthens with capacity rather than inverting:
+  | overlap band | Hindi | Tamil |
+  |---|---:|---:|
+  | low `<0.3` | +145.5% | +126.7% |
+  | mid `0.3–0.7` | +39.6% | +56.9% |
+  | high `>0.7` | +7.9% | +21.6% |
 
-  | overlap band | published | rank 16 | rank 32 |
-  |---|---:|---:|---:|
-  | low `<0.3` | 0.1419 | +86.4% | **+145.5%** |
-  | mid `0.3–0.7` | 0.3774 | +30.2% | +39.6% |
-  | high `>0.7` | 0.5828 | +4.1% | +7.9% |
+  A model memorising surface form improves most where strings already match. Neither does.
+  One language could have been an accident; two unrelated ones make it a property of the
+  method. The lexical-leakage concern that shaped pair mining is now a control the
+  adaptation passes rather than a caveat on it.
 
-  A model memorising surface form would improve most where strings already match. This does
-  the opposite, twice, and more strongly with more capacity — which is the evidence that it
-  learned meaning. The lexical-leakage concern that shaped pair mining has now served as a
-  control the adaptation passed rather than a caveat on it.
+  **The weaker language gained more, which is the argument for doing this at all.** E5
+  serves Tamil worse than Hindi — baseline 0.3219 against 0.4238, or 76% as well. After
+  adaptation Tamil reaches 83% of Hindi's score. The corpus helps most exactly where the
+  published model is thinnest, and that is where a proprietary corpus earns its keep.
 
-  More capacity has not yet cost anything, so the ceiling is above rank 32.
+  More capacity has not cost anything yet: rank 16 gave Hindi +20.3%, rank 32 gave +28.6%.
+  The ceiling is above rank 32.
 
-  Stated with its limits: one language, a 1,994-candidate pool rather than a production
-  index, and held-out pairs drawn from the same distribution as training. It measures
-  in-domain adaptation, not generalisation to another task.
+  Stated with its limits. Two languages, both Wikipedia. A ~2,000-candidate pool rather
+  than a production index. Held-out pairs from the same distribution as training, so this
+  measures in-domain adaptation and not generalisation to another task. And the absolute
+  numbers on the hardest slice remain low — Tamil low-overlap retrieval more than doubled
+  and is still only 0.1868.
 
 ### Phase C — Pair mining from unlabelled text
 
