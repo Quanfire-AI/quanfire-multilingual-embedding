@@ -250,7 +250,13 @@ def main() -> int:
         ),
     ).train([TextPair(example.anchor, example.positive) for example in train])
 
-    print(f"    loss {training.initial_loss:.4f} -> {training.final_loss:.4f}")
+    if training.measurable:
+        print(f"    loss {training.initial_loss:.4f} -> {training.final_loss:.4f}")
+    else:
+        print(
+            f"    loss {training.final_loss:.4f} (one epoch, so there is nothing "
+            f"to compare it against — the retrieval scores below are the evidence)"
+        )
 
     # --- 3. measure again ------------------------------------------------
     print("\n[3] scoring the adapted model on the same held-out pairs")

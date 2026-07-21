@@ -3,7 +3,8 @@
 > An embedding model factory: corpus in, trained and evaluated model out — generic or
 > domain-specific.
 
-**Status:** Phases 0 and A complete. Phases B–E planned.
+**Status:** Phases 0, A and B complete — a published checkpoint adapted on real Indic text
+beats itself by 20.3% on held-out retrieval. Phases C–E planned.
 
 ---
 
@@ -147,9 +148,28 @@ untrained contrastive model must show, and independent evidence the objective is
 **Still unverified:** everything at realistic model size. 5.3M parameters is a toy, and
 0.29 GB of a 16 GB card says nothing about where the ceiling sits for a 100M+ encoder.
 
-- **Exit criterion:** a fine-tuned model beats its own base checkpoint on a held-out set
-  from the same domain. Beating the base is the honest bar — beating a commercial API is
-  a separate claim requiring a separate benchmark.
+- **Exit criterion — met, 21 July 2026.** `intfloat/multilingual-e5-small` adapted with
+  LoRA on 20,000 mined Hindi Wikipedia pairs, scored against 1,994 held-out pairs it never
+  saw:
+
+  | | published | adapted | |
+  |---|---:|---:|---:|
+  | recall@1 | 0.4238 | **0.5100** | +20.3% |
+  | recall@10 | 0.6690 | 0.7523 | +12.5% |
+  | MRR | 0.5136 | 0.5959 | +16.0% |
+
+  **0.25% of parameters trained**, rank 16 on query and value, one epoch, on a 4070 Ti
+  SUPER.
+
+  The breakdown matters more than the headline. Gains run *inversely* to lexical overlap —
+  **+86.4%** where the anchor shares under 30% of its words with the passage, +30.2% in the
+  middle band, +4.1% where overlap exceeds 70%. The model improved most exactly where
+  string matching cannot help, which is the opposite of the failure this project has been
+  guarding against.
+
+  Stated with its limits: one language, a 1,994-candidate pool rather than a production
+  index, and held-out pairs drawn from the same distribution as training. It measures
+  in-domain adaptation, not generalisation to another task.
 
 ### Phase C — Pair mining from unlabelled text
 

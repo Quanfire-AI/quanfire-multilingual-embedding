@@ -610,3 +610,55 @@ class TestGradientCachingInTheTrainer:
         ).train(self._pairs())
 
         assert report.steps > 0
+
+
+class TestLossIsNotEvidenceOnItsOwn:
+    """
+    `improved` compares the first epoch's loss with the last, so for a
+    single epoch it compares a value with itself.
+
+    A real adaptation run reported `loss: [1.17487, 1.17487]` and
+    `improved: False` while its retrieval score rose 20%. Silently
+    returning False there invites the opposite conclusion from the true
+    one.
+    """
+
+    def _pairs(self) -> list[TextPair]:
+        words = ["rain", "storm", "cloud", "wind", "thunder", "drizzle"]
+
+        return [
+            TextPair(f"{words[i % 6]} {words[(i + 2) % 6]}", f"{words[(i + 2) % 6]} today")
+            for i in range(16)
+        ]
+
+    def test_a_single_epoch_run_is_marked_unmeasurable(self) -> None:
+        report = ContrastiveTrainer(
+            build_encoder(dropout=0.0),
+            ContrastiveConfig(epochs=1, batch_size=8, learning_rate=3e-3, seed=1),
+        ).train(self._pairs())
+
+        assert not report.measurable
+
+        assert report.initial_loss == report.final_loss
+
+        assert not report.improved, "improved cannot be true when nothing was compared"
+
+    def test_a_multi_epoch_run_is_measurable(self) -> None:
+        report = ContrastiveTrainer(
+            build_encoder(dropout=0.0),
+            ContrastiveConfig(epochs=4, batch_size=8, learning_rate=3e-3, seed=1),
+        ).train(self._pairs())
+
+        assert report.measurable
+
+        assert report.improved
+
+    def test_the_distinction_is_serialised(self) -> None:
+        """A report read later must carry it too."""
+
+        report = ContrastiveTrainer(
+            build_encoder(dropout=0.0),
+            ContrastiveConfig(epochs=1, batch_size=8, learning_rate=3e-3, seed=1),
+        ).train(self._pairs())
+
+        assert report.to_dict()["measurable"] is False

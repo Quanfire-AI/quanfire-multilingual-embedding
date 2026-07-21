@@ -239,10 +239,32 @@ class TrainingReport:
     losses: list[float] = field(default_factory=list)
 
     @property
-    def improved(self) -> bool:
-        """True when the final epoch's loss beat the first."""
+    def measurable(self) -> bool:
+        """
+        Whether ``improved`` means anything for this run.
 
-        return self.final_loss < self.initial_loss
+        It does not for a single epoch: the first and last epoch are the
+        same epoch, so the comparison is a value against itself. A real
+        adaptation run reported ``loss: [1.17487, 1.17487]`` — identical
+        to sixteen digits — and ``improved: False``, while its retrieval
+        score rose 20%. The loss was not evidence of anything; it was the
+        same number printed twice.
+        """
+
+        return len(self.losses) >= 2
+
+    @property
+    def improved(self) -> bool:
+        """
+        True when the final epoch's loss beat the first.
+
+        Always ``False`` for a single-epoch run, whatever happened. Check
+        :attr:`measurable` before reading this, and prefer a retrieval
+        score to a loss for deciding whether training helped — a falling
+        loss is compatible with having learned nothing useful.
+        """
+
+        return self.measurable and self.final_loss < self.initial_loss
 
     def to_dict(self) -> dict[str, object]:
         """Reduce to primitives for reporting."""
@@ -254,6 +276,7 @@ class TrainingReport:
             "initial_loss": round(self.initial_loss, 6),
             "final_loss": round(self.final_loss, 6),
             "improved": self.improved,
+            "measurable": self.measurable,
             "losses": [round(value, 6) for value in self.losses],
         }
 
