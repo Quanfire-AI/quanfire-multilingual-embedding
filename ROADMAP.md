@@ -193,6 +193,38 @@ untrained contrastive model must show, and independent evidence the objective is
   numbers on the hardest slice remain low — Tamil low-overlap retrieval more than doubled
   and is still only 0.1868.
 
+#### One adapter or one per language — answered
+
+Three runs, identical held-out set, identical 40,000 training pairs, only the *source*
+differing. Baselines matched exactly across all three, which is what makes the comparison
+readable.
+
+| trained on | overall | Hindi | Tamil |
+|---|---:|---:|---:|
+| *(published checkpoint)* | 1018/1985 | 480/779 | 538/1206 |
+| Hindi + Tamil | **1290** | **573** | **717** |
+| Hindi only | 1239 | 558 | 681 |
+| Tamil only | 1267 | 561 | 706 |
+
+**Build one adapter.** Joint training is numerically best on both languages and never
+worse than either specialist. The differences are inside the confidence intervals, so it
+is not *provably* better — but "at least as good, and one artefact instead of two" settles
+the architecture on its own.
+
+**The finding underneath it is larger.** Training on Tamil alone captures **87%** of the
+joint gain on Hindi, and training on Hindi alone captures **80%** of the joint gain on
+Tamil — on languages those runs never saw.
+
+Most of what the adaptation learns is therefore not language-specific. It is being carried
+across an Indo-Aryan and a Dravidian language, which leaves the task, the pair structure
+and the encyclopedic register as the likely content. That is worth knowing before planning
+corpora for the other twenty scheduled languages: the first language may buy most of the
+benefit, and each additional one may add less than its collection cost implies.
+
+It is also a caution on the framing. "Domain adaptation" has been the story throughout;
+this suggests a substantial part is *task* adaptation, and the two would need separating
+before the distinction is claimed in either direction.
+
 ### Phase C — Pair mining from unlabelled text
 
 **The phase that makes domain-specific models possible**, and the one most likely to be
