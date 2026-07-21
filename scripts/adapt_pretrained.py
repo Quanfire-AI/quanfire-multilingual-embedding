@@ -56,22 +56,47 @@ class Example:
 
 def load_pairs(path: Path, count: int, seed: int) -> list[Example]:
     """
-    Read pairs and shuffle them.
+    Draw a uniform sample from the whole file, by reservoir sampling.
 
-    Shuffled before splitting because a mined pair file is in corpus
-    order: the first N pairs come from the first few hundred articles,
-    which is a topic sample rather than a random one.
+    Reading the first ``count * 4`` lines and shuffling those was wrong in
+    a way that produced a plausible result. A mined pair file is in corpus
+    order, and two concatenated files are in language order: for a Hindi
+    and Tamil pair set joined together, the window covered the first
+    168,000 of 642,536 Hindi lines and never reached a Tamil pair. The
+    run reported `by_language: {"hi": ...}` and was read as a joint
+    experiment.
+
+    Reservoir sampling makes every line equally likely to be chosen in one
+    pass, holding only the sample. It costs a full read of the file, which
+    is seconds against a training run, and it cannot silently exclude
+    whatever happens to sit past an arbitrary cut-off.
     """
 
     opener = gzip.open if path.suffix == ".gz" else open
 
-    rows: list[dict[str, Any]] = []
+    rng = random.Random(seed)
+
+    reservoir: list[dict[str, Any]] = []
+
+    seen = 0
 
     with opener(path, "rt", encoding="utf-8") as handle:  # type: ignore[operator]
-        for _, line in zip(range(count * 4), handle, strict=False):
-            rows.append(json.loads(line))
+        for line in handle:
+            seen += 1
 
-    random.Random(seed).shuffle(rows)
+            if len(reservoir) < count:
+                reservoir.append(json.loads(line))
+
+                continue
+
+            # Each later line replaces a random held one with probability
+            # count/seen, which leaves every line equally represented.
+            index = rng.randrange(seen)
+
+            if index < count:
+                reservoir[index] = json.loads(line)
+
+    rng.shuffle(reservoir)
 
     return [
         Example(
@@ -81,7 +106,7 @@ def load_pairs(path: Path, count: int, seed: int) -> list[Example]:
             kind=row.get("kind"),
             overlap=float(row.get("overlap", 0.0)),
         )
-        for row in rows[:count]
+        for row in reservoir
     ]
 
 
@@ -189,15 +214,28 @@ def main() -> int:
     if len(examples) < total:
         print(f"\nonly {len(examples)} pairs available; wanted {total}")
 
+    # The held-out set is drawn from a fixed-size sample of its own, so
+    # that changing --train-pairs does not change what the model is
+    # scored on. It moved before, and two Hindi runs reported baselines
+    # of 0.4238 and 0.4764 for the same checkpoint — a difference in the
+    # measuring stick that looked like a difference in the model.
+    evaluation = load_pairs(arguments.pairs, arguments.eval_pairs, arguments.seed + 10_000)
+
+    held_texts = {example.positive for example in evaluation}
+
+    train_pool = [example for example in examples if example.positive not in held_texts]
+
     train = prefixed(
-        examples[arguments.eval_pairs :], arguments.query_prefix, arguments.passage_prefix
+        train_pool[: arguments.train_pairs], arguments.query_prefix, arguments.passage_prefix
     )
 
-    held = prefixed(
-        examples[: arguments.eval_pairs], arguments.query_prefix, arguments.passage_prefix
-    )
+    held = prefixed(evaluation, arguments.query_prefix, arguments.passage_prefix)
+
+    languages = sorted({e.language for e in held if e.language})
 
     print(f"\ntrain {len(train):,} pairs   held out {len(held):,} pairs")
+
+    print(f"languages in the held-out set: {', '.join(languages) or '<none recorded>'}")
 
     encoder = PretrainedTextEncoder.load(
         arguments.checkpoint,
