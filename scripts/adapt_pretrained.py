@@ -193,6 +193,16 @@ def main() -> int:
 
     parser.add_argument("--output", type=Path, help="Write the comparison as JSON")
 
+    parser.add_argument(
+        "--save-adapter",
+        type=Path,
+        help=(
+            "Directory to write the trained adapter to. Without this the "
+            "adapter is discarded when the process exits and the run has "
+            "produced a measurement rather than a model"
+        ),
+    )
+
     arguments = parser.parse_args()
 
     from multilingual_embedding.embedding.neural import (
@@ -200,6 +210,7 @@ def main() -> int:
         ContrastiveTrainer,
         PretrainedTextEncoder,
         TextPair,
+        save_adapter,
     )
     from multilingual_embedding.embedding.neural.lora import (
         LoRAConfig,
@@ -279,9 +290,9 @@ def main() -> int:
     # --- 2. adapt --------------------------------------------------------
     targets = tuple(name.strip() for name in arguments.targets.split(",") if name.strip())
 
-    apply_lora(
-        encoder._model, LoRAConfig(rank=arguments.rank, alpha=2 * arguments.rank, targets=targets)
-    )
+    lora = LoRAConfig(rank=arguments.rank, alpha=2 * arguments.rank, targets=targets)
+
+    apply_lora(encoder._model, lora)
 
     summary = parameter_summary(encoder._model)
 
@@ -369,6 +380,32 @@ def main() -> int:
                 f"    {band:14} {was.recall_at_1:.4f} -> {now.recall_at_1:.4f}  "
                 f"({now.queries:,} queries)"
             )
+
+    if arguments.save_adapter:
+        # Saved after scoring, with the scores in it, so the artefact
+        # carries the evidence for itself rather than pointing at a
+        # report that may not travel with it.
+        save_adapter(
+            encoder,
+            arguments.save_adapter,
+            lora=lora,
+            query_prefix=arguments.query_prefix,
+            passage_prefix=arguments.passage_prefix,
+            notes={
+                "trained_on": str(arguments.pairs),
+                "scored_against": str(evaluation_source),
+                "train_pairs": len(train),
+                "held_out_languages": languages,
+                "recall_at_1_before": round(before.overall.recall_at_1, 4),
+                "recall_at_1_after": round(after.overall.recall_at_1, 4),
+                "epochs": arguments.epochs,
+                "learning_rate": arguments.learning_rate,
+            },
+        )
+
+        print(f"\nadapter written to {arguments.save_adapter}")
+
+        print(f"  reload with: load_adapter({str(arguments.save_adapter)!r})")
 
     print(f"\nTOTAL {time.time() - started:.0f}s")
 

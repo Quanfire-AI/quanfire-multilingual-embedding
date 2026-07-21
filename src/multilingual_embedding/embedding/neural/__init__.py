@@ -46,6 +46,7 @@ except ImportError as error:  # pragma: no cover
 else:
     del _torch
 
+from .adapter import AdapterMetadata, load_adapter, save_adapter
 from .architecture import EncoderConfig, TransformerEncoderModel
 from .encoder import NeuralTextEncoder, Tokenizes, resolve_device
 from .gradcache import cached_contrastive_backward, suggest_chunk_size
@@ -72,6 +73,7 @@ from .training import (
 
 __all__ = [
     "POOLING_STRATEGIES",
+    "AdapterMetadata",
     "ContrastiveConfig",
     "ContrastiveTrainer",
     "EncoderConfig",
@@ -86,10 +88,12 @@ __all__ = [
     "TransformerEncoderModel",
     "apply_lora",
     "cached_contrastive_backward",
+    "load_adapter",
     "load_lora_state_dict",
     "lora_state_dict",
     "merge_lora",
     "parameter_summary",
     "resolve_device",
+    "save_adapter",
     "suggest_chunk_size",
 ]
