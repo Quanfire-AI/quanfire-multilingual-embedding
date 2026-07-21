@@ -146,7 +146,18 @@ def main() -> int:
 
     parser.add_argument("--checkpoint", required=True, help="Model name or local directory")
 
-    parser.add_argument("--pairs", type=Path, required=True, help="Mined pair file")
+    parser.add_argument("--pairs", type=Path, required=True, help="Mined pair file to train on")
+
+    parser.add_argument(
+        "--eval-pairs-file",
+        type=Path,
+        help=(
+            "Score against this file instead of --pairs. Hold it fixed to "
+            "compare training sets: without it, a run that changes what it "
+            "trains on also changes what it is judged by, and the two "
+            "cannot be separated"
+        ),
+    )
 
     parser.add_argument("--train-pairs", type=int, default=20000)
 
@@ -219,7 +230,9 @@ def main() -> int:
     # scored on. It moved before, and two Hindi runs reported baselines
     # of 0.4238 and 0.4764 for the same checkpoint — a difference in the
     # measuring stick that looked like a difference in the model.
-    evaluation = load_pairs(arguments.pairs, arguments.eval_pairs, arguments.seed + 10_000)
+    evaluation_source = arguments.eval_pairs_file or arguments.pairs
+
+    evaluation = load_pairs(evaluation_source, arguments.eval_pairs, arguments.seed + 10_000)
 
     held_texts = {example.positive for example in evaluation}
 
@@ -236,6 +249,9 @@ def main() -> int:
     print(f"\ntrain {len(train):,} pairs   held out {len(held):,} pairs")
 
     print(f"languages in the held-out set: {', '.join(languages) or '<none recorded>'}")
+
+    if arguments.eval_pairs_file:
+        print(f"scored against {evaluation_source} (held fixed)")
 
     encoder = PretrainedTextEncoder.load(
         arguments.checkpoint,
@@ -363,6 +379,9 @@ def main() -> int:
             json.dumps(
                 {
                     "checkpoint": arguments.checkpoint,
+                    "trained_on": str(arguments.pairs),
+                    "scored_against": str(evaluation_source),
+                    "held_out_languages": languages,
                     "settings": vars(arguments) | {"pairs": str(arguments.pairs)},
                     "before": before.to_dict(),
                     "after": after.to_dict(),
