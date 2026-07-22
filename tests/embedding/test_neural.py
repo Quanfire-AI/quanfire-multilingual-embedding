@@ -15,6 +15,7 @@ configuration.
 
 from __future__ import annotations
 
+import zlib
 from pathlib import Path
 
 import numpy as np
@@ -43,8 +44,17 @@ class WordTokenizer:
     """
     A hashing tokenizer, so these tests need no trained subword model.
 
-    Deterministic, and that is what matters: the same word always maps to
-    the same id, which is all the encoder requires.
+    Deterministic **across processes**, which is the part that matters and
+    the part the first version got wrong. It used the built-in ``hash``,
+    whose result for a `str` is salted by ``PYTHONHASHSEED`` and therefore
+    differs on every interpreter start. Every word landed on a different
+    id each run, so the vocabulary the model saw was random even though
+    the model init and the training were both seeded.
+
+    That made a training test fail roughly one run in ten with a diverged
+    loss — a trajectory that depended on nothing the test controlled.
+    ``crc32`` is not a good hash, but it is a fixed function, which is the
+    only property wanted here.
     """
 
     def __init__(self, vocabulary_size: int = VOCABULARY) -> None:
@@ -53,7 +63,7 @@ class WordTokenizer:
     def encode(self, text: str) -> WordTokenizer._Encoding:
         ids = [
             # 0 is padding, so ids start at 1.
-            1 + (abs(hash(word)) % (self.vocabulary_size - 1))
+            1 + (zlib.crc32(word.encode("utf-8")) % (self.vocabulary_size - 1))
             for word in text.split()
         ]
 
