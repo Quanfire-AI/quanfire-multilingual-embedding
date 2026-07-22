@@ -34,9 +34,18 @@ Nothing else lives here. Experiment configurations are yours to keep wherever su
 | `cpu.yaml` | Development machine — no CUDA-class GPU, small memory budget |
 | `gpu.yaml` | A single 16GB NVIDIA card, sized for a real training run |
 
-Both files set the same five keys under a `compute:` section and nothing else. A profile
+Both files set the same four keys under a `compute:` section and nothing else. A profile
 that reached into `corpus` or `embedding` would defeat its own purpose, since the result
 would then depend on which machine ran it.
+
+What they encode, side by side:
+
+| | `cpu.yaml` | `gpu.yaml` |
+|---|---|---|
+| `device` | `auto` | `auto` |
+| `precision` | `fp32` | `bf16` |
+| `batch_size` | 16 | 256 |
+| `gradient_checkpoint_chunk` | 0 (off) | 32 |
 
 ## How the merge works
 
@@ -61,6 +70,22 @@ for the field names, defaults and validation rules.
 | `precision` | `fp32`, or `bf16` for mixed precision. `fp16` is rejected at config load. |
 | `batch_size` | Pairs per step — and, in contrastive training, the negative count. |
 | `gradient_checkpoint_chunk` | Gradient-caching chunk size. `0` disables it. Peak memory follows the chunk rather than the batch, which is what lets a batch fit that otherwise would not. The gradients are identical either way. |
+
+### What `gradient_checkpoint_chunk` is worth, measured
+
+On an RTX 4070 Ti SUPER at batch 256 with a 5.3M-parameter model:
+
+| Configuration | Peak VRAM | Reduction |
+|---|---:|---:|
+| fp32, no caching | 4.89 GB | — |
+| bf16, no caching | 3.06 GB | 1.6× |
+| fp32, caching at chunk 32 | 0.40 GB | **12.2×** |
+| bf16 + caching | 0.29 GB | **16.9×** |
+
+Final loss across all four spans 0.51%, which is the claim that matters: caching is exact,
+not an approximation. Gradient caching is the setting that decides whether a batch fits;
+bf16 is a smaller, additional win. That model was a toy and 0.29 GB of 16 is not a ceiling
+— measure at your real model size before treating batch 256 as a maximum.
 
 ## Why this exists, rather than a branch per machine
 
@@ -117,6 +142,16 @@ missing.
 The files in this directory are loaded by the test suite rather than assumed correct. A
 typo in `gpu.yaml` would otherwise surface only on the training box, which is the machine
 furthest from a debugger.
+
+## What profiles do *not* cover yet
+
+`--profile` is wired into the config-driven subcommands — `train`, `evaluate` and the
+Python `TrainingPipeline`. `scripts/adapt_pretrained.py`, which is where published
+checkpoints are adapted, takes `--precision`, `--batch-size` and the rest as flags
+directly, because it has no config object to merge a profile into. The defaults there
+(`bf16`, batch 64) are GPU-shaped, so a run on a machine without one needs those flags set
+by hand rather than a profile named. Closing that gap arrives with `qfme adapt`, tracked in
+[`ROADMAP.md`](../ROADMAP.md).
 
 ## Further reading
 

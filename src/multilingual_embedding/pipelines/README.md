@@ -136,14 +136,20 @@ the static one: `_train_embeddings` constructs a `Word2Vec` and nothing in this 
 touches `embedding.neural`, so `ContrastiveTrainer` is driven directly rather than through
 an orchestrated run.
 
-That asymmetry is deliberate for now and not permanent. Contrastive training consumes
-`TextPair`s, and this framework has no pair miner — labelled query-passage pairs will not
-exist for the domains this is aimed at, so they have to be manufactured from document
-structure. Wiring a contrastive stage into `run` before there is anything to feed it would
-produce a stage with no input. `ROADMAP.md` covers the mining work and the `qfme` command
-that will front it; the honest statement until then is that a contextual model is trained by
-calling `scripts/adapt_pretrained.py`, and served by pointing `from_adapter` at the
-directory it saved.
+That asymmetry was originally justified by an input that did not exist: contrastive
+training consumes `TextPair`s, labelled query-passage pairs will not exist for the domains
+this is aimed at, and the framework had no way to manufacture them from document structure.
+Wiring a contrastive stage into `run` before there was anything to feed it would have
+produced a stage with no input.
+
+**That justification has expired.** `corpus/pairs.py` mines pairs, `qfme mine-pairs` fronts
+it, and 1,536,059 pairs have been mined from Hindi and Tamil Wikipedia. What remains is
+plumbing rather than a missing capability — a config schema for the contrastive path, and a
+`qfme adapt` subcommand, both tracked in `ROADMAP.md`. Until they land, the honest statement
+is that an adapted model is trained by calling `scripts/adapt_pretrained.py` and served by
+pointing `from_adapter` at the directory it saved; a from-scratch contextual model is
+trained by driving `ContrastiveTrainer` from the Python API. Neither path goes through
+`TrainingPipeline`, and neither is reachable from the CLI.
 
 ## Usage
 

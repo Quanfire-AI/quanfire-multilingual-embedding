@@ -1,24 +1,26 @@
 # tests/corpus
 
-> Tests for [`multilingual_embedding.corpus`](../../src/multilingual_embedding/corpus/README.md) — the document tree, segmentation, readers, statistics and auditing.
+> Tests for [`multilingual_embedding.corpus`](../../src/multilingual_embedding/corpus/README.md) — the document tree, segmentation, readers, statistics, auditing, Wikipedia extraction and pair mining.
 
-**395 tests**, the largest group in the suite by a wide margin. Run with
+**462 tests**, the largest group in the suite by a wide margin. Run with
 `pytest tests/corpus -q`; the whole group takes under a second.
 
 ## Files
 
-| File | Covers |
-|---|---|
-| `test_indian_languages.py` | The 22 scheduled languages plus English: script detection, terminator, word count, code normalisation and naming, and the shared-script cases |
-| `test_analysis.py` | Language utilities, offset arithmetic, streaming iteration, statistics, length summaries, filters, deduplication, document validation |
-| `test_script.py` | Script detection, range-table invariants, mixed-script flagging, whitespace-delimitation flags |
-| `test_segmentation.py` | Sentence, paragraph and word splitting across scripts; abbreviations, initials, decimals, quotes; span integrity |
-| `test_io.py` | Readers, writers and the config-driven loader, including gzip and malformed input, plus the format-name agreement check |
-| `test_nodes.py` | `Token`/`Sentence`/`Paragraph`/`Document` construction, span consistency, round trips |
-| `test_audit.py` | Corpus auditing: extraction failures, quality warnings, finding shape, `qfme validate` |
-| `test_corpus.py` | Document-level splitting and persistence |
-| `base/test_text_node.py` | The `TextNode` base: length and character counting |
-| `metadata/test_base.py` | `BaseMetadata` defaults |
+| File | Tests | Covers |
+|---|---:|---|
+| `test_indian_languages.py` | 166 | The 22 scheduled languages plus English: script detection, terminator, word count, code normalisation and naming, and the shared-script cases |
+| `test_analysis.py` | 74 | Language utilities, offset arithmetic, streaming iteration, statistics, length summaries, filters, deduplication, document validation |
+| `test_script.py` | 33 | Script detection, range-table invariants, mixed-script flagging, whitespace-delimitation flags |
+| `test_io.py` | 31 | Readers, writers and the config-driven loader, including gzip and malformed input, plus the format-name agreement check |
+| `test_pairs.py` | 30 | Pair mining: the three kinds, lexical overlap, the bigram path for non-spaced scripts, rejection accounting, streaming |
+| `test_wikipedia.py` | 30 | Dump extraction: markup stripping, namespace and redirect filtering, boilerplate headings, deduplication, section preservation |
+| `test_segmentation.py` | 25 | Sentence, paragraph and word splitting across scripts; abbreviations, initials, decimals, quotes; span integrity |
+| `test_audit.py` | 25 | Corpus auditing: extraction failures, quality warnings, finding shape, `qfme validate` |
+| `test_nodes.py` | 22 | `Token`/`Sentence`/`Paragraph`/`Document` construction, span consistency, round trips |
+| `test_corpus.py` | 19 | Document-level splitting and persistence |
+| `base/test_text_node.py` | 5 | The `TextNode` base: length and character counting |
+| `metadata/test_base.py` | 2 | `BaseMetadata` defaults |
 
 ## What matters here
 
@@ -120,3 +122,94 @@ produce an unreadable report.
 `--strict` promotes warnings to failures. That triple is what lets a data pipeline refuse
 to proceed. `--output` writes the audit as JSON, and the test parses it back rather than
 merely checking the file exists.
+
+## Wikipedia extraction
+
+`test_wikipedia.py` covers `corpus/wikipedia.py`, the front door for real data. It needs
+`mwparserfromhell` (the `wikipedia` extra) and calls `pytest.importorskip`, so a core-only
+checkout skips the module rather than erroring.
+
+**The suite's own audit is the acceptance criterion.**
+`TestTheOutputPassesOurOwnAudit::test_extraction_produces_a_corpus_with_no_errors` runs an
+extraction and feeds the result straight into `corpus.audit`. That closes the loop
+deliberately: `_MARKUP_MARKERS` in the extractor matches the marker set `test_audit.py`
+grades as an `ERROR`, so a leak fails at the stage that caused it rather than surfacing
+three stages later as a mysterious quality finding.
+
+**`strip_code` is not sufficient on its own, and eight parametrised cases prove it.**
+`test_no_marker_survives` runs templates, nested templates, `<ref>`, tables, HTML blocks,
+comments, entities, and bold-plus-links, each embedded in real Meetei Mayek prose.
+`test_table_contents_do_not_leak_into_prose` is separate because a stripped table does not
+vanish — its cell contents reappear as a sentence-shaped fragment. When the markup cannot
+be repaired the article is dropped rather than emitted dirty.
+
+**Filtering is tested by what it removes.** Redirects
+(`test_redirects_are_skipped`), non-article namespaces
+(`test_non_article_namespaces_are_skipped`), articles under `--minimum-characters`
+(`test_stubs_are_skipped`) and boilerplate headings
+(`test_boilerplate_sections_are_dropped`).
+
+**Deduplication has three cases, and it is not hypothetical.** Repeated boilerplate is
+dropped by default, `--keep-duplicates` turns that off, and whitespace variants still count
+as duplicates — a real Meetei Mayek wiki yielded 118 articles that were all the same stub
+differing in spacing.
+
+**Sections must survive.** `test_sections_are_kept_for_pair_mining` is the load-bearing
+one, and its name says why: flatten the article and `heading_section` mining becomes
+impossible one stage later, with nothing about the flattened corpus looking wrong.
+
+**The identifier is the page id, not the title.** Titles are neither stable nor unique
+across a dump; `test_the_identifier_is_the_page_id_not_the_title` pins that. The same code
+path carries the ElementTree fix where a leaf whose text is `"0"` is falsy and was once
+read as absent.
+
+**One article must not be able to stall a 227 MB dump.**
+`TestExtractionCannotBeStalledByOneArticle` pins the `_MEDIA_LINK` catastrophic-backtracking
+fix — an unclosed media link with many pipes took 8.5 seconds and now takes microseconds —
+with two companion cases asserting the faster regex still removes media links and still
+keeps ordinary wikilink text.
+
+**File handling is asserted end to end.** Plain XML as well as bzip2, `--limit` stopping
+early, a missing dump and a truncated dump each reported clearly rather than as a parser
+traceback, gzipped JSON Lines written, and the written records read back by the ordinary
+corpus reader — which is the only assertion that proves the two halves agree on a format.
+
+## Pair mining
+
+`test_pairs.py` covers `corpus/pairs.py`, which manufactures supervision out of article
+structure. Pure Python and numpy, no optional dependency, so it always runs.
+
+**Each kind is tested for what it is good for.** `title_lead`, `heading_section` and
+`adjacent` each get a case, `--kinds` restriction gets another, and
+`test_a_corpus_without_structure_still_yields_pairs` pins the property that makes
+`adjacent` worth having: it needs no headings, no title, no structure at all, so it works
+on prose from any source.
+
+**Provenance is recorded on every pair.** `test_provenance_is_recorded` asserts the
+`document` identifier survives, which is what lets training avoid treating two pairs from
+the same article as negatives of each other.
+
+**Lexical overlap is the control, so it is tested as one.** `TestTokenOverlap` covers full
+containment, disjoint text, proportionality, case, and an empty anchor not dividing by
+zero. `test_it_works_without_whitespace_word_boundaries` is the regression that matters:
+the word-split version returned 0.0 for Japanese, silently disabling the leakage filter for
+exactly the scripts that most needed it. The bigram path is now chosen by script rather
+than assumed.
+
+**Leakage must be visible, filterable, and reported per kind.** Overlap is recorded on
+every pair; a leaky pair can be rejected and a clean one survives the same threshold; mean
+overlap is reported per kind; and a kind whose mean is high enough to be suspicious is
+warned about rather than silently mined.
+
+**Quality filters are tested by their asymmetry.** Short anchors and short positives are
+rejected, but a long positive is *truncated rather than dropped* — throwing away the
+article's best passage because it ran long would be the wrong trade. Identical pairs are
+deduplicated and whitespace is normalised first.
+
+**Bad configuration fails at construction, not mid-run.** Six parametrised settings each
+raise when `PairConfig` is built. A mining run over a 163,768-article corpus takes half an
+hour; discovering an invalid threshold at the end of it is not acceptable.
+
+**Statistics and pairs both serialise.** `test_a_pair_serialises_to_the_trainer_format`
+pins the JSON shape `scripts/adapt_pretrained.py` reads, and is the only thing standing
+between the miner and the trainer disagreeing silently.

@@ -71,34 +71,55 @@ Implemented and tested end to end:
 
 | Area | What is there |
 |---|---|
-| Corpus | `Corpus → Document → Paragraph → Sentence → Token` tree, script-aware segmentation, JSON Lines / plain text / line readers, streaming statistics, filtering, exact deduplication |
+| Corpus | `Corpus → Document → Paragraph → Sentence → Token` tree, script-aware segmentation, JSON Lines / plain text / line readers, streaming statistics, filtering, exact deduplication, graded quality auditing |
+| Corpus building | MediaWiki dump extraction with markup stripping and section preservation; contrastive pair mining in three kinds with lexical leakage measured per pair. Run on real Hindi and Tamil dumps: 282,339 articles → 1,536,059 pairs, under 201 MB resident |
 | Tokenization | Unicode normalizers, four pre-tokenizers including a script-aware one, SentencePiece training and inference, a dependency-free `WordTokenizer` |
 | Vocabulary | Deterministic token/id mapping, fixed special token ids, streaming builder, JSON persistence |
 | Embeddings | Skip-gram word2vec with negative sampling in pure numpy, mean-pooling and SIF sentence encoders, exact cosine similarity index |
 | Evaluation | Tokenizer compression/fertility/unknown-rate metrics with a per-language fairness breakdown, structural embedding metrics (isotropy, effective dimensions), optional similarity and analogy datasets |
-| Interfaces | `qfme` CLI (`stats`, `train`, `search`, `evaluate`) and a Python API |
+| Interfaces | `qfme` CLI (`stats`, `validate`, `extract`, `mine-pairs`, `train`, `search`, `evaluate`) and a Python API |
 
-**Behind an optional extra.** The contextual encoder — a transformer, contrastive
-InfoNCE training, LoRA adaptation and gradient caching — lives in
-`embedding/neural/` and needs torch:
+**Behind optional extras.** Three capabilities are installed separately, so the base
+install stays small for callers that only need text preparation:
+
+| Extra | Adds | Gives you |
+|---|---|---|
+| `neural` | torch | The contextual encoder: transformer, contrastive InfoNCE training, LoRA, gradient caching |
+| `pretrained` | transformers | Loading a published checkpoint and LoRA-adapting it |
+| `wikipedia` | mwparserfromhell | `qfme extract` |
 
 ```bash
-uv sync --extra neural
+uv sync --extra neural --extra pretrained --extra wikipedia
 ```
 
 The base install is `numpy`, `pandas`, `pyyaml`, `sentencepiece`, `tqdm`. Everything
-through vocabulary and static word2vec runs on that alone, which keeps text preparation
-a small install for callers that need nothing more. Skipping the extra costs the
-contextual encoder and nothing else; its tests skip rather than fail.
+through vocabulary, static word2vec and pair mining runs on that alone. Skipping an extra
+costs exactly the capability it names and nothing else; the affected tests skip rather
+than fail.
+
+**Adapting a published checkpoint is implemented and proven.** `intfloat/multilingual-e5-small`
+adapted with LoRA on mined Wikipedia pairs gained **+28.6% recall@1 in Hindi and +40.9% in
+Tamil** from a 3.4 MB adapter training 0.50% of parameters. It is driven through
+`scripts/adapt_pretrained.py` and served with `SemanticSearchPipeline.from_adapter`; there
+is no `qfme adapt` subcommand yet.
+
+Note what that does *not* say: the weights are not loaded into this project's transformer.
+That encoder is pre-norm while most published ones are post-norm, and the shapes match, so
+a cross-load would succeed and be numerically wrong with nothing raising. External
+checkpoints are therefore run through their own library instead, behind the same
+`TextEncoder` contract. See [ROADMAP.md](https://github.com/quanfire/quanfire-multilingual-embedding/blob/main/ROADMAP.md).
 
 **Still absent.** These are missing rather than stubbed:
 
 - **No subword-averaging model.** There is no character n-gram embedding model; word2vec
   operates on SentencePiece pieces, which is a different thing.
 - **No decoder and no generation.** This produces embeddings, not text.
-- **No adaptation of external pretrained checkpoints yet.** The encoder here is pre-norm
-  while most published encoders are post-norm, so their weights do not transfer
-  directly. See [ROADMAP.md](https://github.com/quanfire/quanfire-multilingual-embedding/blob/main/ROADMAP.md).
+- **No hard negatives.** Contrastive training uses in-batch negatives only. Mining hard
+  negatives against a base encoder is the most likely next source of gain.
+- **No cross-lingual pair mining.** Nothing produces translation pairs, so cross-lingual
+  retrieval depends entirely on what the corpus happened to contain.
+- **No from-scratch pretraining at scale.** Every measurement here is at 5.3M or 118M
+  parameters; the target is a 568M encoder, and nothing has been run at that size.
 
 Further limits worth knowing before you rely on the framework:
 

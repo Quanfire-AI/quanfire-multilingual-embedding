@@ -87,4 +87,4 @@ It is imported by `corpus/base` (`TextNode` imports `BaseMetadata` for its `base
 ## Tests
 - `tests/corpus/metadata/test_base.py` — 1 test.
 
-The metadata classes are otherwise exercised indirectly and extensively through the node and corpus tests, principally `tests/corpus/test_nodes.py` (22 tests) and `tests/corpus/test_io.py` (29 tests), which cover the round-tripping of `license`, `author`, `url` and `attributes` through `Document.to_dict` and `Document.from_dict`.
+The metadata classes are otherwise exercised indirectly and extensively through the node and corpus tests, principally `tests/corpus/test_nodes.py` (22 tests) and `tests/corpus/test_io.py` (31 tests), which cover the round-tripping of `license`, `author`, `url` and `attributes` through `Document.to_dict` and `Document.from_dict`.

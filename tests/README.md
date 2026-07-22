@@ -24,14 +24,14 @@ failure appears:
 | Directory | Tests | Covers |
 |---|---|---|
 | [`common/`](common/README.md) | 20 | Spans, enums, type aliases, constants, version |
-| [`core/`](core/README.md) | 27 | Registry, factory, logging, exception context |
-| [`config/`](config/README.md) | 87 | Config validation, merging, precedence, compute profiles, persistence |
+| [`core/`](core/README.md) | 29 | Registry, factory, logging, exception context |
+| [`config/`](config/README.md) | 88 | Config validation, merging, precedence, compute profiles, persistence |
 | [`utils/`](utils/README.md) | 61 | Validation, hashing, filesystem, I/O, serialization |
-| [`corpus/`](corpus/README.md) | 424 | Scripts, segmentation, nodes, readers, statistics, auditing, the 22 scheduled languages |
+| [`corpus/`](corpus/README.md) | 462 | Scripts, segmentation, nodes, readers, statistics, auditing, Wikipedia extraction, pair mining, the 22 scheduled languages |
 | [`vocabulary/`](vocabulary/README.md) | 36 | Token/id mapping, special tokens, builder, persistence |
 | [`tokenizer/`](tokenizer/README.md) | 187 | Normalizers, pre-tokenizers, encoding, training, round trips |
-| [`embedding/`](embedding/README.md) | 148 | Matrix, word2vec, sentence encoders, index, contextual encoder, LoRA, gradient caching |
-| [`evaluation/`](evaluation/README.md) | 67 | Metric primitives, evaluators, report rendering |
+| [`embedding/`](embedding/README.md) | 177 | Matrix, word2vec, sentence encoders, index, contextual encoder, LoRA, gradient caching, pretrained checkpoints, adapter save/load |
+| [`evaluation/`](evaluation/README.md) | 81 | Metric primitives, evaluators, report rendering |
 | [`pipelines/`](pipelines/README.md) | 18 | Query/passage prefixes, batched indexing, building a pipeline from a saved adapter |
 | [`integration/`](integration/README.md) | 29 | End-to-end training, search and CLI |
 | `test_architecture.py` | 16 | Layering rule, acyclic import graph, `py.typed` marker, encoder contract |

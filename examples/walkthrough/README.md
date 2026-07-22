@@ -343,24 +343,114 @@ and the audit is how you find that out rather than discovering it in a model.
 
 ---
 
+## 10. Turn that corpus into training pairs
+
+An extracted corpus is not yet supervision. `qfme mine-pairs` manufactures it out of
+article structure:
+
+```bash
+qfme mine-pairs --source data/wikipedia/mni.jsonl.gz \
+                --output data/pairs/mni.jsonl.gz \
+                --max-overlap 0.9 --report reports/mni-pairs.json
+```
+
+Each line is an anchor, a positive, the kind it came from, the source document, and the
+lexical overlap between the two:
+
+```json
+{"anchor": "...", "positive": "...", "kind": "title_lead",
+ "document": "10", "language": "mni", "overlap": 1.0}
+```
+
+Three kinds are mined by default, and the mean overlap of each is reported because it is
+the number that says how much of the task a string matcher could solve on its own. On the
+real Hindi run:
+
+| Kind | Pairs | Mean overlap |
+|---|---:|---:|
+| `adjacent` | 414,166 | 0.50 |
+| `heading_section` | 130,243 | 0.77 |
+| `title_lead` | 98,127 | 0.98 |
+
+`title_lead` at 0.98 is the reason `--max-overlap` exists. It is still worth mining — it is
+the second-largest source — but capping it removes the pairs that are trivially solvable.
+
+**Cost, measured on an Intel MacBook with no GPU:** Hindi took 25m 04s to mine 642,536
+pairs from 118,571 articles; Tamil 28m 46s for 893,523 from 163,768. Peak resident memory
+under 201 MB in both cases, because nothing is held in memory that does not have to be.
+
+## 11. Adapt a published model, and measure whether it helped
+
+This is the step the project exists for, and it needs a GPU:
+
+```bash
+python scripts/adapt_pretrained.py \
+    --checkpoint intfloat/multilingual-e5-small \
+    --pairs data/pairs/hi.jsonl.gz \
+    --query-prefix "query: " --passage-prefix "passage: " \
+    --rank 32 --epochs 2 --batch-size 64 \
+    --sample-pairs 120000 --train-pairs 20000 --eval-pairs 2000 \
+    --output reports/hi-v1.json --save-adapter models/hi-v1
+```
+
+It scores the checkpoint first, then trains, then scores again on the same held-out pairs.
+The before/after comparison is the whole point — beating chance proves nothing, and
+fine-tuning a well-pretrained model on a narrow corpus can easily make it worse.
+
+Measured on an RTX 4070 Ti SUPER, against ~2,000 held-out pairs, training **0.50% of
+parameters**:
+
+| | Hindi base | Hindi adapted | Tamil base | Tamil adapted |
+|---|---:|---:|---:|---:|
+| recall@1 | 0.4238 | **0.5451** (+28.6%) | 0.3219 | **0.4535** (+40.9%) |
+| MRR | 0.5136 | 0.6364 (+23.9%) | 0.3931 | 0.5397 (+37.3%) |
+
+The weaker language gained more, which is the argument for doing this at all. The output
+is a 3.4 MB adapter, and serving it is one call:
+
+```python
+from multilingual_embedding.pipelines import SemanticSearchPipeline
+
+pipeline = SemanticSearchPipeline.from_adapter("models/hi-v1")
+```
+
+`from_adapter` restores the query and passage prefixes recorded in the artefact. Serving an
+E5 model without them produces plausible vectors encoding the wrong thing, with nothing
+raising — which is why they are stored rather than left to whoever loads it.
+
+[`docs/reading-results.md`](../../docs/reading-results.md) is how to read the report
+without fooling yourself.
+
+---
+
 ## What this does and does not show
 
 **Shown, end to end:** installation, corpus preparation, auditing that catches real
-extraction damage, tokenizer and vocabulary training, two families of embedding model,
+extraction damage, tokenizer and vocabulary training, three families of embedding model,
 retrieval in three scripts, per-language fairness reporting, evidence the contextual model
-learns, the economics of domain adaptation, and extraction of a real Wikipedia dump.
+learns, the economics of domain adaptation, extraction of a real Wikipedia dump, mining it
+into contrastive pairs, and adapting a published checkpoint with a measured before/after.
+
+Steps 1–9 run on the development machine with no GPU. Steps 10 and 11 split: mining runs
+anywhere, adaptation needs CUDA.
 
 **Not shown, because it does not work yet:**
 
-- **The contextual encoder has no CLI path.** `qfme train` trains the static model only.
-  The transformer is Python-API only — the two share the `TextEncoder` contract, not the
-  command line.
+- **The contextual and adapted encoders have no CLI path.** `qfme train` trains the static
+  model only. The transformer is Python-API only, and adaptation goes through
+  `scripts/adapt_pretrained.py` — there is no `qfme adapt`. The three families share the
+  `TextEncoder` contract, not the command line.
 - **Cross-lingual retrieval.** A Hindi query does not find English passages. That needs
-  aligned training pairs, which this corpus does not contain.
-- **External pretrained checkpoints.** This encoder is pre-norm; most published ones are
-  post-norm, so their weights do not load directly.
-- **Anything on a GPU.** No CUDA hardware here, so those paths are unexercised. Expect
-  device-specific problems to appear first on the training box, not on this machine.
+  aligned training pairs, and nothing here mines them.
+- **Hard negatives.** Contrastive training uses in-batch negatives only.
+- **Loading external weights into *this* transformer.** The encoder here is pre-norm and
+  most published ones are post-norm, and the shapes match — so a cross-load would succeed
+  and be silently wrong. Published checkpoints are therefore adapted through their own
+  library instead, which is what step 11 does; what remains impossible is the specific act
+  of initialising this project's architecture from someone else's file.
+- **CUDA verified by a test.** The GPU results in step 11 were produced by hand on a 4070
+  Ti SUPER. No automated test exercises a CUDA path, because development happens on a
+  machine without one. Expect device-specific problems to appear first on the training box.
 
 **A note on the sample corpus.** It is small and templated, which makes it ideal for
 seeing the mechanics and useless for judging quality. Real judgement needs real text —

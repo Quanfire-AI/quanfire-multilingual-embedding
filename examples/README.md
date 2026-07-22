@@ -9,11 +9,18 @@ the bundled sample corpus, so an example that has rotted fails visibly rather th
 misleading a reader.
 
 `train_and_search.py` and the first six walkthrough steps need only the base install
-(`uv sync`). The walkthrough's contextual-encoder and LoRA steps need `--extra neural`,
-and its extraction step needs `--extra wikipedia`:
+(`uv sync`). Beyond that, each extra buys one step:
+
+| Walkthrough steps | Needs |
+|---|---|
+| 1–6, and `train_and_search.py` | base install |
+| 7–8 — the contextual encoder and LoRA | `--extra neural` |
+| 9 — extracting a real dump | `--extra wikipedia` |
+| 10 — mining pairs | base install |
+| 11 — adapting a published checkpoint | `--extra neural --extra pretrained`, and a GPU |
 
 ```bash
-uv sync --extra neural --extra wikipedia
+uv sync --extra neural --extra pretrained --extra wikipedia
 ```
 
 ## Contents
@@ -69,10 +76,12 @@ would be wrong for real use, say so in the script where the setting appears.
 
 ## Walkthrough
 
-[`walkthrough/`](walkthrough/README.md) is a step-by-step tour of the whole project —
+[`walkthrough/`](walkthrough/README.md) is an eleven-step tour of the whole project —
 corpus stats, auditing a damaged extraction, training, multilingual search, per-language
 fairness, the static model's structural limit, evidence that the contextual encoder
-learns, and what domain adaptation costs.
+learns, what domain adaptation costs, extracting a real Wikipedia dump, mining it into
+contrastive pairs, and adapting a published checkpoint with a measured before/after.
 
 Every command and every output in it was executed rather than predicted, and the numbers
-reproduce.
+reproduce. The last step's figures come from a GPU run rather than this machine, and are
+labelled as such.

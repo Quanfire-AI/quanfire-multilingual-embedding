@@ -2,7 +2,7 @@
 
 > Tests for [`multilingual_embedding.core`](../../src/multilingual_embedding/core/README.md) — registry, factory, logging, exceptions.
 
-**27 tests.** Run with `pytest tests/core -q`.
+**29 tests.** Run with `pytest tests/core -q`.
 
 ## Files
 

@@ -19,6 +19,7 @@ nothing from the framework except `utils.validation`.
 | `metrics.py` | Metric primitives: cosine similarity, `precision_at_k`, `recall_at_k`, `f1_score`, `average_precision`, `reciprocal_rank`, `mean_reciprocal_rank`, `ndcg_at_k`, `accuracy`, `pearson_correlation`, `spearman_correlation`. |
 | `tokenizer_eval.py` | `TokenizerEvaluator`, `TokenizerMetrics`, `evaluate_tokenizer` and `language_fairness` — compression, fertility, unknown rate and the per-language spread. |
 | `embedding_eval.py` | `EmbeddingEvaluator`, `EmbeddingMetrics`, the `SimilarityPair` / `AnalogyQuestion` records, their JSON Lines loaders, and `sample_neighbour_probes`. |
+| `retrieval.py` | `evaluate_retrieval`, `RetrievalReport`, `RetrievalScores` — scoring any `TextEncoder` at the task it exists for, with the breakdowns that catch a fake result. |
 | `report.py` | `EvaluationReport`: bundles corpus, tokenizer and embedding metrics with the resolved config, and writes `report.json` plus `report.md`. |
 
 ## Key design decisions
@@ -102,21 +103,56 @@ next to the metrics. A metric without the settings that produced it cannot be co
 against anything, so the two are written together as `report.json` for machines and
 `report.md` for humans.
 
-## What this layer does not yet score
+## `retrieval.py`: scoring the task, not a property of the model
 
-`EmbeddingEvaluator` takes an `EmbeddingMatrix`. That is the right shape for the static
-model and the wrong one for the contextual encoder in `embedding/neural/`, which has no
-per-token table to read — the whole point of `TextEncoder` is that a vector is computed at
-call time. So while `metrics.py` already supplies the primitives a retrieval evaluation
-needs — `ndcg_at_k`, `mean_reciprocal_rank`, `recall_at_k` — nothing here wires them to an
-encoder, and there is no query-passage retrieval evaluator, no per-domain scoring and no
-cross-lingual retrieval measurement.
+Everything else in this package measures a *property* of a model — how isotropic its
+vectors are, how efficiently a tokenizer segments, whether two words that should be similar
+are. None of that answers the only question that matters for a retrieval encoder: given a
+query, does the right passage come back?
 
-The last of those is worth naming rather than leaving implicit, because
-`pipelines/search.py` documents the corresponding caveat: a shared multilingual vector
-space does not imply the languages are aligned within it. The honest way to settle that is
-to measure retrieval across languages, and this layer cannot do so today. `ROADMAP.md`
-carries it.
+**A falling loss is compatible with having learned nothing useful.** Contrastive training
+on pairs whose anchor words already appear in their positive can be solved by string
+matching, and the loss will fall beautifully while the model learns substrings. That is not
+hypothetical: Hindi Wikipedia's `title_lead` pairs average 0.977 lexical overlap.
+
+`evaluate_retrieval(encoder, pairs)` takes anything satisfying the encode contract — the
+static model, the contextual encoder, or a published checkpoint — because it needs an
+encoder rather than an `EmbeddingMatrix`. Each pair's anchor is a query, its positive the
+one correct answer, and every other pair's positive a distractor, so the candidate pool is
+the pair set itself.
+
+**Three things decide whether a number here means anything, and all three are reported
+next to it:**
+
+| Reported | Why it is not optional |
+|---|---|
+| `candidates` | Recall@1 against 100 candidates and against 100,000 are different tasks. A recall figure without its pool size is not interpretable. |
+| `random_recall_at_1` | Chance is `1/N`. The difference between "0.42" and "0.42 against a chance level of 0.001" is the whole claim. |
+| `dropped_duplicate_positives` | If two queries share an identical passage, neither the model nor the metric can tell which was meant, and scoring silently punishes correct behaviour. They are removed, and the count is reported. |
+
+`RetrievalReport` then breaks the result down three ways — `by_language`, `by_kind` and
+`by_overlap`. **`by_overlap` is the one to read first.** A model that scores well only in
+the high-overlap band has learned string matching, and its loss curve looks identical to
+one that learned meaning. This is the breakdown that turned the Hindi and Tamil adaptation
+results from plausible into defensible: gains ran *inversely* to overlap in both languages
+(+145.5% and +126.7% in the low band, against not-significant and +21.6% in the high).
+
+[`docs/reading-results.md`](../../../docs/reading-results.md) is how to read one of these
+without fooling yourself.
+
+## What this layer still does not score
+
+- **Cross-lingual retrieval.** `by_language` scores each language separately; nothing here
+  measures a Hindi query against English passages. `pipelines/search.py` documents the
+  corresponding caveat — a shared multilingual vector space does not imply the languages
+  are aligned within it — and the honest way to settle that is a cross-lingual metric,
+  which needs aligned pairs that nothing currently mines.
+- **Per-domain scoring against non-Wikipedia text.** The machinery accepts any pair file;
+  no such file has been produced yet.
+- **Reranking or multi-positive relevance.** Each query has exactly one correct answer.
+  Graded relevance would need a different pair format.
+
+`ROADMAP.md` carries all three.
 
 ## Usage
 
@@ -166,7 +202,10 @@ baseline on a deliberately unfair pair of inputs.
 May import from `common`, `core`, `utils`, `config`, `corpus`, `vocabulary`, `tokenizer`
 and `embedding`. In practice: `metrics.py` imports only `utils.validation`;
 `tokenizer_eval.py` imports `core.logging` and `corpus.script`; `embedding_eval.py`
-imports `core.logging`, `embedding.matrix` and `utils.io`; `report.py` imports
+imports `core.logging`, `embedding.matrix` and `utils.io`; `retrieval.py` imports
+`core.exceptions`, `core.logging` and `utils.hashing` and nothing else — it reaches the
+encoder through a local `Encodes` protocol rather than importing `embedding`, which is why
+it can score a published checkpoint it has never heard of; `report.py` imports
 `common.version`, `core.logging`, `utils.filesystem` and `utils.io`. Notably this layer
 does not import `tokenizer` — see the plain-callable decision above.
 
@@ -176,9 +215,10 @@ Only `pipelines` imports this package. Nothing below it may.
 
 | File | Tests |
 |---|---|
-| `tests/evaluation/test_metrics.py` | 30 |
 | `tests/evaluation/test_evaluators.py` | 37 |
+| `tests/evaluation/test_metrics.py` | 30 |
+| `tests/evaluation/test_retrieval.py` | 14 |
 
-`.venv/bin/python -m pytest tests/evaluation -q` reports **67 passed**. The evaluators are
+`.venv/bin/python -m pytest tests/evaluation -q` reports **81 passed**. The evaluators are
 additionally exercised against real trained artefacts by
 `tests/integration/test_end_to_end.py` (29 tests).

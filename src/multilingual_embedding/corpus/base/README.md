@@ -80,4 +80,4 @@ Nothing below the corpus layer may import it. Within the corpus layer it is impo
 ## Tests
 - `tests/corpus/base/test_text_node.py` — 5 tests.
 
-`ContainerNode.verify_children` and the node hierarchy as a whole are covered more heavily through the concrete classes, chiefly in `tests/corpus/test_nodes.py` (22 tests) and `tests/corpus/test_corpus.py` (19 tests). The whole `tests/corpus` tree is 395 tests.
+`ContainerNode.verify_children` and the node hierarchy as a whole are covered more heavily through the concrete classes, chiefly in `tests/corpus/test_nodes.py` (22 tests) and `tests/corpus/test_corpus.py` (19 tests). The whole `tests/corpus` tree is 462 tests.

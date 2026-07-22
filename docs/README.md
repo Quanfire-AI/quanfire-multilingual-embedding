@@ -19,14 +19,24 @@ The division of labour across the project's documentation is deliberate:
 
 ## Pages
 
+Listed in navigation order, which is also reading order.
+
 | Page | Contents |
 |---|---|
 | `index.md` | Overview, design principles, scope — including what is explicitly not implemented |
+| `installing.md` | The use-it/develop-it split: `uv tool install` for running `qfme` anywhere, `uv sync` in a clone for changing it, and which extras each job needs |
 | `getting-started.md` | Install, inspect a corpus, train, search, evaluate, Python API, running tests |
 | `architecture.md` | Layer diagram and dependency rule, package walkthrough, the non-obvious design decisions |
 | `configuration.md` | Every configuration field with type, default, meaning and validation rule; the precedence chain; annotated example configs |
 | `data-format.md` | The exact JSON Lines contract an extraction pipeline must produce, the rules it must satisfy, how to check an extraction with `qfme validate`, and notes specific to Wikipedia dumps |
 | `compute-profiles.md` | The machine/experiment split: what a `--profile` carries, why it is configuration rather than a branch per machine, and which single setting is not result-neutral |
+| `reading-results.md` | How to tell a real retrieval result from a flattering one — the disqualifying checks, in the order that stops you interpreting an invalid number |
+
+`reading-results.md` is the page to send someone who has just been handed an adaptation
+report. It is ordered so that each step can disqualify everything below it: the baseline
+before the gain, the candidate pool before the recall, the overlap bands before the
+headline. A +40% recall@1 against no baseline, or against 50 candidates, means nothing, and
+the report contains everything needed to notice that.
 
 `mkdocs.yml` at the repository root defines the navigation, and its `nav` must list
 exactly the pages present here — `mkdocs build --strict` fails on a mismatch, and CI

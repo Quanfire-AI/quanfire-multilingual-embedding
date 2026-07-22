@@ -7,14 +7,23 @@ domain — with the corpus handling, tokenization, vocabulary management, traini
 evaluation in between built to be inspected, configured and reproduced.
 
 ```
-corpus  ->  tokenizer  ->  vocabulary  ->  embedding model  ->  evaluation  ->  search
+Wikipedia dump  ->  corpus  ->  mined pairs  ->  adapted encoder  ->  evaluation  ->  search
+                       |
+                  tokenizer  ->  vocabulary  ->  static baseline
 ```
 
-Two model families share that pipeline: a **static** word2vec baseline in pure numpy, and
-a **contextual** transformer encoder trained contrastively, which needs the optional
-`neural` extra. The static model is the floor the contextual one is measured against.
+Three routes to a vector share that pipeline: a **static** word2vec baseline in pure numpy,
+a **contextual** transformer written out in this repository and trained contrastively, and
+an **adapted** published checkpoint — LoRA over frozen `multilingual-e5-small`-class weights.
+The last is what produces the models this project ships; the first is the floor the others
+are measured against. The second and third need the optional `neural` extra.
 
-**1103 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
+**1204 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
+
+**Proven on real data:** a published checkpoint adapted on mined Hindi and Tamil Wikipedia
+pairs beats itself by **+28.6% (Hindi)** and **+40.9% (Tamil)** recall@1 on held-out
+retrieval, training **0.50%** of its parameters into a **3.4 MB** artefact.
+[Full numbers below.](#what-this-has-achieved)
 
 ---
 
@@ -22,23 +31,27 @@ a **contextual** transformer encoder trained contrastively, which needs the opti
 
 - [Purpose](#purpose)
 - [Objective](#objective)
+- [What this has achieved](#what-this-has-achieved)
+- [What it can do today](#what-it-can-do-today)
 - [Goals](#goals)
 - [Non-goals](#non-goals)
 - [Status](#status)
 - [Running locally](#running-locally)
 - [Quick start](#quick-start)
+- [Training on Wikipedia, in multiple languages](#training-on-wikipedia-in-multiple-languages)
 - [What makes it multilingual](#what-makes-it-multilingual)
 - [Architecture](#architecture)
-- [The two model families](#the-two-model-families)
+- [The three model families](#the-three-model-families)
 - [Design decisions worth knowing](#design-decisions-worth-knowing)
 - [Configuration](#configuration)
 - [Running in production](#running-in-production)
+- [Pros and cons](#pros-and-cons)
 - [Project layout](#project-layout)
 - [Development](#development)
 - [Limitations](#limitations)
 
-> **Where this is going:** [ROADMAP.md](ROADMAP.md) tracks the remaining phases — pair
-> mining from unlabelled text, a serving API, and from-scratch pretraining.
+> **Where this is going:** [ROADMAP.md](ROADMAP.md) tracks the remaining work — domain pair
+> miners, hard negatives, a serving API, and from-scratch pretraining.
 > [ECOSYSTEM.md](ECOSYSTEM.md) places this repository within the wider QuanFire AI stack;
 > everything outside embeddings lives there and nowhere in this README.
 
@@ -98,14 +111,134 @@ Concretely, the framework must be able to:
    changing anything but a profile.
 
 **Where it falls short of that today.** `qfme train` trains the static model only. The
-contextual encoder is trained and served through the Python API — `TrainingPipeline` has
-no neural path, and `SemanticSearchPipeline.from_directory` always reconstructs a static
-model. The two families share the `TextEncoder` contract, not the command line. Closing
-that gap is part of Phase D in [ROADMAP.md](ROADMAP.md); until it is closed, "from a
+contextual and adapted encoders are driven through the Python API and
+`scripts/adapt_pretrained.py` — `TrainingPipeline` has no neural path, and
+`SemanticSearchPipeline.from_directory` always reconstructs a static model. (Serving an
+adapted one is a single call, `SemanticSearchPipeline.from_adapter`, but there is no
+`qfme adapt` subcommand.) The families share the `TextEncoder` contract, not the command
+line. Closing that gap is tracked in [ROADMAP.md](ROADMAP.md); until it is closed, "from a
 single command" is true of word2vec and not of the transformer.
 
 **Scope.** This repository does embeddings. Nothing else. The other modalities in the
 QuanFire stack are separate repositories and are described in [ECOSYSTEM.md](ECOSYSTEM.md).
+
+---
+
+## What this has achieved
+
+Not capability claims — measured results, each with the run that produced it. Full working
+in [ROADMAP.md](ROADMAP.md).
+
+### The headline: adaptation works, on real Indic text
+
+`intfloat/multilingual-e5-small` adapted with LoRA on 20,000 mined Wikipedia pairs per
+language, scored against ~2,000 held-out pairs it never saw. Rank 32, two epochs, **0.50%
+of parameters trained**, on an RTX 4070 Ti SUPER.
+
+| | Hindi base | Hindi adapted | Tamil base | Tamil adapted |
+|---|---:|---:|---:|---:|
+| recall@1 | 0.4238 | **0.5451** (+28.6%) | 0.3219 | **0.4535** (+40.9%) |
+| recall@10 | 0.6690 | 0.7929 (+18.5%) | 0.5269 | 0.6966 (+32.2%) |
+| MRR | 0.5136 | 0.6364 (+23.9%) | 0.3931 | 0.5397 (+37.3%) |
+
+**The weaker language gained more, which is the argument for doing this at all.** E5 serves
+Tamil at 76% of its Hindi score; after adaptation Tamil reaches 83% of Hindi's. The corpus
+helps most exactly where the published model is thinnest — which is where a proprietary
+corpus earns its keep.
+
+### The control: it is not learning to match strings
+
+Gains run *inversely* to lexical overlap, in both languages, and Tamil is Dravidian while
+Hindi is Indo-Aryan:
+
+| overlap band | Hindi | Tamil |
+|---|---:|---:|
+| low `<0.3` | +145.5% | +126.7% |
+| mid `0.3–0.7` | +39.6% | +56.9% |
+| high `>0.7` | *not significant* | +21.6% |
+
+A model memorising surface form improves most where strings already match. Neither does.
+One language could be an accident; two unrelated ones make it a property of the method.
+
+### The finding that changes how corpora get planned
+
+Four controlled runs, each varying exactly one facet with everything else held fixed and
+the evaluation set pinned:
+
+| varied | held fixed | achievable gain captured |
+|---|---|---:|
+| **task shape** — `adjacent` → `heading_section` | language, corpus | **−17%** |
+| **language** — Hindi → Tamil | task shape, corpus | **+95%** |
+
+**The adaptation is language-general and task-specific** — the reverse of the intuitive
+assumption. Pairs transfer across languages almost completely: training on Hindi alone
+scored 381/1272 on Tamil against in-language training's 388/1272, seven queries apart. Pairs
+do **not** transfer across query shapes. So: mine wherever the text is cleanest, but mine
+*several pair shapes*, because every shape to be served must be present in the mixture. A
+mixture works even when a single wrong shape does not — `indic-v1` trained on all three
+kinds recovered +38.0% on `heading_section` *and* +40.8% on `adjacent` from one adapter.
+
+### The engineering that made it fit
+
+Measured on the training box, batch 256, a 5.3M-parameter encoder over 4,000 mined pairs:
+
+| | no caching | chunk 32 |
+|---|---:|---:|
+| fp32 | 4.89 GB / 4.3s | 0.40 GB / 4.7s |
+| bf16 | 2.99 GB / 2.7s | 0.29 GB / 4.7s |
+
+Gradient caching carries the memory saving — **12.2× alone**, 1.6× for bf16, **16.9×
+together** — and final losses spanned **0.51%** across all four cells, so the exactness
+claim holds off the test bench. Initial loss matched `ln(batch_size)` to within 4–6% at both
+batch 16 and 256, which is what an untrained contrastive model must show and independent
+evidence the objective is wired the right way round.
+
+LoRA at BERT-base shape, rank 16: **0.81% of parameters trainable**, a **3.4 MB** adapter
+against a 419 MB model, optimiser state from **0.82 GB to 6.8 MB**.
+
+### The data path, end to end on real dumps
+
+A full `extract → validate → mine-pairs → train` run over both dumps, 9/9 stages passing in
+1h 30m on a laptop with **under 201 MB peak resident memory** throughout:
+
+| | Hindi | Tamil |
+|---|---:|---:|
+| Dump | 227 MB | 258 MB |
+| Articles extracted | 118,571 in 7.4s | 163,768 in 8.2s |
+| Sentences | 2,235,798 | 2,677,328 |
+| Pairs mined | **642,536** in 25m | **893,523** in 29m |
+| — `adjacent` / `heading_section` / `title_lead` | 414,166 / 130,243 / 98,127 | 507,058 / 237,049 / 149,416 |
+| Mean overlap by kind | 0.50 / 0.77 / 0.98 | 0.47 / 0.76 / 0.98 |
+
+That `title_lead` overlap of 0.98 is the leakage the pair miner exists to measure: a
+Wikipedia lead restates its title almost verbatim, so the largest pair source is also the
+most solvable by string matching. It is reported, not hidden, and `--max-overlap` filters it.
+
+---
+
+## What it can do today
+
+| Capability | State | Entry point |
+|---|---|---|
+| Read a corpus larger than memory, plain or gzipped, text/lines/JSON Lines | ✅ | `qfme stats`, `stream_documents` |
+| Extract a Wikipedia dump into corpus format, sections preserved | ✅ | `qfme extract` |
+| Audit a corpus and refuse to train on a broken one | ✅ | `qfme validate` (non-zero exit) |
+| Segment and script-detect across 22 scheduled Indian languages + more | ✅ | `corpus/` |
+| Train a SentencePiece tokenizer and shared vocabulary | ✅ | `qfme train` |
+| Train a static word2vec model and search it | ✅ | `qfme train`, `qfme search` |
+| Mine contrastive pairs from unlabelled text, leakage measured | ✅ | `qfme mine-pairs` |
+| Train a transformer encoder contrastively from scratch | ✅ | Python API |
+| Adapt a published checkpoint with LoRA on mined pairs | ✅ | `scripts/adapt_pretrained.py` |
+| Fit a large contrastive batch on 16 GB (gradient caching, bf16) | ✅ | `compute` profile |
+| Save an adapted model as a ~3.4 MB artefact | ✅ | `save_adapter` |
+| Serve an adapted model, prefixes applied correctly | ✅ | `SemanticSearchPipeline.from_adapter` |
+| Score retrieval per language, per pair kind, per overlap band, with Wilson intervals | ✅ | `evaluate_retrieval` |
+| Declare an experiment's design and have the data checked against it | ✅ | `--adaptation` |
+| Hard-negative mining, domain-specific miners, synthetic pairs | ❌ | Phase C |
+| HTTP embeddings endpoint, ONNX export, container image | ❌ | Phase D |
+| `qfme adapt` subcommand, neural path in `TrainingPipeline` | ❌ | Phase D |
+| From-scratch pretraining (MLM then contrastive) | ❌ | Phase E |
+| Approximate nearest-neighbour index | ❌ | out of scope — export instead |
 
 ## Goals
 
@@ -149,8 +282,10 @@ Stated up front, because a framework that claims everything is useful for nothin
 | 4 | Vocabulary — token/id mapping, special tokens, persistence | **Implemented** |
 | 5 | Static embeddings — word2vec, sentence encoders, similarity search | **Implemented** |
 | A | Transformer encoder, contrastive InfoNCE training | **Implemented** |
-| B | LoRA adaptation, gradient caching, mixed precision | **Implemented** — external checkpoint adaptation outstanding |
-| C–E | Pair mining, serving API, from-scratch pretraining | **Planned** — see [ROADMAP.md](ROADMAP.md) |
+| B | LoRA, gradient caching, mixed precision, **external checkpoint adaptation** | **Implemented** — exit criterion met on hardware, 21 July 2026 |
+| C | Pair mining from unlabelled text | **Substantially done** — Wikipedia structure miners and `qfme mine-pairs` ship; hard negatives, domain miners and synthetic pairs outstanding |
+| D | Serving | **Started** — `from_adapter` serves a saved model locally; endpoint, ONNX, container outstanding |
+| E | From-scratch pretraining | **Planned** — capability, not the default; see [ROADMAP.md](ROADMAP.md) |
 
 **The dependency split is deliberate.** The base install is `numpy`, `pandas`, `pyyaml`,
 `sentencepiece`, `tqdm` — no torch. Everything through vocabulary and static embeddings
@@ -165,9 +300,13 @@ Skipping it costs you the contextual encoder and nothing else; the suite skips t
 tests rather than failing.
 
 **Honest limit on verification.** Development happens on a machine with no NVIDIA GPU, so
-**the CUDA paths are not exercised by local testing**. bf16 autocast is verified on CPU,
-including that the loss still falls, but the speed and memory claims that motivate it are
-unverified until a run on GPU hardware. Device-specific bugs will surface there first.
+**the CUDA paths are not exercised by any automated test**. They are verified by hand on an
+RTX 4070 Ti SUPER — that is where the memory, speed and retrieval numbers above come from,
+and `scripts/verify_e2e.py` exists to reproduce the whole path there on demand. But a
+device-specific regression will still reach the training box before it reaches CI.
+
+**And a limit on scale.** Every measurement above is at 5.3M or 118M parameters. The target
+is a 568M encoder, and 0.29 GB of a 16 GB card says nothing about where that ceiling sits.
 
 ---
 
@@ -379,6 +518,112 @@ A complete worked example is in [`examples/train_and_search.py`](examples/train_
 
 ---
 
+## Training on Wikipedia, in multiple languages
+
+**When can this start? It already has.** Hindi and Tamil are done end to end — dumps
+extracted, audited, mined, adapted, measured, and the adapter saved as `models/indic-v1`.
+Nothing is blocking a third language, or a twentieth. What follows is the recipe and its
+real costs.
+
+### The four commands
+
+```bash
+# 1. Fetch a dump. ~200-300 MB per mid-sized Indic wiki.
+curl -O https://dumps.wikimedia.org/hiwiki/latest/hiwiki-latest-pages-articles.xml.bz2
+
+# 2. Extract. Streams; peak memory is one article.
+qfme extract --dump data/dumps/hiwiki-latest-pages-articles.xml.bz2 \
+             --output data/corpora/hi.jsonl.gz --language hi
+
+# 3. Gate on quality before spending GPU time.
+qfme validate --source data/corpora/hi.jsonl.gz --output reports/hi-audit.json
+
+# 4. Mine pairs, all three kinds, with leakage reported per kind.
+qfme mine-pairs --source data/corpora/hi.jsonl.gz \
+                --output data/pairs/hi.jsonl.gz \
+                --max-overlap 0.9 --report reports/hi-pairs.json
+```
+
+Then adapt, on the GPU box:
+
+```bash
+python scripts/adapt_pretrained.py \
+    --checkpoint intfloat/multilingual-e5-small \
+    --pairs data/pairs/hi.jsonl.gz \
+    --query-prefix "query: " --passage-prefix "passage: " \
+    --rank 32 --epochs 2 --batch-size 64 \
+    --sample-pairs 120000 --train-pairs 20000 --eval-pairs 2000 \
+    --output reports/hi-v1.json --save-adapter models/hi-v1
+```
+
+For **multilingual** training, concatenate the pair files rather than training one adapter
+per language. That question was settled by a controlled experiment: joint training is
+numerically best on both languages, never worse than either specialist, and produces one
+artefact instead of two.
+
+```bash
+cat data/pairs/hi.jsonl.gz data/pairs/ta.jsonl.gz > data/pairs/indic.jsonl.gz
+```
+
+Gzip members concatenate, and every reader here decompresses transparently. Sampling is a
+reservoir over the whole file, so a mixed file gives a mixed sample without interleaving.
+
+### What it costs, measured
+
+Per language, on an Intel MacBook with no GPU (steps 2–4):
+
+| Step | Hindi | Tamil |
+|---|---:|---:|
+| `extract` | 7.4s → 118,571 articles | 8.2s → 163,768 articles |
+| `validate` | 11m 02s | 12m 15s |
+| `mine-pairs` | 25m 04s → 642,536 pairs | 28m 46s → 893,523 pairs |
+| Peak resident memory | **< 201 MB** | **< 201 MB** |
+| Disk (corpus + pairs) | ~288 MB | ~276 MB |
+
+So **roughly 40 minutes and 300 MB of disk per language, on a laptop, with no GPU.** The
+adaptation itself is minutes on the 4070 Ti at 20,000 pairs — the data preparation dominates.
+Two languages at once is under two hours of wall-clock, most of it unattended.
+
+### What the results say about which languages to add
+
+The controlled task/language experiment above changes the obvious plan. Because adaptation
+is **language-general**, the first language buys most of the benefit and each additional one
+adds less than its collection cost implies. Because it is **task-specific**, every query
+shape to be served must appear in the training mixture.
+
+Practical consequences for a 22-language programme:
+
+1. **Mine where the text is cleanest and most abundant first.** Hindi, Tamil, Bengali,
+   Telugu, Marathi have wikis large enough to matter. The smallest — Santali (Ol Chiki),
+   Meitei (Meetei Mayek), Dogri — will yield few pairs and, on this evidence, would have
+   been largely covered by the larger languages anyway.
+2. **Always mine all three pair kinds.** `--kinds` defaults to all of them for this reason.
+   A single-shape adapter cost 17% of the achievable gain when the shape was wrong.
+3. **Cap the leakiest kind rather than dropping it.** `title_lead` averages 0.98 overlap and
+   is still the second-largest source; `--max-overlap 0.9` keeps volume while removing the
+   pairs a string matcher solves outright.
+4. **Hold the evaluation set fixed with `--eval-pairs-file`** whenever comparing runs, or
+   the held-out split moves with the training filter and the comparison measures the wrong
+   thing.
+5. **Use `--sample-pairs` several times `--train-pairs`** whenever a facet filter is set.
+   Filters run after reservoir sampling, so without it a run naming a minority kind silently
+   trains on less data — this happened, at 25,000 pairs against 7,000.
+
+### What is *not* yet possible
+
+- **A non-Wikipedia corpus axis is untested.** Every comparison so far has Wikipedia on both
+  sides. `--adaptation domain` exists for it and needs a pair file from real QuanFire
+  documents to run — that is the experiment that would justify "this will help on our
+  contracts".
+- **No hard negatives.** Negatives are in-batch only. Mining hard ones against a base
+  encoder is Phase C's remaining piece and is the most likely next source of gain.
+- **No cross-lingual pairs.** Nothing mines translation pairs, so cross-lingual retrieval
+  works only to the extent the corpus contained comparable content.
+- **`qfme extract` needs the `wikipedia` extra** (`mwparserfromhell`). Without it the
+  command raises a message naming the fix rather than an `ImportError`.
+
+---
+
 ## What makes it multilingual
 
 The word "multilingual" is easy to claim. Concretely, these are the places where
@@ -472,12 +717,17 @@ example:
 | [`core`](src/multilingual_embedding/core/README.md) | Exceptions, logging, registry, factory |
 | [`config`](src/multilingual_embedding/config/README.md) | Typed configuration and loading |
 | [`utils`](src/multilingual_embedding/utils/README.md) | Validation, hashing, filesystem, I/O, serialization |
-| [`corpus`](src/multilingual_embedding/corpus/README.md) | Document tree, segmentation, readers, statistics |
+| [`corpus`](src/multilingual_embedding/corpus/README.md) | Document tree, segmentation, readers, statistics, Wikipedia extraction, pair mining |
 | [`vocabulary`](src/multilingual_embedding/vocabulary/README.md) | Token/id mapping, special tokens |
 | [`tokenizer`](src/multilingual_embedding/tokenizer/README.md) | Normalizers, pre-tokenizers, SentencePiece |
-| [`embedding`](src/multilingual_embedding/embedding/README.md) | word2vec, transformer encoder, contrastive training, LoRA, similarity index |
+| [`embedding`](src/multilingual_embedding/embedding/README.md) | word2vec, sentence encoders, similarity index, the `TextEncoder` contract |
+| [`embedding/neural`](src/multilingual_embedding/embedding/neural/README.md) | Transformer encoder, contrastive training, LoRA, gradient caching, pretrained adaptation, the adapter artefact |
 | [`evaluation`](src/multilingual_embedding/evaluation/README.md) | Metrics, scoring, reports |
 | [`pipelines`](src/multilingual_embedding/pipelines/README.md) | Training and search workflows |
+
+Outside the package, [`scripts/`](scripts/README.md) holds the adaptation experiment, the
+end-to-end verifier and one diagnostic, and [`data/`](data/README.md) documents the corpus
+and dump layout.
 
 The corpus is a tree:
 
@@ -497,19 +747,29 @@ See [`docs/architecture.md`](docs/architecture.md) for the full walkthrough.
 
 ---
 
-## The two model families
+## The three model families
 
-Both are trained by this repository, on the same corpus, tokenizer and vocabulary. They
-differ in what a vector can represent.
+All three are produced by this repository, from the same corpus. They differ in what a
+vector can represent and in where the pretraining came from.
 
-| | Static (`word2vec`) | Contextual (transformer) |
-|---|---|---|
-| Vector per | token type | token occurrence, pooled to a text |
-| Runtime | pure numpy | torch (`neural` extra) |
-| Training | skip-gram, negative sampling | contrastive InfoNCE, in-batch negatives |
-| Needs pairs | no — raw text is enough | yes — anchor/positive pairs |
-| Trains on CPU | comfortably | slowly, but yes |
-| Reachable from `qfme` | yes | **no — Python API only** |
+| | Static (`word2vec`) | Contextual (ours) | Adapted (published + LoRA) |
+|---|---|---|---|
+| Vector per | token type | token occurrence, pooled to a text | same |
+| Runtime | pure numpy | torch (`neural` extra) | torch + `transformers` |
+| Training | skip-gram, negative sampling | contrastive InfoNCE from scratch | contrastive InfoNCE over frozen weights |
+| Needs pairs | no — raw text is enough | yes | yes |
+| Pretraining scale | none | whatever you can afford | **someone else's, free** |
+| Trains on CPU | comfortably | slowly, but yes | slowly, but yes |
+| Downloads at runtime | no | no | **yes**, once, cached |
+| Artefact size | vocab × dim × 4 bytes | full model | **3.4 MB** adapter |
+| Reachable from `qfme` | yes | **no — Python API only** | **no — `scripts/adapt_pretrained.py`** |
+| What it is for | the baseline every claim is measured against | owning a trustworthy training loop | **the models actually shipped** |
+
+**The adapted route is the product.** Writing the transformer out was the right way to build
+a training loop worth trusting — a borrowed checkpoint would have masked a broken loop, and
+a good model trains adequately in spite of bugs. But pretraining scale is precisely what a
+single consumer GPU cannot reproduce, so the encoder worth serving starts from someone
+else's weights and earns its advantage from a corpus nobody else has.
 
 **The static model has a structural ceiling, and it is worth seeing rather than reading
 about.** In `river bank` and `savings bank`, word2vec assigns `bank` one vector — the two
@@ -521,14 +781,16 @@ retired: a contextual model that cannot beat it has not learned anything.
 The transformer is written out in this repository rather than imported — pre-norm
 residuals, fused scaled dot-product attention, GELU, learned positions, mean pooling over
 the true mask. Pre-norm trains more stably, at one real cost: most published encoders are
-post-norm, so external weights do not transfer directly. Adapting an external checkpoint
-is the outstanding piece of Phase B.
+post-norm, so external weights **do not transfer into it** — and because the shapes match,
+such a load *succeeds* and produces a model that is structurally valid and numerically
+wrong. That is why the adapted route goes through the upstream library instead
+(`neural/pretrained.py`) rather than inventing that failure.
 
 **Adapting a model to a domain does not require retraining it.** LoRA freezes the base
 and learns a low-rank update. Measured at BERT-base shape **with rank 16** — the rank is
 what sets these numbers, so a figure quoted without it means nothing: **0.81% of
-parameters trainable**, a 3.4 MB adapter against a 415 MB model, and optimiser state
-falling from 0.81 GB to 6.8 MB. Halving the rank halves all three. That is what makes one base model plus several domain adapters
+parameters trainable**, a 3.4 MB adapter against a 419 MB model, and optimiser state
+falling from 0.82 GB to 6.8 MB. Halving the rank halves all three. That is what makes one base model plus several domain adapters
 practical on a single card.
 
 **Batch size is a quality parameter here, not just a throughput one.** Contrastive
@@ -719,27 +981,75 @@ nearest-neighbour library or vector database without conversion.
 
 ---
 
+## Pros and cons
+
+An honest assessment. The cons are structural choices with reasons, not a defect list.
+
+### Pros
+
+| | |
+|---|---|
+| **Owned end to end** | No opaque model file, no paid API. Every stage is inspectable code, and a bad result on one language can be traced to the segmentation, the vocabulary or the pairs that caused it. |
+| **Genuinely multilingual** | 22 scheduled Indian languages verified end to end across ten scripts. The combining-mark, danda, ZWJ and non-whitespace-delimited handling are structural, not patches. |
+| **Cheap to specialise** | 3.4 MB per domain adapter over one shared base. Many domain models cost roughly one model's storage, and a run is minutes rather than days. |
+| **Fits real hardware** | Gradient caching (12.2× memory) plus bf16 (1.6×) makes a competitive contrastive batch fit on a 16 GB consumer card. Without it this hardware could not train a competitive model however long it ran. |
+| **Honest measurement** | Wilson intervals on every retrieval number, per language, per pair kind, per lexical-overlap band, always against a named baseline. Claims that did not survive a recount were corrected in `ROADMAP.md` rather than quietly dropped. |
+| **Fails loudly where it can** | Typed errors with structured context, atomic writes, a corpus audit that exits non-zero, an experiment-design check that refuses a run whose label and data disagree. |
+| **Small base install** | No torch needed for corpus, tokenizer, vocabulary, static embeddings or evaluation. Text preparation is a light dependency. |
+| **Reproducible** | Seeded runs, deterministic vocabulary ordering, resolved config written beside every artefact, `local_files_only` to refuse the network. |
+| **Streams** | Under 201 MB peak resident memory over a 227 MB Wikipedia dump, at every stage. Corpus size is bounded by disk. |
+
+### Cons
+
+| | Why it is this way |
+|---|---|
+| **The best models are not ours** | The shipped route starts from a published checkpoint. Pretraining scale cannot be reproduced on one consumer GPU, so the differentiation has to come from corpus and domain instead. Phase E exists for independence, not because it would be better. |
+| **Two CLIs, one of them a script** | `qfme` covers the corpus-to-static path; adaptation is `scripts/adapt_pretrained.py`. The experiment design was changing weekly while these results were produced, and freezing it into a subcommand would have meant a contract that had to break. It has settled now; `qfme adapt` is the next CLI work. |
+| **Search is exact only** | Brute-force cosine, right to ~10⁵–10⁶ vectors. Wrapping a poor ANN implementation would be worse than being honest about the ceiling; the vectors are plain float32 and export anywhere. |
+| **No CUDA in CI** | Development has no NVIDIA GPU. GPU claims are hand-verified and reproducible via `scripts/verify_e2e.py`, but a device regression reaches the training box before it reaches CI. |
+| **Everything measured is Wikipedia** | Both sides of every comparison so far. The corpus axis — does this survive contact with real contracts and invoices — is the untested one, and it is the one the business case rests on. |
+| **Everything measured is small** | 5.3M and 118M parameters. The 568M target is unvalidated. |
+| **Segmentation is rule-based** | Fast, predictable, dependency-free, and it will split on an unknown abbreviation before a capitalised noun. Readers accept pre-segmented input when that is not good enough. |
+| **Deduplication is exact-match only** | Near-duplicate detection carries a false-positive risk, and a false positive here silently deletes legitimate text — most likely in the least-represented language, where it is hardest to spot. |
+| **Language inference refuses to guess** | Returns `None` for Latin, Arabic, Cyrillic and Han. A plausible wrong answer propagates into metadata, segmentation rules and normalizers with nothing downstream able to notice. |
+| **In-batch negatives only** | No hard-negative mining yet, which is the most likely remaining source of gain. |
+| **Single-process training** | No data-loader parallelism, no distributed training. One process, one device. |
+| **Runtime download on the adapted route** | Base weights are fetched and cached on first use, which breaks the otherwise-absolute "downloads nothing at runtime" property. Opt-in behind an extra, and `local_files_only=True` disables it. |
+
+---
+
 ## Project layout
 
 ```
 quanfire-multilingual-embedding/
 ├── src/multilingual_embedding/     the framework (see the package table above)
 │   ├── common/  core/  config/  utils/
-│   ├── corpus/  vocabulary/  tokenizer/  evaluation/  pipelines/
-│   ├── embedding/                  word2vec, and neural/ for the transformer
+│   ├── corpus/                     tree, segmentation, readers, wikipedia.py, pairs.py
+│   ├── vocabulary/  tokenizer/  evaluation/  pipelines/
+│   ├── embedding/                  word2vec and the TextEncoder contract
+│   │   └── neural/                 transformer, LoRA, gradcache, pretrained, adapter
 │   ├── cli.py                      the `qfme` command
 │   └── py.typed                    marks the package as typed for consumers
-├── tests/                          1103 tests mirroring the source layout
+├── tests/                          1204 tests mirroring the source layout
+├── scripts/                        adapt_pretrained.py, verify_e2e.py, diagnose_audit.py
 ├── configs/                        compute profiles — cpu.yaml, gpu.yaml
-├── examples/                       runnable end-to-end example
-├── data/sample/                    six-language sample corpus
+├── examples/                       runnable end-to-end example and a walkthrough
+├── data/
+│   ├── sample/                     six-language sample corpus (committed)
+│   └── dumps/                      Wikipedia dumps (gitignored, ~485 MB for hi + ta)
 ├── docs/                           MkDocs documentation
 ├── knowledge-base/                 the reference handbook (PDF), its source and build script
+├── models/                         saved LoRA adapters, e.g. indic-v1 (gitignored)
+├── artifacts/                      trained static experiments (gitignored)
 ├── reports/                        evaluation output (gitignored)
+├── verify-output/                  end-to-end verification products (gitignored)
 ├── .github/workflows/ci.yml        lint, types, tests, build, docs
 ├── pyproject.toml                  dependencies and tool configuration
 └── uv.lock                         pinned dependency versions
 ```
+
+`models/`, `artifacts/`, `reports/`, `verify-output/` and `data/dumps/` are gitignored
+build products — they exist on the training box and not in a fresh clone.
 
 ---
 
@@ -807,16 +1117,25 @@ Stated plainly, because knowing where a tool stops is part of using it well.
   training corpus contained parallel or comparable content.
 - **Language inference is script-based**, not statistical, and returns `None` for
   scripts shared across languages.
-- **The contextual encoder has no CLI path.** `qfme train` produces the static model;
-  the transformer is trained and served through the Python API only.
+- **The contextual and adapted encoders have no CLI path.** `qfme train` produces the
+  static model; the transformer is trained through the Python API and adaptation through
+  `scripts/adapt_pretrained.py`. Serving an adapter is one call, but there is no `qfme
+  adapt`.
 - **Training is single-process.** There is no data-loader parallelism and no
   distributed training; a run is bounded by one process on one device.
-- **External pretrained checkpoints cannot yet be adapted.** The encoder is pre-norm and
-  most published ones are post-norm, so their weights do not transfer directly.
-- **CUDA is unverified by local testing**, though verified by hand on an RTX 4070 Ti
+- **External weights do not load into our own transformer.** It is pre-norm and most
+  published encoders are post-norm; the shapes match, so such a load succeeds and is
+  numerically wrong. External checkpoints *are* supported — through their own library, in
+  `neural/pretrained.py` — which is a different thing from that loader existing.
+- **Negatives are in-batch only.** No hard-negative mining yet.
+- **CUDA is unverified by any automated test**, though verified by hand on an RTX 4070 Ti
   SUPER: gradient caching cut peak VRAM 12.2×, bf16 a further 1.6×, with final losses
   within 0.51%. Development still happens without an NVIDIA GPU, so device-specific bugs
   surface first on the training box.
+- **The corpus axis is untested.** Every adaptation result so far has Wikipedia on both
+  sides. `--adaptation domain` exists to test transfer to real documents and has not been
+  run, so "this will help on our contracts" is not yet a claim this repository can make.
+- **Everything is measured small.** 5.3M and 118M parameters against a 568M target.
 
 ---
 

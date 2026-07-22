@@ -8,6 +8,13 @@ A layered pipeline from raw multilingual text to searchable embeddings:
 corpus -> tokenizer -> vocabulary -> embeddings -> evaluation
 ```
 
+The corpus layer additionally carries the two ends the adapted route needs — a MediaWiki
+dump reader on the way in, and a contrastive pair miner on the way out:
+
+```
+Wikipedia dump -> corpus -> mined pairs -> LoRA adapter -> evaluation
+```
+
 ## Layers
 
 Ordered lowest to highest. A package may import from packages strictly below it and from
@@ -44,25 +51,40 @@ pipelines   end-to-end training and semantic search workflows
 | [core](core/README.md) | The exception hierarchy, structured logging, the generic `Registry` and factory helpers. Standard library plus `common` only. |
 | [utils](utils/README.md) | Cross-cutting helpers: `validation`, `hashing`, `filesystem`, `io`, `serialization`. Never imports a domain package. |
 | [config](config/README.md) | `ExperimentConfig` and its `CorpusConfig`, `TokenizerConfig`, `EmbeddingConfig`, `EvaluationConfig` sections, each self-validating in `__post_init__`, plus YAML load and save. |
-| [corpus](corpus/README.md) | The document tree, sentence segmentation, script and language detection, readers and writers, and streaming statistics. |
+| [corpus](corpus/README.md) | The document tree, sentence segmentation, script and language detection, readers and writers, streaming statistics and auditing, MediaWiki dump extraction, and contrastive pair mining with lexical leakage measured per pair. |
 | [vocabulary](vocabulary/README.md) | `Vocabulary`, `VocabularyBuilder` and the special-token block that every layer above indexes against. |
 | [tokenizer](tokenizer/README.md) | Normalizer pipeline, pre-tokenizers, the SentencePiece tokenizer and its trainer, and `Encoding`. |
-| [embedding](embedding/README.md) | The `TextEncoder` contract; numpy skip-gram word2vec, the embedding matrix and sentence encoders as the static baseline; a transformer encoder with contrastive training, LoRA and gradient caching under `embedding/neural/`; exact cosine search over either. |
+| [embedding](embedding/README.md) | The `TextEncoder` contract; numpy skip-gram word2vec, the embedding matrix and sentence encoders as the static baseline; a transformer encoder with contrastive training, LoRA and gradient caching under `embedding/neural/`; loading and LoRA-adapting a published checkpoint, and saving the adapter; exact cosine search over any of them. |
 | [evaluation](evaluation/README.md) | Metric primitives, tokenizer and embedding evaluators, and the evaluation report. |
 | [pipelines](pipelines/README.md) | `TrainingPipeline` and `SemanticSearchPipeline`. |
 
-## One optional dependency
+## Three optional dependencies
 
 Every layer above runs on the core dependencies — numpy, pandas, pyyaml, sentencepiece,
-tqdm. The single exception is `embedding/neural/`, which needs torch and is installed with
-`uv sync --extra neural`.
+tqdm. Three capabilities sit behind extras, each drawn where it is:
 
-The boundary is drawn deliberately rather than by accident. `embedding/__init__.py` does not
-import `neural`, so nothing pulls torch in transitively, and the corpus, tokenizer,
+| Extra | Pulls in | Needed for | Without it |
+|---|---|---|---|
+| `neural` | torch | `embedding/neural/` — the transformer, contrastive training, LoRA, gradient caching | `ImportError` naming the extra |
+| `pretrained` | transformers | `embedding/neural/pretrained.py` — loading a published checkpoint | `ImportError` naming the extra |
+| `wikipedia` | mwparserfromhell | `corpus/wikipedia.py` and `qfme extract` | the command exits with a message naming the fix |
+
+```bash
+uv sync --extra neural --extra pretrained --extra wikipedia
+```
+
+The boundaries are drawn deliberately rather than by accident. `embedding/__init__.py` does
+not import `neural`, so nothing pulls torch in transitively, and the corpus, tokenizer,
 vocabulary and evaluation layers stay a small install for callers that only need text
-preparation. Importing `multilingual_embedding.embedding.neural` without torch raises an
-`ImportError` naming the extra, rather than a bare `ModuleNotFoundError`. The layering rule
-below is unaffected: `neural` is part of the `embedding` layer and obeys the same ordering.
+preparation — which the LLM and speech work will, without wanting a training stack.
+`pretrained` is split from `neural` because this project's own transformer needs torch and
+nothing else; a model hub client is only warranted when you actually intend to load someone
+else's weights. `wikipedia` is split because most callers consume a corpus rather than build
+one, and MediaWiki markup is the only reason that parser exists.
+
+Every one of them fails with a message naming the extra rather than a bare
+`ModuleNotFoundError`. The layering rule below is unaffected: `neural` is part of the
+`embedding` layer, `wikipedia.py` part of `corpus`, and both obey the same ordering.
 
 ## The corpus tree
 
@@ -86,8 +108,21 @@ Everything else is reached through its own package, which keeps this module's im
 cost proportional to what a caller actually uses.
 
 `cli.py` is the entry point for the `qfme` console script, declared in `pyproject.toml`
-as `qfme = "multilingual_embedding.cli:main"`. Its subcommands are `stats`, `validate`,
-`train`, `search` and `evaluate`.
+as `qfme = "multilingual_embedding.cli:main"`. Its seven subcommands:
+
+| Subcommand | Does |
+|---|---|
+| `stats` | counts and distributions over a corpus |
+| `validate` | graded audit findings; non-zero exit on `ERROR` |
+| `extract` | MediaWiki dump → corpus JSON Lines |
+| `mine-pairs` | corpus → contrastive pairs, three kinds, leakage measured |
+| `train` | tokenizer + static embeddings, then evaluation |
+| `search` | query a trained experiment |
+| `evaluate` | score a trained experiment and write a report |
+
+Adapting a published checkpoint has no subcommand yet; it is driven through
+[`scripts/adapt_pretrained.py`](../../scripts/README.md), which is where the experiment
+design lives.
 
 `py.typed` marks the package as typed under PEP 561. Without it, mypy in a downstream
 project silently ignores every annotation this framework provides;

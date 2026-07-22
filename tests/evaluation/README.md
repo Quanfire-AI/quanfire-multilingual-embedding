@@ -2,14 +2,20 @@
 
 > Tests for [`multilingual_embedding.evaluation`](../../src/multilingual_embedding/evaluation/README.md) — metrics, scoring and reports.
 
-**67 tests.** Run with `pytest tests/evaluation -q`.
+**81 tests.** Run with `pytest tests/evaluation -q`.
 
 ## Files
 
-| File | Covers |
-|---|---|
-| `test_metrics.py` | The metric primitives: cosine, ranking metrics, accuracy, correlation |
-| `test_evaluators.py` | Tokenizer and embedding evaluators, per-language fairness, dataset loading, report rendering |
+| File | Tests | Covers |
+|---|---:|---|
+| `test_evaluators.py` | 37 | Tokenizer and embedding evaluators, per-language fairness, dataset loading, report rendering |
+| `test_metrics.py` | 30 | The metric primitives: cosine, ranking metrics, accuracy, correlation |
+| `test_retrieval.py` | 14 | Scoring an encoder against held-out pairs: recall@k, MRR, nDCG, Wilson intervals, breakdowns by kind, language and overlap band |
+
+`test_retrieval.py` is what makes an adaptation report trustworthy. Every number
+`scripts/adapt_pretrained.py` prints comes through `evaluation/retrieval.py`, including the
+Wilson intervals that decide whether a gain is significant and the `by_overlap` breakdown
+that is the control against a model learning to match strings rather than meaning.
 
 ## What matters here
 

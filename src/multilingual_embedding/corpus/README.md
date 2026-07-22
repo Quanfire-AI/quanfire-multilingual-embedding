@@ -1,9 +1,11 @@
 # corpus
 
-> Text representation, multilingual segmentation, script and language identification, streaming readers and writers, cleaning, statistics and auditing — everything between files on disk and a stream of sentences.
+> Text representation, multilingual segmentation, script and language identification, streaming readers and writers, Wikipedia extraction, contrastive pair mining, cleaning, statistics and auditing — everything between files on disk and a stream of sentences or training pairs.
 
 ## Purpose
 Everything above this layer consumes sentences: the tokenizer trains on them, the embedding model treats them as context windows, the evaluators score them. This package is what turns arbitrary files into those sentences without losing the ability to say where any unit came from. It is a layer of its own because segmentation, script detection and cleaning are all script-dependent decisions that must be made in exactly one place — a period-and-space sentence rule silently destroys Hindi and Chinese, and a naive word regex silently destroys every Indic and Arabic word, so these rules cannot be allowed to be reinvented per call site.
+
+Two modules extend that remit at the ends. `wikipedia.py` is the **front door**: it turns a MediaWiki dump into the corpus format, which for most scheduled Indian languages is the only route to a substantial amount of real text. `pairs.py` is the **exit** toward contrastive training: it manufactures anchor/positive pairs out of the structure Wikipedia already carries, because labelled retrieval pairs do not exist for these languages and never will. Together they are the `dump → corpus → pairs → adapter` path that produced `models/indic-v1`.
 
 ## Modules
 | Module | Responsibility |
@@ -24,6 +26,8 @@ Everything above this layer consumes sentences: the tokenizer trains on them, th
 | `statistics.py` | `StatisticsAccumulator` and `CorpusStatistics`; streaming, with bounded word and length tables. |
 | `validators.py` | `SentenceFilter`, `DocumentDeduplicator`, `FilterReport`, `validate_document`. |
 | `audit.py` | `audit_corpus` and its `CorpusAudit`, `Finding` and `Severity`; judges a corpus rather than describing it. |
+| `wikipedia.py` | `WikipediaArticle`, `iter_articles`, `extract_dump`, `WikipediaExtractionError`; MediaWiki dump → corpus JSON Lines, sections preserved. |
+| `pairs.py` | `MinedPair`, `PairKind`, `PairConfig`, `PairStatistics`, `iter_pairs`, `mine_pairs`, `token_overlap`; corpus → contrastive training pairs, with leakage measured. |
 | `exceptions.py` | `CorpusError` and its subclasses `CorpusFormatError`, `SegmentationError`, `EmptyCorpusError`. |
 | `base/` | Structural base classes for nodes — see `base/README.md`. |
 | `metadata/` | Metadata records for each level — see `metadata/README.md`. |
@@ -164,6 +168,54 @@ The audit streams. It consumes the iterable once and holds only counters and con
 
 It is exposed as `qfme validate`, which prints the report and **exits non-zero when the corpus is unusable**, so a data pipeline can gate on it rather than discovering the problem partway through a training run. `--strict` extends that to warnings, for a pipeline that would rather stop than train on text with an unpopulated language column. `--output` writes the whole audit as JSON for a build system to keep. The CLI passes `deduplicate=False` to `stream_documents` deliberately: the loader's own deduplication would remove the duplicates before the audit could count them, and reporting "no duplicates" because they were silently dropped upstream is the exact failure this module exists to prevent.
 
+### `wikipedia.py`: the front door, and the format is hostile
+
+Wikipedia is the only source of substantial text in most of the 22 scheduled Indian languages, so this is where real training data comes from. It is also a format designed for rendering rather than for reading: MediaWiki markup nests templates inside tables inside references, and a naive extraction leaves enough of it behind that the tokenizer learns syntax instead of language. That failure is quiet — the corpus loads, training completes, the model is worse — which is why `audit.py` exists and why the output of this module should always be run through it. **The module holds itself to that standard**: `_MARKUP_MARKERS` is deliberately the same marker set the audit looks for.
+
+The markup itself is parsed by `mwparserfromhell` rather than by regular expressions. A hand-rolled wiki parser is the canonical job that looks easy and is not, and shipping one would mean shipping exactly the defect the audit is designed to catch. Three things `strip_code` does not handle on its own are corrected here: **tables** survive as their cell contents, so a statistics table arrives as a run of bare numbers indistinguishable from prose; **headings** collapse to their text, leaving a floating word mid-article; and **leftover artefacts** — file captions, category names, stray entities — that no parser removes because they are legitimate wikitext. Roughly 1% of articles carry markup that is malformed *in the source*, which no parser can resolve, so a residue pass strips what is left.
+
+Three filters run before an article is kept, each for a specific kind of noise:
+
+| Filter | Drops | Why |
+|---|---|---|
+| Namespace 0 only | talk pages, templates, user pages, categories | project machinery, not prose |
+| Redirects | `#REDIRECT` stubs | no text at all |
+| `_BOILERPLATE_HEADINGS` | References, See also, External links, Gallery, … | link lists, not language |
+| `minimum_characters` (200) | one-line stubs | vocabulary noise that teaches nothing |
+| `deduplicate=True` | repeated text | template-generated stubs are numerous — the Meetei Mayek wiki has 118 country articles sharing one boilerplate sentence, which would inflate every token in it by two orders of magnitude |
+
+**Sections are preserved rather than flattened**, and that single decision is what makes pair mining possible. A heading and the body beneath it are a query and a passage; the structure is free at extraction time and expensive to recover afterwards. `WikipediaArticle.to_record()` writes them as a `sections` list of `{heading, text}`, which `JsonlReader` carries into `DocumentMetadata.base.attributes` and `pairs.py` reads back out.
+
+Extraction streams. `iterparse` elements are cleared as they are consumed — without that, the whole tree is retained and the process grows until it is killed — so memory is bounded by one article rather than by a multi-gigabyte dump. `.bz2`, `.gz` and plain XML are all opened transparently.
+
+Two bugs are preserved here as comments because both were silent. The article id is read with `is not None` rather than a truth test, because ElementTree defines an element's truthiness by its child count, so the leaf `<id>4461</id>` is falsy and a plain `if` fell through to the title — every article had a title for an id until a real dump was read. And `_MEDIA_LINK` is written without a nested quantifier: the first version was catastrophically backtracking on unclosed media links, which real dumps contain, taking 8.5 seconds on 22 pipes and roughly quadrupling per pipe after that. One article could stall an extraction for minutes, and it is the likeliest explanation for Tamil extracting 4.6× slower per article than Hindi. The linear form matches the same text in 7 microseconds.
+
+`mwparserfromhell` lives behind the optional `wikipedia` extra, and a missing install raises `WikipediaExtractionError` naming the command to fix it rather than an `ImportError` from three frames down.
+
+### `pairs.py`: manufacturing supervision out of structure
+
+Contrastive training needs an anchor and a positive — a query and the passage answering it. Labelled pairs do not exist for most domains, and for Hindi and Tamil retrieval they never will. So they are built out of structure the author already imposed. That is not labelling; it is reading.
+
+| `PairKind` | Anchor | Positive | Character |
+|---|---|---|---|
+| `title_lead` | article title | first paragraph | the largest and most reliable source, and the leakiest |
+| `heading_section` | section heading | section body | closest to a real query/passage pair |
+| `adjacent` | one paragraph | the next paragraph | works on any prose, needs no structure at all |
+
+`adjacent` is what makes this module usable on a corpus that is not Wikipedia. Structure that is present is used, structure that is absent is skipped, so a plain text corpus with no `sections` still yields pairs.
+
+**The failure this module exists to avoid is lexical leakage.** If the anchor's words are simply present in the positive, a model can score the pair correctly by matching strings, learn nothing about meaning, and still show a falling loss. Wikipedia leads almost always open by restating the title, so the most obvious pair source is also the most contaminated. Overlap is therefore measured for every pair, carried on the pair, averaged per kind, and filterable via `PairConfig.maximum_overlap`. The CLI prints the per-kind mean and flags any kind above 0.75 inline with `<- solvable by string match`, rather than only logging it — the reader scanning that table is exactly who needs to know.
+
+`maximum_overlap` defaults to `1.0`, which accepts everything. That default is permissive rather than principled, and deliberately so: tightening it discards `title_lead`, which is the largest source of pairs. The right value is an experiment, not a constant, which is why it is exposed rather than chosen here.
+
+`token_overlap` had a silent bug worth stating, because it disabled the safety check for exactly the scripts that need it most. Overlap was computed on whitespace-split words, so for Han, Kana and Thai — which put no spaces between words — a whole sentence was a single token, two texts sharing every character intersected in nothing, and every such pair reported an overlap of `0.0` and passed the leakage filter however contaminated it was. `_units` now branches on `is_whitespace_delimited` and uses **character bigrams** for non-delimited scripts. Crude, but it compares what is actually shared, and the measure now means the same thing in Hindi, English and Japanese.
+
+**A second, quieter problem is the false negative.** Contrastive training treats every other passage in the batch as a negative, so two pairs mined from the *same* article punish the model for noticing they are related. Every `MinedPair` therefore carries the `document` identifier it came from, which is what lets a sampler keep them apart. `language` is carried for the same class of reason: a mixed-language pair set has to stay separable, or a per-language result cannot be computed afterwards.
+
+Rejections are counted **against their reason**, not into a single number. `_candidates` yields before any filtering so that `PairStatistics` can report `short_anchor`, `short_positive`, `overlap` and `duplicate` separately — an unexpectedly small pair set is then traceable to the rule responsible rather than guessed at. Duplicates are exact-match on a hash of `anchor\x00positive`, so the same lead paragraph reached from two directions counts once.
+
+`iter_pairs` streams and `mine_pairs` collects. Both are offered because the choice is real: a pair set from a mid-sized Wikipedia is millions of pairs holding two strings each, which is gigabytes. `mine_pairs` bounds memory by the pair set, which is the thing being built and has to fit; `iter_pairs` bounds it by one document and is what `qfme mine-pairs` uses to write straight to disk. Pass a `PairStatistics` to `iter_pairs` to have it filled in as pairs are produced — it is only complete once the iterator is exhausted.
+
 ## Usage
 
 ```python
@@ -216,25 +268,78 @@ stats: 3 6 False
 
 Several decisions are visible at once. `Dr.` and `3.14` did not split, but the danda did, without needing a following space. `split_words("नमस्ते")` returns one span of six codepoints rather than the two fragments a naive `\w+` produces. `"hello, world!"` scores exactly 1.0 for Latin because punctuation is out of the denominator. And the document's language is `None` — the text is mixed-script, so `infer_language` declined to guess rather than answering "en".
 
+## The dump-to-pairs path
+
+This is the sequence that produces training data, and each stage is a CLI subcommand.
+
+```bash
+# 1. dump -> corpus. Needs the `wikipedia` extra.
+qfme extract --dump data/dumps/hiwiki-latest-pages-articles.xml.bz2 \
+             --output data/corpora/hi.jsonl.gz --language hi
+
+# 2. Gate on quality before spending GPU hours on it.
+qfme validate --source data/corpora/hi.jsonl.gz --output reports/hi-audit.json
+
+# 3. corpus -> pairs, with leakage measured per kind.
+qfme mine-pairs --source data/corpora/hi.jsonl.gz \
+                --output data/pairs/hi.jsonl.gz \
+                --max-overlap 0.8 --report reports/hi-pairs.json
+```
+
+| Stage | In | Out |
+|---|---|---|
+| `extract` | `*-pages-articles.xml.bz2` | JSON Lines: `{id, language, title, text, source, license, sections[]}` |
+| `validate` | that corpus | printed audit, optional JSON, **non-zero exit when unusable** |
+| `mine-pairs` | that corpus | JSON Lines: `{anchor, positive, kind, document, language, overlap}` + a per-kind yield/overlap table |
+
+Both outputs gzip automatically when the path ends `.gz`, and every reader decompresses transparently, so there is never a reason not to.
+
+`--kinds` selects the sources (default all three); `--max-overlap` sets the leakage filter; `--report` writes `PairStatistics.to_dict()` for a build system to keep. `--limit` on `extract` stops after N articles, which is how to try a dump before committing an afternoon to it.
+
+The pair file is the input to `scripts/adapt_pretrained.py` — see [`scripts/README.md`](../../../scripts/README.md) and [`embedding/neural/README.md`](../embedding/neural/README.md) for what happens to it next.
+
+Directly in Python:
+
+```python
+from multilingual_embedding.corpus.wikipedia import iter_articles
+from multilingual_embedding.corpus.pairs import PairConfig, PairKind, mine_pairs
+
+for article in iter_articles("hiwiki.xml.bz2", language="hi", limit=10):
+    print(article.title, len(article.text), len(article.sections))
+
+pairs, stats = mine_pairs(
+    reader.iter_documents(),
+    PairConfig(maximum_overlap=0.8, kinds=(PairKind.HEADING_SECTION, PairKind.ADJACENT)),
+)
+
+print(stats.to_dict()["mean_overlap_by_kind"])
+```
+
 ## Dependencies
 May import from `common` (`Span`, `SpecialToken`, constants), `core` (exceptions, `Registry`, logging), `utils` (`io`, `filesystem`, `hashing`) and `config` (`loader.py` takes a `CorpusConfig`). Within itself, `base/` and `metadata/` sit beneath the concrete node modules.
 
 Must **not** import `vocabulary`, `tokenizer`, `embedding`, `evaluation` or `pipelines`. Enforced by `tests/test_architecture.py`.
 
-Consumed by `tokenizer` (`pretokenizer.py` imports `Script`, `is_whitespace_delimited`, `script_of_character` and `Token`), `evaluation/tokenizer_eval.py` (`detect_script`), `pipelines/training.py` (`SentenceStream`, the loader and statistics) and `cli.py` (the loader, statistics and `audit_corpus`).
+The only third-party dependency in the package is `mwparserfromhell`, imported inside `wikipedia.py`'s functions rather than at module scope, so it stays behind the optional `wikipedia` extra and a core-only install can still import `multilingual_embedding.corpus`.
+
+Consumed by `tokenizer` (`pretokenizer.py` imports `Script`, `is_whitespace_delimited`, `script_of_character` and `Token`), `evaluation/tokenizer_eval.py` (`detect_script`), `pipelines/training.py` (`SentenceStream`, the loader and statistics), `cli.py` (the loader, statistics, `audit_corpus`, `extract_dump` and `iter_pairs`) and `scripts/adapt_pretrained.py`, which reads the mined pair file.
 
 ## Tests
-Package total: **395 tests** across `tests/corpus`, of which 389 cover this package's own modules and 6 the `base/` and `metadata/` subpackages.
+Package total: **462 tests** across `tests/corpus`, of which 455 cover this package's own modules and 7 the `base/` and `metadata/` subpackages.
 
 - `tests/corpus/test_indian_languages.py` — 166 tests (per-language segmentation, script detection and inference across the scheduled languages)
 - `tests/corpus/test_analysis.py` — 74 tests (script, language, offsets, statistics, validators)
 - `tests/corpus/test_script.py` — 33 tests
-- `tests/corpus/test_io.py` — 29 tests (readers, writers, loader, round-tripping)
+- `tests/corpus/test_io.py` — 31 tests (readers, writers, loader, round-tripping)
+- `tests/corpus/test_pairs.py` — 30 tests (each pair kind, the overlap measure across scripts, rejection accounting, streaming)
+- `tests/corpus/test_wikipedia.py` — 30 tests (markup stripping, section splitting, namespace and redirect filtering, the backtracking regression)
 - `tests/corpus/test_segmentation.py` — 25 tests
+- `tests/corpus/test_audit.py` — 25 tests
 - `tests/corpus/test_nodes.py` — 22 tests
-- `tests/corpus/test_audit.py` — 21 tests
 - `tests/corpus/test_corpus.py` — 19 tests
 - `tests/corpus/base/test_text_node.py` — 5 tests
-- `tests/corpus/metadata/test_base.py` — 1 test
+- `tests/corpus/metadata/test_base.py` — 2 tests
+
+`test_wikipedia.py` builds its dumps in `tmp_path` rather than downloading one, so nothing here reaches the network. Its `TestExtractionCannotBeStalledByOneArticle` class is the regression for the catastrophic-backtracking media-link pattern described above; a reintroduced nested quantifier fails it on time, not on output.
 
 Layering is separately enforced by `tests/test_architecture.py`, and the whole layer is exercised end to end by `tests/integration/test_end_to_end.py`.

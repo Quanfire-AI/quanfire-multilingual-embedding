@@ -1,10 +1,10 @@
 # embedding
 
-> Turns tokens into vectors — a static word2vec baseline, a transformer encoder trained contrastively, and exact similarity search over whichever produced them.
+> Turns tokens into vectors — a static word2vec baseline, a transformer encoder trained contrastively, a published checkpoint adapted with LoRA, and exact similarity search over whichever produced them.
 
 ## Purpose
 
-This layer is where text stops being symbols and becomes geometry. It holds two routes
+This layer is where text stops being symbols and becomes geometry. It holds three routes
 to a vector and one contract that hides which route was taken.
 
 The **static** route is `Word2Vec`, which fits skip-gram vectors with negative sampling
@@ -13,18 +13,26 @@ table binding those vectors to the vocabulary that indexes them. The sentence en
 compose word vectors into sentence vectors, and `SimilarityIndex` answers
 nearest-neighbour queries over a set of those.
 
-The **contextual** route is `neural/`: a transformer encoder written out in this
-repository, fitted with an InfoNCE contrastive objective, with LoRA and gradient caching
-so it trains on the hardware actually available. It computes a vector for the whole input
-at call time.
+The **contextual** route is `neural/architecture.py`: a transformer encoder written out in
+this repository, fitted with an InfoNCE contrastive objective, with LoRA and gradient
+caching so it trains on the hardware actually available. It computes a vector for the whole
+input at call time.
 
-`encoder.py` defines the contract both satisfy: `TextEncoder`, a `Protocol` of `dimension`,
-`encode` and `encode_batch`. This is the layer's most important boundary and the reason it
-exists in this shape — see below.
+The **adapted** route is `neural/pretrained.py`: a published encoder — `multilingual-e5-small`
+and its kind — loaded through its own library and put behind the same contract, then
+adapted with LoRA on mined pairs and saved by `neural/adapter.py` as a few megabytes.
+**This is the route that produces the models this project actually ships.** Writing the
+architecture out was the right way to build a training loop worth trusting; it is the wrong
+way to get pretraining scale, which a single consumer GPU cannot reproduce. See
+[`neural/README.md`](neural/README.md).
+
+`encoder.py` defines the contract all three satisfy: `TextEncoder`, a `Protocol` of
+`dimension`, `encode` and `encode_batch`. This is the layer's most important boundary and
+the reason it exists in this shape — see below.
 
 It is its own layer because everything below deals in text and ids while everything here
-deals in float arrays, and because those two contracts let the pipeline layer swap the
-model without knowing which one it holds.
+deals in float arrays, and because that contract lets the pipeline layer swap the model
+without knowing which one it holds.
 
 ## Modules
 
@@ -38,9 +46,16 @@ model without knowing which one it holds.
 | `index.py` | `SimilarityIndex` and `SearchResult`: exact brute-force cosine search over labelled vectors, with persistence. |
 | `neural/architecture.py` | `EncoderConfig` and `TransformerEncoderModel` — pre-norm blocks, fused attention, GELU, learned positions, masked mean pooling. Tensors only. |
 | `neural/encoder.py` | `NeuralTextEncoder` (tokenise, pad, batch, device, normalise, save/load), plus `resolve_device` and `autocast_for`. |
+| `neural/pretrained.py` | `PretrainedTextEncoder`, `POOLING_STRATEGIES`, `PretrainedEncoderError` — a published checkpoint loaded through its own library, wearing `(ids, mask) → pooled vectors`. |
+| `neural/adapter.py` | `save_adapter`, `load_adapter`, `AdapterMetadata` — a ~3.4 MB artefact recording the adapter *and how the encoder must be used*. |
 | `neural/training.py` | `ContrastiveTrainer`, `ContrastiveConfig`, `TextPair`, `TrainingReport` — InfoNCE over in-batch negatives, with warmup, decay and clipping. |
-| `neural/lora.py` | `LoRALinear`, `apply_lora`, `merge_lora`, adapter-only checkpoints, `parameter_summary`. |
+| `neural/lora.py` | `LoRALinear`, `LoRAConfig`, `apply_lora`, `merge_lora`, adapter-only checkpoints, `parameter_summary`. |
 | `neural/gradcache.py` | `cached_contrastive_backward` and `suggest_chunk_size` — chunked encoding with a cached vector gradient. |
+
+`neural/` has its own [README](neural/README.md) covering the training stack in full: the
+two transformers and why weights do not cross-load, the seven quiet-degradation failure
+modes and their structural guards, the measured LoRA and GradCache numbers, and the
+dump → corpus → pairs → adapter → pipeline flow.
 
 ## The two contracts, and why there are two
 
@@ -74,8 +89,8 @@ unchanged.
 **The architecture is written out rather than imported from a model library.** A borrowed
 checkpoint can hide a broken training loop: a good model trains adequately in spite of a
 bug, and the bug surfaces only when the checkpoint is replaced. A model defined here
-cannot hide it. Adapting external checkpoints is a smaller, later step that now has a
-verified loop to land on — see `ROADMAP.md`.
+cannot hide it. That loop is now verified, and external checkpoints land on it —
+`neural/pretrained.py` is the smaller, later step, and it has shipped.
 
 **Pre-norm residuals, and this has a consequence worth knowing.** `EncoderBlock` normalises
 *before* each sub-layer and adds the residual to the un-normalised input, so gradients reach
@@ -153,6 +168,45 @@ decay.
 anything with fewer than two dimensions. This matters more than it sounds: decaying a
 LayerNorm gain pulls it toward zero and scales down that layer's entire output.
 
+## Key design decisions — the adapted route
+
+**A published checkpoint is loaded through its own library, not into our transformer.**
+The shapes match, so a cross-load *succeeds*: it returns a model that is structurally valid
+and numerically wrong, because ours is pre-norm and most published encoders are post-norm.
+That is a failure with no exception and no NaN attached to it — the only symptom is
+mediocre retrieval, which is indistinguishable from a mediocre model. Going through
+`transformers` avoids inventing that failure. `_PooledTransformer` then wraps the result
+in this project's forward signature — `(ids, mask) → pooled, normalised vectors` — which
+is the same shape `TransformerEncoderModel` produces, so `ContrastiveTrainer`, `apply_lora`,
+`cached_contrastive_backward` and `evaluate_retrieval` all apply unchanged. The wrapper is
+the whole integration; there is no parallel training path.
+
+**Pooling is a required decision, and `POOLING_STRATEGIES` is `("mean", "cls")`.** A model
+trained mean-pooled and served CLS-pooled produces plausible vectors encoding the wrong
+thing, and nothing raises. Sentence-transformers models are usually mean-pooled. The value
+is stored in the adapter artefact rather than left to be remembered.
+
+**The base install downloads nothing at runtime, and this route breaks that.** Weights are
+fetched on first use and cached. It is deliberate and opt-in behind an extra, and
+`local_files_only=True` makes a run refuse to reach the network at all — which is what a
+reproducible experiment wants, since an upstream repository can change what sits behind a
+name.
+
+**The adapter artefact records how the encoder must be used, not only what it weighs.**
+`save_adapter` writes the low-rank update — about 3.4 MB at rank 32 on a 118M-parameter
+encoder — plus `AdapterMetadata`: the base checkpoint *name* (not a copy; it is hundreds of
+megabytes, already cached, and LoRA did not change it), the `LoRAConfig`, the pooling, and
+the query and passage prefixes. Those prefixes belong to the model as firmly as its weights
+do: an E5 model served without `query: ` degrades quietly. `load_adapter` returns the
+encoder **and** its metadata as a tuple, deliberately, because returning the encoder alone
+would invite the prefixes being dropped. `SemanticSearchPipeline.from_adapter` consumes
+both and applies them automatically — see [`pipelines/README.md`](../pipelines/README.md).
+
+`AdapterMetadata` is a plain mapping rather than a dataclass, so unknown keys survive a
+round trip between versions of this code that disagree on fields. The reload is verified
+rather than assumed: a round-trip test asserts byte-identical vectors, because a saved model
+that scores differently on reload is worse than no saved model — it is trusted.
+
 ## Key design decisions — fitting the hardware
 
 **LoRA: frozen base, low-rank update, zero-initialised up-projection.** Instead of learning
@@ -172,7 +226,7 @@ rank 16 on the attention projections:
 
 | | Full fine-tune | LoRA |
 |---|---|---|
-| Trainable parameters | 109.7M (100%) | 884,736 (**0.80%**) |
+| Trainable parameters | 109.7M (100%) | 884,736 (**0.81%**) |
 | Checkpoint | 419 MB | **3.4 MB** (adapters only) |
 | Adam moment state | 0.82 GB | **6.8 MB** |
 
@@ -422,6 +476,46 @@ goes straight into `SemanticSearchPipeline` with no adapter, and `encoder.save(d
 writes weights and architecture together — a state dictionary alone cannot be loaded without
 knowing the shape that produced it.
 
+The adapted path, which requires the `neural` extra and downloads a checkpoint on first use:
+
+```python
+from multilingual_embedding.embedding.neural.adapter import load_adapter, save_adapter
+from multilingual_embedding.embedding.neural.lora import LoRAConfig, apply_lora
+from multilingual_embedding.embedding.neural.pretrained import PretrainedTextEncoder
+
+encoder = PretrainedTextEncoder.load("intfloat/multilingual-e5-small", pooling="mean")
+
+lora = LoRAConfig(rank=16, targets=("query", "value"))
+
+apply_lora(encoder.model, lora)
+
+# ... train with ContrastiveTrainer over mined pairs ...
+
+save_adapter(
+    encoder,
+    "models/indic-v1",
+    lora=lora,
+    query_prefix="query: ",
+    passage_prefix="passage: ",
+)
+
+encoder, metadata = load_adapter("models/indic-v1", local_files_only=True)
+```
+
+In practice this is driven by `scripts/adapt_pretrained.py`, which also holds the baseline
+comparison and the experiment-design checks — see [`scripts/README.md`](../../../scripts/README.md).
+Serving the result is one call:
+
+```python
+from multilingual_embedding.pipelines.search import SemanticSearchPipeline
+
+pipeline = SemanticSearchPipeline.from_adapter("models/indic-v1")
+```
+
+which carries the recorded prefixes into indexing and querying automatically. Writing
+`SemanticSearchPipeline(load_adapter("models/indic-v1")[0])` instead loads the right weights
+and then uses them wrongly, silently — which is exactly why the factory exists.
+
 ## Dependencies
 
 May import from `common`, `core`, `utils`, `config`, `corpus`, `vocabulary` and `tokenizer`.
@@ -456,22 +550,30 @@ platform alone.
 
 ## Tests
 
-| File | Tests |
-|---|---|
-| `tests/embedding/test_word2vec.py` | 17 |
-| `tests/embedding/test_matrix.py` | 20 |
-| `tests/embedding/test_sentence.py` | 20 |
-| `tests/embedding/test_index.py` | 19 |
-| `tests/embedding/test_encoder_contract.py` | 15 |
-| `tests/embedding/test_neural.py` | 32 |
-| `tests/embedding/test_lora_gradcache.py` | 21 |
+| File | Tests | Covers |
+|---|---|---|
+| `tests/embedding/test_neural.py` | 38 | Architecture, encoder, contrastive training, padding, precision |
+| `tests/embedding/test_lora_gradcache.py` | 24 | Zero-init identity, adapter-only state dicts, gradient equivalence, chunk invariance |
+| `tests/embedding/test_matrix.py` | 20 | Similarity, analogy, normalisation, versioned persistence |
+| `tests/embedding/test_sentence.py` | 20 | Mean pooling, SIF, the registry |
+| `tests/embedding/test_index.py` | 19 | Exact search, labels, persistence |
+| `tests/embedding/test_word2vec.py` | 17 | Sampling tables, subsampling, the update rules |
+| `tests/embedding/test_encoder_contract.py` | 15 | `TextEncoder`: shape, order, zero-not-NaN |
+| `tests/embedding/test_pretrained.py` | 15 | Pooling strategies, the wrapper's forward shape, error paths |
+| `tests/embedding/test_adapter.py` | 9 | Save/load round trip, byte-identical vectors, metadata survival |
 
-`.venv/bin/python -m pytest tests/embedding -q` reports **148 passed**. The layering rule
-described above is enforced separately by `tests/test_architecture.py` (16 tests).
+`pytest tests/embedding -q` reports **177 passed** on a full install. `test_neural.py`,
+`test_lora_gradcache.py`, `test_pretrained.py` and `test_adapter.py` call
+`pytest.importorskip("torch")`, so a core-only checkout collects fewer and still runs green.
+`test_pretrained.py` and `test_adapter.py` build a small BERT locally rather than
+downloading one — nothing here reaches the network. The layering rule described above is
+enforced separately by `tests/test_architecture.py` (16 tests).
 
 ## What is not here
 
-There is no character n-gram model, no approximate nearest-neighbour index, and no loader for
-external pretrained checkpoints — the pre-norm arrangement above means such a loader is a real
-piece of work rather than a `load_state_dict` call. Hard-negative mining, Matryoshka
-truncation and checkpoint resumption are likewise absent. `ROADMAP.md` covers all of these.
+There is no character n-gram model, no approximate nearest-neighbour index, no hard-negative
+mining, no Matryoshka truncation and no checkpoint resumption. There is also no loader for
+external weights into `TransformerEncoderModel` — the pre-norm arrangement above makes that a
+real piece of work rather than a `load_state_dict` call, and `pretrained.py` sidesteps it by
+using the upstream library instead, which is why external checkpoints *are* supported while
+that loader is not. `ROADMAP.md` covers the rest.
