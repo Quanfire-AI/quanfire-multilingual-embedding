@@ -1,6 +1,6 @@
 # tests
 
-> The test suite. 1326 tests, 94% statement coverage, mirroring the source layout.
+> The test suite. 1341 tests, 94% statement coverage, mirroring the source layout.
 
 ## Purpose
 
@@ -25,15 +25,15 @@ failure appears:
 |---|---|---|
 | [`common/`](common/README.md) | 20 | Spans, enums, type aliases, constants, version |
 | [`core/`](core/README.md) | 29 | Registry, factory, logging, exception context |
-| [`config/`](config/README.md) | 88 | Config validation, merging, precedence, compute profiles, persistence |
+| [`config/`](config/README.md) | 121 | Config validation, merging, precedence, compute profiles, persistence |
 | [`utils/`](utils/README.md) | 61 | Validation, hashing, filesystem, I/O, serialization |
-| [`corpus/`](corpus/README.md) | 462 | Scripts, segmentation, nodes, readers, statistics, auditing, Wikipedia extraction, pair mining, the 22 scheduled languages |
+| [`corpus/`](corpus/README.md) | 493 | Scripts, segmentation, nodes, readers, statistics, auditing, Wikipedia extraction, pair mining, the 22 scheduled languages |
 | [`vocabulary/`](vocabulary/README.md) | 36 | Token/id mapping, special tokens, builder, persistence |
 | [`tokenizer/`](tokenizer/README.md) | 187 | Normalizers, pre-tokenizers, encoding, training, round trips |
 | [`embedding/`](embedding/README.md) | 177 | Matrix, word2vec, sentence encoders, index, contextual encoder, LoRA, gradient caching, pretrained checkpoints, adapter save/load |
-| [`evaluation/`](evaluation/README.md) | 81 | Metric primitives, evaluators, report rendering |
-| [`pipelines/`](pipelines/README.md) | 18 | Query/passage prefixes, batched indexing, building a pipeline from a saved adapter |
-| [`integration/`](integration/README.md) | 29 | End-to-end training, search and CLI |
+| [`evaluation/`](evaluation/README.md) | 89 | Metric primitives, evaluators, report rendering |
+| [`pipelines/`](pipelines/README.md) | 68 | Query/passage prefixes, batched indexing, building a pipeline from a saved adapter |
+| [`integration/`](integration/README.md) | 44 | End-to-end training, search and CLI, and verifying a copied adapter |
 | `test_architecture.py` | 16 | Layering rule, acyclic import graph, `py.typed` marker, encoder contract |
 
 `conftest.py` holds shared fixtures, including the multilingual sample texts used
@@ -54,7 +54,7 @@ pytest -k segmentation      # by name
 Integration tests are marked `slow` because they train models. They still complete in
 about five seconds, so there is rarely a reason to skip them locally; the marker
 exists so a fast inner loop is available when iterating on a single module. `slow` is
-the only marker that deselects anything — all 29 integration tests carry it, and nothing
+the only marker that deselects anything — all 44 integration tests carry it, and nothing
 else does.
 
 ## Conventions
@@ -85,11 +85,18 @@ Nothing reaches the network. Model-training tests use deliberately small dimensi
 few epochs.
 
 **Optional dependencies skip rather than fail.** The contextual-encoder tests in
-`embedding/` and the adapter test in `pipelines/` require torch, which lives behind the
-`neural` extra. They use `pytest.importorskip`, so a checkout with only the core
-dependencies installed still runs green — it simply runs fewer tests. The counts in the
-table above are for a full install; without the extra, those two directories collect
-fewer.
+`embedding/`, the adapter test in `pipelines/` and all of
+`integration/test_saved_adapter.py` require torch, which lives behind the `neural` extra.
+They use `pytest.importorskip`, so a checkout with only the core dependencies installed
+still runs green — it simply runs fewer tests. The counts in the table above are for a
+full install; without the extra, those directories collect fewer.
+
+**Missing artefacts skip too.** `integration/test_saved_adapter.py` verifies a trained
+adapter that was copied here by hand from the GPU machine. It skips when
+`models/indic-v1/` is absent, and again when the base checkpoint it names is not in the
+local Hugging Face cache — because nothing in this suite reaches the network, and a test
+that only runs online is worth less than that guarantee. So a fresh clone reports 15
+skips there, and warming the cache once turns them into assertions.
 
 ## Adding tests
 

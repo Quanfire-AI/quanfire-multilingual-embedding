@@ -97,3 +97,13 @@ data/*
 *.model
 *.npy
 *.npz
+
+# Adapted checkpoints. The default is to ignore them, for the reason
+# above. models/indic-v1/ is the deliberate exception: it is 3.4 MB, it
+# is *not* reproducible from anything in this repository — it predates
+# `qfme adapt`, and its base checkpoint is an external name whose
+# contents can change — and every published number was measured on it.
+# An artefact that carries claims and cannot be rebuilt has to be kept.
+models/*
+!models/indic-v1/
+!models/README.md
