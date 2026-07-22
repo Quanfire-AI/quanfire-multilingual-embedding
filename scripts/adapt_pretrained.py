@@ -191,6 +191,20 @@ def main() -> int:
 
     parser.add_argument("--eval-pairs", type=int, default=2000)
 
+    parser.add_argument(
+        "--sample-pairs",
+        type=int,
+        help=(
+            "How many pairs to draw from the file before filtering by kind. "
+            "Defaults to --train-pairs plus --eval-pairs, which is right when "
+            "no kind filter is set and wrong when one is: a kind holding a "
+            "sixth of the file yields a sixth of the sample, so --train-pairs "
+            "stops binding and two runs that name different kinds train on "
+            "different amounts of data. Set this several times --train-pairs "
+            "to make the cap bind for every kind"
+        ),
+    )
+
     parser.add_argument("--epochs", type=int, default=1)
 
     parser.add_argument("--batch-size", type=int, default=64)
@@ -274,7 +288,7 @@ def main() -> int:
 
     print("=" * 68)
 
-    total = arguments.train_pairs + arguments.eval_pairs
+    total = arguments.sample_pairs or (arguments.train_pairs + arguments.eval_pairs)
 
     examples = load_pairs(arguments.pairs, total, arguments.seed)
 
@@ -322,6 +336,20 @@ def main() -> int:
 
     if train_kinds and eval_kinds and not set(train_kinds) & set(eval_kinds):
         print("  -> disjoint: this measures whether the adaptation generalises across task shapes")
+
+    # A kind filter that starves the training set turns a comparison of
+    # task shapes into a comparison of training-set sizes. Said out loud,
+    # because it is invisible in the scores and it silently decided a run:
+    # `--train-pairs 40000 --train-kinds title_lead` drew about 7,000
+    # pairs from a 42,000 sample while `--train-kinds adjacent` drew
+    # 25,000 from the same sample.
+    if arguments.train_kinds and len(train) < arguments.train_pairs:
+        print(
+            f"\n  WARNING: asked for {arguments.train_pairs:,} training pairs and the "
+            f"kind filter left {len(train):,}.\n"
+            f"  Raise --sample-pairs (currently {total:,}) until this stops, or runs "
+            f"naming different kinds will differ in data volume as well as shape."
+        )
 
     if arguments.eval_pairs_file:
         print(f"scored against {evaluation_source} (held fixed)")
@@ -483,6 +511,13 @@ def main() -> int:
                     "held_out_languages": languages,
                     "train_kinds": train_kinds,
                     "eval_kinds": eval_kinds,
+                    # The counts actually used, not the ones requested. A
+                    # kind filter can cut either far below its flag, and a
+                    # report that records only the request describes a run
+                    # that did not happen.
+                    "train_examples": len(train),
+                    "eval_examples": len(held),
+                    "sampled_from": total,
                     "settings": vars(arguments) | {"pairs": str(arguments.pairs)},
                     "before": before.to_dict(),
                     "after": after.to_dict(),
