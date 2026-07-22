@@ -19,6 +19,10 @@ misleading a reader.
 | 10 — mining pairs | base install |
 | 11 — adapting a published checkpoint | `--extra neural --extra pretrained`, and a GPU |
 
+`use_adapter.py` needs `--extra neural --extra pretrained` and an adapter at
+`models/indic-v1/`; unlike step 11 it needs no GPU, because using a model is not training
+one. See [`models/README.md`](../models/README.md).
+
 ```bash
 uv sync --extra neural --extra pretrained --extra wikipedia
 ```
@@ -29,6 +33,7 @@ uv sync --extra neural --extra pretrained --extra wikipedia
 |---|---|
 | `train_and_search.py` | The complete lifecycle: configure, train a tokenizer and embeddings, report per-language tokenizer fairness, reload the model from disk, and run semantic queries in four languages |
 | `adaptation.yaml` | A complete `qfme adapt` experiment, annotated: what each setting decides, why the evaluation file is held fixed, and why the E5 prefixes are part of the model rather than of the command line |
+| `use_adapter.py` | Loading a trained adapter and querying it — the raw encoder path, what forgetting the prefixes costs, and the pipeline path that cannot forget them |
 
 `adaptation.yaml` is the only file here that will not run as it stands — it points at a
 mined pair file, which is yours to produce:
@@ -46,6 +51,7 @@ no longer exists fails in CI rather than on the training box.
 
 ```bash
 uv run python examples/train_and_search.py
+uv run python examples/use_adapter.py      # needs models/indic-v1/
 ```
 
 Takes a few seconds. Artefacts are written to `artifacts/example/` and the evaluation

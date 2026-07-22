@@ -1,0 +1,33 @@
+{
+  "format_version": 1,
+  "checkpoint": "intfloat/multilingual-e5-small",
+  "dimension": 384,
+  "pooling": "mean",
+  "max_length": 256,
+  "normalize": true,
+  "query_prefix": "query: ",
+  "passage_prefix": "passage: ",
+  "lora": {
+    "rank": 32,
+    "alpha": 64,
+    "dropout": 0.0,
+    "targets": [
+      "query",
+      "value"
+    ]
+  },
+  "adapter_parameters": 589824,
+  "notes": {
+    "trained_on": "verify-output/hi-ta-pairs.jsonl.gz",
+    "scored_against": "verify-output/hi-ta-pairs.jsonl.gz",
+    "train_pairs": 40000,
+    "held_out_languages": [
+      "hi",
+      "ta"
+    ],
+    "recall_at_1_before": 0.5128,
+    "recall_at_1_after": 0.6539,
+    "epochs": 2,
+    "learning_rate": 0.0005
+  }
+}
