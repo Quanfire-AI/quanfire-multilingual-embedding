@@ -49,6 +49,7 @@ stream; none loads a file into memory.
 | Path | Tracked | Contains | Produced by |
 |---|---|---|---|
 | `sample/corpus.jsonl` | **yes** | 150 documents, 750 sentences, six languages | committed by hand |
+| `sample/domain-corpus.jsonl` | **yes** | 10 structured non-Wikipedia documents; the pair-mining contract a domain export must satisfy | committed by hand |
 | `dumps/` | no | `*wiki-latest-pages-articles.xml.bz2` as downloaded | `curl` from dumps.wikimedia.org |
 | `corpora/` | no | extracted corpus JSON Lines, one file per language | `qfme extract` |
 | `pairs/` | no | mined contrastive pairs, one file per language | `qfme mine-pairs` |
@@ -359,6 +360,62 @@ all.
 
 [`docs/data-format.md`](../docs/data-format.md) is the full contract: every field, the rules
 an extraction must satisfy, and notes on Wikipedia dumps specifically.
+
+### The domain path — mining pairs from text that is not Wikipedia
+
+Every published result in this repository came from a MediaWiki dump, which leaves a fair
+question open: is the miner coupled to Wikipedia, or was it merely pointed at one?
+
+**It is not coupled.** [`corpus/pairs.py`](../src/multilingual_embedding/corpus/pairs.py)
+reads three things and nothing else — a `title`, a list of `sections`, and blank-line
+paragraphs in `text`. A matter file with a subject line and headed sections, an invoice with
+its schedule of services, a policy with numbered clauses: each already *is* a title plus
+sections plus paragraphs. Producing a domain corpus is a **format conversion, not a new
+capability**, and that is the single most useful thing to know before planning Phase C.
+
+[`data/sample/domain-corpus.jsonl`](sample/domain-corpus.jsonl) is a committed ten-document
+example in exactly that shape — professional-services text, English and Hindi, no Wikipedia
+anywhere in it. Mine it:
+
+```bash
+qfme mine-pairs --source data/sample/domain-corpus.jsonl \
+    --output /tmp/domain-pairs.jsonl --report /tmp/domain-report.json
+```
+
+```
+kind                  pairs   mean overlap
+adjacent                 19           0.21
+heading_section          30           0.22
+title_lead                7           0.23
+```
+
+Ten documents, **56 pairs**, all three kinds. Five more were rejected and named as such
+(one short anchor, four short positives), because a pair that vanishes without a reason is
+a pair you cannot reason about.
+
+**The trap: `sections` goes at the top level of the record.** Nested under an `attributes`
+key it is silently invisible — `JsonlReader` flattens unrecognised *top-level* fields into
+metadata, so a nested one never arrives. Mining still succeeds and still reports success; it
+simply produces zero `heading_section` pairs, which on a large corpus is easy to miss
+entirely. `tests/corpus/test_domain_pairs.py` demonstrates that failure rather than
+describing it, because it has no error message of its own.
+
+**A result worth checking, and not yet a result.** The overlap figures above sit near 0.22
+across all three kinds. On Hindi Wikipedia the same miner returns **0.977** for `title_lead`
+— an encyclopedia lead restates its title by convention, and lexical leakage was the
+dominant difficulty in every experiment run so far. Business prose has no such convention:
+an invoice's payment-terms section does not open by repeating the words "payment terms".
+
+If that survives contact with a real export, the hardest problem in the Wikipedia work is
+substantially smaller on domain text. **But this corpus is synthetic and was written by
+someone who knew overlap would be measured**, so the figures are a hypothesis, not evidence.
+The way to settle it costs one command: run `qfme mine-pairs --report` over a real export and
+read `mean_overlap_by_kind`. Do that before assuming either answer.
+
+**What the fixture does not do.** It does not train anything and cannot: Phase C's exit
+criterion is a model trained on mined domain pairs beating the base checkpoint *on that
+domain*, and that needs a real corpus and a GPU. What is settled is everything upstream of
+the training run — the record shape, the reader, the miner, and the accounting.
 
 ## Audit before you train
 
