@@ -33,6 +33,16 @@ against a chance level of 0.001".
 neither the model nor the metric can tell which was meant, and the
 scoring silently punishes correct behaviour. They are removed before
 scoring, and the count of what was removed is reported.
+
+**On languages.** ``by_language`` scores each language separately and
+answers "how well does this model serve Tamil". It does not answer "can a
+Tamil query find a Hindi passage", which is a different question and the
+one a shared multilingual vector space is usually assumed to settle.
+Answering it properly needs aligned pairs — a query in one language whose
+correct answer is in another — and nothing here mines those.
+
+What *is* measurable without them is the prerequisite: whether the space
+is organised by language at all. See :class:`LanguageSeparation`.
 """
 
 from __future__ import annotations
@@ -50,6 +60,7 @@ from multilingual_embedding.core.logging import get_logger
 from multilingual_embedding.utils.hashing import hash_text
 
 __all__ = [
+    "LanguageSeparation",
     "RetrievalReport",
     "RetrievalScores",
     "evaluate_retrieval",
@@ -68,6 +79,11 @@ _OVERLAP_BANDS: tuple[tuple[str, float, float], ...] = (
 # Encoding and scoring happen in blocks so that a large evaluation does
 # not build an N-by-N score matrix in one allocation.
 _BLOCK = 512
+
+# How many near misses per query the language-separation measure looks
+# at. Small, because the question is what the model *nearly* retrieved,
+# and a long tail of candidates says nothing about that.
+_SEPARATION_K = 5
 
 
 class Pair(Protocol):
@@ -206,6 +222,104 @@ class RetrievalScores:
 
 
 @dataclass(slots=True)
+class LanguageSeparation:
+    """
+    Whether the vector space is organised by language or by meaning.
+
+    **This is not cross-lingual retrieval evaluation.** That needs
+    aligned pairs — a query in one language whose correct answer is in
+    another — and nothing in this project mines them. What this measures
+    is the prerequisite, and it can be computed from the ordinary
+    multilingual pair sets that already exist.
+
+    The method. For each query, look at the near misses: the highest
+    scoring candidates that are not the correct answer. Count how many
+    are in the query's own language, and compare that against how many
+    would be expected if the model ranked purely on meaning and ignored
+    language entirely — which is just that language's share of the pool.
+
+    A model that has genuinely aligned its languages puts a Tamil
+    passage about tenancy near a Hindi query about tenancy, so its near
+    misses look like the pool. A model that has merely learned to encode
+    *which language this is* fills every query's near misses with the
+    query's own language, whatever they are about.
+
+    Attributes
+    ----------
+    queries:
+        Queries contributing to the measure. Zero when the pair set has
+        fewer than two languages, in which case the question is not
+        being asked.
+
+    pool:
+        Language composition of the candidate pool, which is what the
+        expectation is computed from.
+
+    observed:
+        Share of near misses in the query's own language, averaged over
+        queries.
+
+    expected:
+        The same share for a language-blind model.
+
+    by_language:
+        Observed share per query language. A model can be aligned in one
+        direction and not the other, and an average hides that.
+
+    Notes
+    -----
+    ``separation`` is the number to read: 1.0 means language plays no
+    part in the ranking, and the pool's own composition is the ceiling
+    on how high it can go. It is a diagnostic, not a score — a strongly
+    separated space is the *expected* outcome of training on pairs whose
+    two sides are always the same language, which is what every pair
+    this project mines looks like. Reading a high value as a defect
+    would be reading it wrong; reading it as evidence that cross-lingual
+    retrieval will work anyway would be worse.
+    """
+
+    queries: int = 0
+
+    pool: dict[str, int] = field(default_factory=dict)
+
+    observed: float = 0.0
+
+    expected: float = 0.0
+
+    by_language: dict[str, float] = field(default_factory=dict)
+
+    @property
+    def measured(self) -> bool:
+        """False when the pair set was monolingual, so nothing was asked."""
+
+        return self.queries > 0 and len(self.pool) > 1
+
+    @property
+    def separation(self) -> float:
+        """
+        Observed over expected. 1.0 is a language-blind space.
+
+        Above 1.0 the model prefers its own language among near misses
+        by more than the pool composition explains.
+        """
+
+        return self.observed / self.expected if self.expected else 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Reduce to primitives for reporting."""
+
+        return {
+            "measured": self.measured,
+            "queries": self.queries,
+            "pool": dict(sorted(self.pool.items())),
+            "observed_same_language_share": round(self.observed, 4),
+            "expected_same_language_share": round(self.expected, 4),
+            "separation": round(self.separation, 3),
+            "by_language": {k: round(v, 4) for k, v in sorted(self.by_language.items())},
+        }
+
+
+@dataclass(slots=True)
 class RetrievalReport:
     """
     The whole picture, including the breakdowns that catch a fake result.
@@ -224,6 +338,12 @@ class RetrievalReport:
         string matching, and its loss curve will look identical to one
         that learned meaning.
 
+    language_separation:
+        Whether the space is organised by language rather than by
+        meaning. Empty and ``measured`` False for a monolingual pair set.
+        Read :class:`LanguageSeparation` before quoting it — it is not a
+        cross-lingual retrieval score.
+
     dropped_duplicate_positives:
         Pairs removed because another pair had the same passage. Scoring
         them is impossible, and a large number here means the pair set
@@ -238,6 +358,8 @@ class RetrievalReport:
 
     by_overlap: dict[str, RetrievalScores] = field(default_factory=dict)
 
+    language_separation: LanguageSeparation = field(default_factory=LanguageSeparation)
+
     dropped_duplicate_positives: int = 0
 
     def to_dict(self) -> dict[str, Any]:
@@ -248,6 +370,7 @@ class RetrievalReport:
             "by_language": {k: v.to_dict() for k, v in sorted(self.by_language.items())},
             "by_kind": {k: v.to_dict() for k, v in sorted(self.by_kind.items())},
             "by_overlap": {k: v.to_dict() for k, v in sorted(self.by_overlap.items())},
+            "language_separation": self.language_separation.to_dict(),
             "dropped_duplicate_positives": self.dropped_duplicate_positives,
         }
 
@@ -273,6 +396,19 @@ class RetrievalReport:
                     f"  {band:14} recall@1 {scores.recall_at_1:.3f}  ({scores.queries:,} queries)"
                 )
 
+        separation = self.language_separation
+
+        if separation.measured:
+            lines.append("")
+
+            lines.append(
+                f"language separation {separation.separation:.2f}x — near misses are "
+                f"{separation.observed:.0%} same-language against {separation.expected:.0%} "
+                f"expected of a language-blind space"
+            )
+
+            lines.append("  (not a cross-lingual retrieval score; see LanguageSeparation)")
+
         return "\n".join(lines)
 
 
@@ -284,24 +420,36 @@ def _score_block(
     """
     Rank every positive for a block of anchors.
 
-    Returns the rank of each anchor's own positive, and the index of
-    whatever ranked first — the latter so a caller can tell a near miss
-    from a wild one.
+    Returns the rank of each anchor's own positive, and the indices of
+    its top near misses — the correct answer masked out, so every index
+    returned is something the model preferred or nearly preferred over
+    it. :class:`LanguageSeparation` reads the second.
     """
 
     similarity = anchors @ positives.T
 
     correct = np.arange(offset, offset + len(anchors))
 
+    rows = np.arange(len(anchors))
+
     # The score the right answer got, against the scores of everything
     # else. Rank is how many candidates beat it, so a rank of 0 means it
     # came first. Computed by comparison rather than by sorting, which
     # would cost N log N per query for a number one comparison gives.
-    own = similarity[np.arange(len(anchors)), correct]
+    own = similarity[rows, correct]
 
     ranks = (similarity > own[:, None]).sum(axis=1)
 
-    return ranks, similarity.argmax(axis=1)
+    # Masked rather than filtered afterwards: dropping the correct index
+    # from a top-k list per row would leave rows of different lengths,
+    # and the whole point of doing this in blocks is to stay in arrays.
+    similarity[rows, correct] = -np.inf
+
+    width = min(_SEPARATION_K, similarity.shape[1])
+
+    top = np.argpartition(-similarity, width - 1, axis=1)[:, :width]
+
+    return ranks, top
 
 
 def _scores_from_ranks(ranks: NDArray[np.int64], candidates: int) -> RetrievalScores:
@@ -405,15 +553,18 @@ def evaluate_retrieval(
 
     positives = encoder.encode_batch([pair.positive for pair in kept])
 
-    ranks = np.concatenate(
-        [
-            _score_block(anchors[start : start + _BLOCK], positives, start)[0]
-            for start in range(0, len(kept), _BLOCK)
-        ]
-    )
+    blocks = [
+        _score_block(anchors[start : start + _BLOCK], positives, start)
+        for start in range(0, len(kept), _BLOCK)
+    ]
+
+    ranks = np.concatenate([block[0] for block in blocks])
+
+    near_misses = np.concatenate([block[1] for block in blocks])
 
     report = RetrievalReport(
         overall=_scores_from_ranks(ranks, len(kept)),
+        language_separation=_language_separation(kept, near_misses),
         dropped_duplicate_positives=duplicates,
     )
 
@@ -434,6 +585,75 @@ def evaluate_retrieval(
     )
 
     return report
+
+
+def _language_separation(
+    pairs: Sequence[Any],
+    near_misses: NDArray[np.int64],
+) -> LanguageSeparation:
+    """
+    How much of a query's near misses its own language accounts for.
+
+    Returns an unmeasured result rather than raising when the pair set
+    is monolingual or carries no language labels. There is no meaningful
+    answer in either case, and a zero would be indistinguishable from a
+    perfectly aligned space — the same reason the evaluators elsewhere
+    in this package leave a missing metric as ``None``.
+    """
+
+    languages = [getattr(pair, "language", None) for pair in pairs]
+
+    if any(language is None for language in languages):
+        return LanguageSeparation()
+
+    pool: dict[str, int] = {}
+
+    for language in languages:
+        pool[str(language)] = pool.get(str(language), 0) + 1
+
+    if len(pool) < 2:
+        return LanguageSeparation(pool=pool)
+
+    total = len(pairs)
+
+    observed: list[float] = []
+
+    expected: list[float] = []
+
+    per_language: dict[str, list[float]] = {}
+
+    for index, language in enumerate(languages):
+        name = str(language)
+
+        candidates = [int(other) for other in near_misses[index] if int(other) != index]
+
+        if not candidates:
+            continue
+
+        share = sum(1 for other in candidates if str(languages[other]) == name) / len(candidates)
+
+        # The query's own passage is not a candidate for itself, so the
+        # language-blind expectation excludes it from both counts.
+        chance = (pool[name] - 1) / (total - 1)
+
+        observed.append(share)
+
+        expected.append(chance)
+
+        per_language.setdefault(name, []).append(share)
+
+    if not observed:
+        return LanguageSeparation(pool=pool)
+
+    return LanguageSeparation(
+        queries=len(observed),
+        pool=pool,
+        observed=sum(observed) / len(observed),
+        expected=sum(expected) / len(expected),
+        by_language={
+            name: sum(shares) / len(shares) for name, shares in sorted(per_language.items())
+        },
+    )
 
 
 def _band(pair: Any) -> str | None:

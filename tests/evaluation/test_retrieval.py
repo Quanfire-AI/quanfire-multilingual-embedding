@@ -275,3 +275,168 @@ class TestItWorksOnTheRealEncoders:
         assert report.overall.queries == 40
 
         assert 0.0 <= report.overall.recall_at_1 <= 1.0
+
+
+class TestLanguageSeparation:
+    """
+    Whether the space is organised by language rather than by meaning.
+
+    This measure is the easiest thing in the module to misread, so the
+    tests are mostly about what it must *refuse* to say: it is not a
+    cross-lingual retrieval score, it declines to answer on a
+    monolingual pair set, and its baseline has to come from the pool's
+    own composition rather than from a constant.
+    """
+
+    @staticmethod
+    def bilingual(count: int = 40) -> list[Pair]:
+        """
+        Alternating languages, with topics deliberately decoupled from them.
+
+        Deriving the topic from the index would make topic and language
+        correlate, and a language-blind encoder would then look
+        separated for a reason that has nothing to do with language.
+        That is a real way to fool this measure, so the fixture is built
+        not to.
+        """
+
+        order = list(np.random.default_rng(7).permutation(count))
+
+        return [
+            Pair(
+                anchor=f"query about topic {order[i]}",
+                positive=f"passage discussing topic {order[i]} at length",
+                language="en" if i % 2 == 0 else "hi",
+            )
+            for i in range(count)
+        ]
+
+    def test_it_declines_to_answer_on_one_language(self) -> None:
+        separation = evaluate_retrieval(Perfect(), pairs(40)).language_separation
+
+        assert not separation.measured
+
+        assert separation.separation == 0.0
+
+    def test_it_declines_when_pairs_carry_no_language(self) -> None:
+        @dataclass
+        class Unlabelled:
+            anchor: str
+
+            positive: str
+
+        unlabelled = [
+            Unlabelled(f"query about topic {i}", f"passage discussing topic {i} at length")
+            for i in range(20)
+        ]
+
+        assert not evaluate_retrieval(Perfect(), unlabelled).language_separation.measured
+
+    def test_a_language_blind_encoder_scores_near_one(self) -> None:
+        """
+        The calibration. Without it a high number proves nothing, because
+        every number this measure produces would be high.
+        """
+
+        report = evaluate_retrieval(Perfect(count=40), self.bilingual())
+
+        separation = report.language_separation
+
+        assert separation.measured
+
+        assert separation.separation < 1.35
+
+    def test_a_language_clustered_encoder_scores_well_above_one(self) -> None:
+        class ByLanguage:
+            """Same-language texts are near-identical whatever they say."""
+
+            def encode_batch(self, texts):  # type: ignore[no-untyped-def]
+                vectors = np.zeros((len(texts), 8), dtype=np.float32)
+
+                for row, text in enumerate(texts):
+                    vectors[row, 0] = 5.0 if "topic" in text else 0.0
+
+                    # The language axis, inferred from the pair set's own
+                    # alternation, dwarfs the topic axis.
+                    vectors[row, 1] = 5.0 * (topic_of(text) % 2)
+
+                    vectors[row, 2 + topic_of(text) % 6] = 1.0
+
+                norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+
+                return (vectors / np.maximum(norms, 1e-9)).astype(np.float32)
+
+        aligned = [
+            Pair(
+                anchor=f"query about topic {i}",
+                positive=f"passage discussing topic {i} at length",
+                language="en" if i % 2 == 0 else "hi",
+            )
+            for i in range(40)
+        ]
+
+        separation = evaluate_retrieval(ByLanguage(), aligned).language_separation
+
+        assert separation.separation > 1.5
+
+    def test_the_expectation_comes_from_the_pool(self) -> None:
+        """
+        An unbalanced pool must move the baseline, not the verdict.
+
+        Nine tenths of the passages being English makes "the near misses
+        were English" unremarkable, and a measure that ignored that would
+        report every skewed corpus as language-separated.
+        """
+
+        skewed = [
+            Pair(
+                anchor=f"query about topic {i}",
+                positive=f"passage discussing topic {i} at length",
+                language="en" if i % 10 else "hi",
+            )
+            for i in range(40)
+        ]
+
+        separation = evaluate_retrieval(Perfect(count=40), skewed).language_separation
+
+        assert separation.pool == {"en": 36, "hi": 4}
+
+        # Averaged per query, excluding the query's own passage from both
+        # counts: 36 English queries each expect 35/39, and 4 Hindi ones
+        # expect 3/39.
+        assert separation.expected == pytest.approx((36 * 35 / 39 + 4 * 3 / 39) / 40)
+
+        # And the verdict does not move with the skew, which is the point.
+        assert separation.separation < 1.2
+
+    def test_it_reports_each_language_separately(self) -> None:
+        separation = evaluate_retrieval(Perfect(count=40), self.bilingual()).language_separation
+
+        assert set(separation.by_language) == {"en", "hi"}
+
+    def test_the_summary_says_what_it_is_not(self) -> None:
+        """
+        The one number here that would be quoted out of context, so the
+        line that stops it being quoted travels with it.
+        """
+
+        summary = evaluate_retrieval(Perfect(count=40), self.bilingual()).summary()
+
+        assert "language separation" in summary
+
+        assert "not a cross-lingual retrieval score" in summary
+
+    def test_it_survives_a_round_trip_to_primitives(self) -> None:
+        payload = evaluate_retrieval(Perfect(count=40), self.bilingual()).to_dict()
+
+        assert payload["language_separation"]["measured"] is True
+
+        assert set(payload["language_separation"]) == {
+            "measured",
+            "queries",
+            "pool",
+            "observed_same_language_share",
+            "expected_same_language_share",
+            "separation",
+            "by_language",
+        }

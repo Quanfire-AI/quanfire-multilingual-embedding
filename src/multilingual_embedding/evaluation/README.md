@@ -140,15 +140,44 @@ results from plausible into defensible: gains ran *inversely* to overlap in both
 [`docs/reading-results.md`](../../../docs/reading-results.md) is how to read one of these
 without fooling yourself.
 
+### `language_separation` — whether the space is organised by language at all
+
+`pipelines/search.py` carries a caveat this layer could not check: a shared multilingual
+vector space does not imply the languages are *aligned* within it. `LanguageSeparation`
+checks the prerequisite, and it does so from the ordinary same-language pair sets that
+already exist.
+
+The method: for each query, take the top near misses — the highest-scoring candidates
+that are not the correct answer, which is masked out — and count the share in the query's
+own language. Divide that by the share a language-blind ranker would produce, which is
+that language's share of the pool excluding the query's own passage. `separation` is the
+ratio. **1.0 means language plays no part in the ranking.** The pool's composition is the
+ceiling, so the baseline moves with a skewed corpus rather than the verdict — a 90%
+English pool makes "the near misses were English" unremarkable, and the measure knows it.
+
+Three things it deliberately refuses to do. It **declines to answer** — `measured` is
+`False` — when the pair set has fewer than two languages or the pairs carry no language,
+rather than returning a meaningless 1.0. It reports `by_language` as well as an average,
+because a model can be aligned in one direction and not the other. And `summary()` prints
+the disclaimer on the same line as the number, because this is the one figure here that
+would be quoted out of context.
+
+**It is a diagnostic, not a score.** Every pair this project mines has both sides in the
+same language, so a strongly separated space is the *expected* outcome of that training,
+not a defect. What it cannot tell you is whether cross-lingual retrieval works — a space
+that scores near 1.0 has cleared the prerequisite and nothing more.
+
 ## What this layer still does not score
 
-- **Cross-lingual retrieval.** `by_language` scores each language separately; nothing here
-  measures a Hindi query against English passages. `pipelines/search.py` documents the
-  corresponding caveat — a shared multilingual vector space does not imply the languages
-  are aligned within it — and the honest way to settle that is a cross-lingual metric,
-  which needs aligned pairs that nothing currently mines.
-- **Per-domain scoring against non-Wikipedia text.** The machinery accepts any pair file;
-  no such file has been produced yet.
+- **Cross-lingual retrieval itself.** `by_language` scores each language separately and
+  `language_separation` scores whether the space is language-blind, but nothing measures a
+  Hindi query whose correct answer is an English passage. That needs aligned pairs, and
+  nothing in this project mines them; the pair miner produces both sides from one document,
+  which is by construction one language.
+- **Per-domain scoring against real non-Wikipedia text.** The machinery accepts any pair
+  file, and `data/sample/domain-corpus.jsonl` proves a domain corpus mines
+  (`tests/corpus/test_domain_pairs.py`), but that fixture is synthetic. No real client
+  export has been scored.
 - **Reranking or multi-positive relevance.** Each query has exactly one correct answer.
   Graded relevance would need a different pair format.
 
@@ -217,8 +246,8 @@ Only `pipelines` imports this package. Nothing below it may.
 |---|---|
 | `tests/evaluation/test_evaluators.py` | 37 |
 | `tests/evaluation/test_metrics.py` | 30 |
-| `tests/evaluation/test_retrieval.py` | 14 |
+| `tests/evaluation/test_retrieval.py` | 22 |
 
-`.venv/bin/python -m pytest tests/evaluation -q` reports **81 passed**. The evaluators are
+`.venv/bin/python -m pytest tests/evaluation -q` reports **89 passed**. The evaluators are
 additionally exercised against real trained artefacts by
 `tests/integration/test_end_to_end.py` (29 tests).

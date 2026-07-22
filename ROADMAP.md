@@ -303,6 +303,37 @@ manufactured from document structure and content:
 - **Exit criterion:** a model trained purely on mined pairs from a domain corpus beats
   the untrained base on that domain.
 
+#### The miner is not a Wikipedia miner — 22 July 2026
+
+Every mining figure published so far came from a MediaWiki dump, which left the phase
+resting on an unchecked assumption. `data/sample/domain-corpus.jsonl` — ten synthetic
+professional-services documents, English and Hindi — mines **56 pairs across all three
+kinds** with no code change, and `tests/corpus/test_domain_pairs.py` (16 tests) pins the
+record contract an exporter has to satisfy.
+
+The trap it fixes has no error message: `JsonlReader` flattens unrecognised *top-level*
+fields into the attributes mapping, so `sections` nested under an `attributes` key is
+silently invisible and mining produces zero `heading_section` pairs while reporting
+success. That is now a test rather than a paragraph.
+
+So a domain corpus is a **format conversion**, not a missing capability. What remains
+genuinely unknown is whether real client documents behave like the fixture — its
+`title_lead` overlap of 0.234 against Hindi Wikipedia's 0.977 is a hypothesis written by
+someone who knew overlap would be measured, and settling it needs a real export.
+
+#### Cross-lingual, one layer down — 22 July 2026
+
+The `Cross-lingual` row above needs parallel text nothing mines, and the exit criterion
+for it stays open. But the *prerequisite* is measurable without aligned pairs:
+`RetrievalReport.language_separation` reports whether the near misses of each query are
+dominated by the query's own language, against the baseline a language-blind ranker would
+produce from the pool's own composition. It declines to answer on a monolingual pair set
+rather than returning a meaningless 1.0.
+
+It is a diagnostic, not a score. Every pair mined here has both sides in one language, so
+a separated space is the expected outcome; a value near 1.0 clears the precondition for
+cross-lingual retrieval and demonstrates nothing beyond it.
+
 ### Phase D — Serving
 
 A web service over the artefact-loading pattern already in place, using the de facto

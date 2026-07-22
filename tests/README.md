@@ -1,6 +1,6 @@
 # tests
 
-> The test suite. 1204 tests, 94% statement coverage, mirroring the source layout.
+> The test suite. 1228 tests, 94% statement coverage, mirroring the source layout.
 
 ## Purpose
 

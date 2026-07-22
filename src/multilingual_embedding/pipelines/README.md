@@ -129,6 +129,13 @@ the languages occupy separate regions of the same space and cross-lingual retrie
 not work, however shared the space is. A shared vector space does not imply alignment;
 the way to know is to measure retrieval across languages, not to assume it.
 
+Part of that measurement now exists. `RetrievalReport.language_separation` reports whether
+the space is organised by language at all — the prerequisite — and it runs on the ordinary
+same-language pair sets this project mines, so it needs no new data. It does not close the
+caveat: a space that is language-blind has cleared the precondition for cross-lingual
+retrieval, not demonstrated it. That still needs aligned pairs. See
+[`evaluation/README.md`](../evaluation/README.md).
+
 ## The asymmetry between the two pipelines
 
 `SemanticSearchPipeline` already serves both kinds of model. `TrainingPipeline` trains only
