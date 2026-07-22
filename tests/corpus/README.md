@@ -2,7 +2,7 @@
 
 > Tests for [`multilingual_embedding.corpus`](../../src/multilingual_embedding/corpus/README.md) — the document tree, segmentation, readers, statistics, auditing, Wikipedia extraction and pair mining.
 
-**462 tests**, the largest group in the suite by a wide margin. Run with
+**493 tests**, the largest group in the suite by a wide margin. Run with
 `pytest tests/corpus -q`; the whole group takes under a second.
 
 ## Files
@@ -19,6 +19,8 @@
 | `test_audit.py` | 25 | Corpus auditing: extraction failures, quality warnings, finding shape, `qfme validate` |
 | `test_nodes.py` | 22 | `Token`/`Sentence`/`Paragraph`/`Document` construction, span consistency, round trips |
 | `test_corpus.py` | 19 | Document-level splitting and persistence |
+| `test_domain_pairs.py` | 16 | The miner against a corpus that is not Wikipedia: contracts, transcripts and support tickets carry structure of their own, and the three kinds must find it without a Wikipedia-shaped assumption |
+| `test_pair_io.py` | 15 | Reading a pair file back: what a record may leave out, and that reservoir sampling can reach the end of the file — a head-window sampler reported a two-language run as monolingual |
 | `base/test_text_node.py` | 5 | The `TextNode` base: length and character counting |
 | `metadata/test_base.py` | 2 | `BaseMetadata` defaults |
 

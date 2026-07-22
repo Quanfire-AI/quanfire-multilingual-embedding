@@ -7,6 +7,9 @@ import pytest
 from multilingual_embedding.common.constants import DEFAULT_RANDOM_SEED
 from multilingual_embedding.common.enums import TokenizerModel
 from multilingual_embedding.config.base import (
+    ADAPTATION_DESCRIPTIONS,
+    ADAPTATIONS,
+    AdaptationConfig,
     CorpusConfig,
     EmbeddingConfig,
     EvaluationConfig,
@@ -474,3 +477,158 @@ class TestLoaderErrorContract:
             load_config(path, use_environment=False)
 
         assert caught.value.context["format"] == "parquet"
+
+
+class TestAdaptationConfig:
+    """
+    The science half of an adaptation run.
+
+    Everything the *machine* dictates lives in ``ComputeConfig`` and is
+    swapped by ``--profile``. What is here decides what the run measures,
+    so the validation is about making an uninterpretable run impossible
+    to express rather than about catching type errors.
+    """
+
+    def test_a_comma_separated_string_becomes_a_tuple(self) -> None:
+        """YAML has no tuple and the CLI hands over a string, so both
+        arrive here and everything downstream must see one shape."""
+
+        config = AdaptationConfig(train_kinds="adjacent,title_lead")
+
+        assert config.train_kinds == ("adjacent", "title_lead")
+
+    def test_spacing_around_the_commas_is_not_part_of_the_name(self) -> None:
+        assert AdaptationConfig(eval_kinds=" adjacent , title_lead ").eval_kinds == (
+            "adjacent",
+            "title_lead",
+        )
+
+    def test_a_list_from_yaml_becomes_a_tuple(self) -> None:
+        assert AdaptationConfig(train_languages=["hi", "ta"]).train_languages == ("hi", "ta")
+
+    def test_an_empty_filter_stays_empty(self) -> None:
+        """Empty means "everything", and a tuple holding one empty string
+        would instead mean "a kind called nothing", which matches no pair."""
+
+        assert AdaptationConfig(train_kinds="").train_kinds == ()
+
+        assert AdaptationConfig(train_kinds=",,").train_kinds == ()
+
+    def test_string_paths_become_paths(self) -> None:
+        config = AdaptationConfig(pairs="pairs.jsonl.gz", save_adapter="out/adapter")
+
+        assert config.pairs == Path("pairs.jsonl.gz")
+
+        assert config.save_adapter == Path("out/adapter")
+
+    def test_the_sample_defaults_to_covering_both_sets(self) -> None:
+        assert AdaptationConfig(train_pairs=100, eval_pairs=20).sampled == 120
+
+    def test_an_explicit_sample_size_wins(self) -> None:
+        """
+        Raising it is how a kind filter is made to stop starving the
+        training set: a kind holding a sixth of the file yields a sixth
+        of the sample, so ``train_pairs`` quietly stops binding and two
+        runs naming different kinds differ in volume as well as in shape.
+        """
+
+        assert AdaptationConfig(train_pairs=100, eval_pairs=20, sample_pairs=900).sampled == 900
+
+    def test_alpha_defaults_to_twice_the_rank(self) -> None:
+        assert AdaptationConfig(rank=32).resolved_alpha == 64
+
+    def test_an_explicit_alpha_wins(self) -> None:
+        assert AdaptationConfig(rank=32, alpha=32).resolved_alpha == 32
+
+    def test_every_mode_can_say_what_it_measures(self) -> None:
+        """The description is printed at the top of a run and stored in
+        the report, so a mode without one would ship a blank label."""
+
+        assert set(ADAPTATION_DESCRIPTIONS) == set(ADAPTATIONS)
+
+        for mode in ADAPTATIONS:
+            assert AdaptationConfig(adaptation=mode).measures
+
+    def test_an_unknown_mode_is_refused_with_the_list(self) -> None:
+        with pytest.raises(ConfigurationError) as caught:
+            AdaptationConfig(adaptation="cross-lingual")
+
+        assert caught.value.context["supported"] == sorted(ADAPTATIONS)
+
+    def test_unsupported_pooling_is_refused(self) -> None:
+        with pytest.raises(ConfigurationError):
+            AdaptationConfig(pooling="max")
+
+    def test_lora_must_attach_somewhere(self) -> None:
+        """Zero targets trains nothing and reports a delta of zero, which
+        reads as a result about the corpus."""
+
+        with pytest.raises(ConfigurationError):
+            AdaptationConfig(targets="")
+
+    @pytest.mark.parametrize(
+        "settings",
+        [
+            {"train_pairs": 0},
+            {"eval_pairs": 0},
+            {"epochs": 0},
+            {"learning_rate": 0.0},
+            {"rank": 0},
+            {"max_length": 0},
+            {"sample_pairs": 0},
+            {"alpha": 0},
+            {"dropout": 1.5},
+            {"seed": -1},
+        ],
+    )
+    def test_impossible_settings_are_refused(self, settings: dict[str, object]) -> None:
+        with pytest.raises((ConfigurationError, ValidationError)):
+            AdaptationConfig(**settings)  # type: ignore[arg-type]
+
+    def test_the_global_seed_is_inherited(self) -> None:
+        assert ExperimentConfig(seed=7).adaptation.seed == 7
+
+    def test_an_explicit_adaptation_seed_wins(self) -> None:
+        config = ExperimentConfig(seed=7, adaptation=AdaptationConfig(seed=99))
+
+        assert config.adaptation.seed == 99
+
+    def test_a_merged_global_seed_reaches_the_section(self) -> None:
+        merged = ExperimentConfig().merged({"seed": 11, "adaptation": {"rank": 8}})
+
+        assert merged.adaptation.seed == 11
+
+        assert merged.adaptation.rank == 8
+
+    def test_an_explicit_adaptation_seed_survives_a_global_seed_merge(self) -> None:
+        base = ExperimentConfig(seed=7, adaptation=AdaptationConfig(seed=99))
+
+        assert base.merged({"seed": 11}).adaptation.seed == 99
+
+    def test_a_mapping_section_is_coerced_and_validated(self) -> None:
+        """Direct construction must not store a raw dict whose values
+        validation would have rejected."""
+
+        config = ExperimentConfig(adaptation={"rank": 8, "train_kinds": "adjacent"})  # type: ignore[arg-type]
+
+        assert isinstance(config.adaptation, AdaptationConfig)
+
+        assert config.adaptation.train_kinds == ("adjacent",)
+
+        with pytest.raises(ConfigurationError):
+            ExperimentConfig(adaptation={"pooling": "max"})  # type: ignore[arg-type]
+
+    def test_it_round_trips_through_a_dict(self) -> None:
+        config = ExperimentConfig(
+            adaptation=AdaptationConfig(
+                checkpoint="intfloat/multilingual-e5-small",
+                pairs=Path("pairs.jsonl.gz"),
+                train_kinds="adjacent",
+                adaptation="task",
+                eval_kinds="title_lead",
+            )
+        )
+
+        restored = ExperimentConfig.from_dict(config.to_dict())
+
+        assert restored.adaptation == config.adaptation

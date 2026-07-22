@@ -25,9 +25,22 @@ uv sync --extra neural --extra pretrained --extra wikipedia
 
 ## Contents
 
-| Script | What it demonstrates |
+| File | What it demonstrates |
 |---|---|
 | `train_and_search.py` | The complete lifecycle: configure, train a tokenizer and embeddings, report per-language tokenizer fairness, reload the model from disk, and run semantic queries in four languages |
+| `adaptation.yaml` | A complete `qfme adapt` experiment, annotated: what each setting decides, why the evaluation file is held fixed, and why the E5 prefixes are part of the model rather than of the command line |
+
+`adaptation.yaml` is the only file here that will not run as it stands — it points at a
+mined pair file, which is yours to produce:
+
+```bash
+qfme mine-pairs --source corpus.jsonl --output pairs.jsonl.gz
+qfme adapt --config examples/adaptation.yaml --profile configs/gpu.yaml \
+    --set adaptation.pairs=pairs.jsonl.gz
+```
+
+It is loaded by `tests/config/test_compute_profiles.py`, so a renamed field or a mode that
+no longer exists fails in CI rather than on the training box.
 
 ## Running
 

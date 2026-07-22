@@ -18,7 +18,7 @@ an **adapted** published checkpoint — LoRA over frozen `multilingual-e5-small`
 The last is what produces the models this project ships; the first is the floor the others
 are measured against. The second and third need the optional `neural` extra.
 
-**1228 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
+**1326 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
 
 **Proven on real data:** a published checkpoint adapted on mined Hindi and Tamil Wikipedia
 pairs beats itself by **+28.6% (Hindi)** and **+40.9% (Tamil)** recall@1 on held-out
@@ -57,7 +57,7 @@ retrieval, training **0.50%** of its parameters into a **3.4 MB** artefact.
 
 > **Looking for the full reference?**
 > [`knowledge-base/QuanFire-Multilingual-Embedding-Handbook.pdf`](knowledge-base/QuanFire-Multilingual-Embedding-Handbook.pdf)
-> is a 66-page handbook covering purpose, design, architecture, components, usage, local
+> is a 90-page handbook covering purpose, design, architecture, components, usage, local
 > and production operation, benefits, and an honest pros-and-cons assessment. Read that
 > if you want the whole picture in one document; read on for the quick version.
 
@@ -110,14 +110,16 @@ Concretely, the framework must be able to:
 9. Do all of the above deterministically, on a development machine or a GPU box, without
    changing anything but a profile.
 
-**Where it falls short of that today.** `qfme train` trains the static model only. The
-contextual and adapted encoders are driven through the Python API and
-`scripts/adapt_pretrained.py` — `TrainingPipeline` has no neural path, and
-`SemanticSearchPipeline.from_directory` always reconstructs a static model. (Serving an
-adapted one is a single call, `SemanticSearchPipeline.from_adapter`, but there is no
-`qfme adapt` subcommand.) The families share the `TextEncoder` contract, not the command
-line. Closing that gap is tracked in [ROADMAP.md](ROADMAP.md); until it is closed, "from a
-single command" is true of word2vec and not of the transformer.
+**Where it falls short of that today.** Two of the three routes now have a command.
+`qfme train` trains the static model; `qfme adapt` runs the full adaptation experiment from
+a config file and a compute profile. The one still missing is the *from-scratch* contextual
+encoder: `TrainingPipeline` has no neural path, so a transformer trained from nothing is
+built by driving `ContrastiveTrainer` from the Python API. `SemanticSearchPipeline.from_directory`
+likewise always reconstructs a static model, though serving an adapted one is a single call
+to `from_adapter`. The families share the `TextEncoder` contract, and now share most of the
+command line. Closing the rest is tracked in [ROADMAP.md](ROADMAP.md); until it is, "from a
+single command" is true of word2vec and of adaptation, and not of a transformer trained from
+scratch.
 
 **Scope.** This repository does embeddings. Nothing else. The other modalities in the
 QuanFire stack are separate repositories and are described in [ECOSYSTEM.md](ECOSYSTEM.md).
@@ -228,7 +230,7 @@ most solvable by string matching. It is reported, not hidden, and `--max-overlap
 | Train a static word2vec model and search it | ✅ | `qfme train`, `qfme search` |
 | Mine contrastive pairs from unlabelled text, leakage measured | ✅ | `qfme mine-pairs` |
 | Train a transformer encoder contrastively from scratch | ✅ | Python API |
-| Adapt a published checkpoint with LoRA on mined pairs | ✅ | `scripts/adapt_pretrained.py` |
+| Adapt a published checkpoint with LoRA on mined pairs | ✅ | `qfme adapt` |
 | Fit a large contrastive batch on 16 GB (gradient caching, bf16) | ✅ | `compute` profile |
 | Save an adapted model as a ~3.4 MB artefact | ✅ | `save_adapter` |
 | Serve an adapted model, prefixes applied correctly | ✅ | `SemanticSearchPipeline.from_adapter` |
@@ -236,7 +238,7 @@ most solvable by string matching. It is reported, not hidden, and `--max-overlap
 | Declare an experiment's design and have the data checked against it | ✅ | `--adaptation` |
 | Hard-negative mining, domain-specific miners, synthetic pairs | ❌ | Phase C |
 | HTTP embeddings endpoint, ONNX export, container image | ❌ | Phase D |
-| `qfme adapt` subcommand, neural path in `TrainingPipeline` | ❌ | Phase D |
+| Neural path in `TrainingPipeline` (a transformer from scratch, from one command) | ❌ | Phase D |
 | From-scratch pretraining (MLM then contrastive) | ❌ | Phase E |
 | Approximate nearest-neighbour index | ❌ | out of scope — export instead |
 
@@ -496,6 +498,43 @@ qfme search --experiment artifacts/demo \
  3. [0.9996] अभियंता देखता है मशीन लर्निंग।
 ```
 
+### Adapt a published checkpoint
+
+`qfme train` builds a model from your corpus. `qfme adapt` takes one that already exists
+and specialises it, which is the route that produces the models this project ships. It needs
+the `neural` and `pretrained` extras, a checkpoint, and a pair file from `qfme mine-pairs`.
+
+```bash
+qfme adapt --config examples/adaptation.yaml --profile configs/cpu.yaml \
+    --set adaptation.pairs=data/pairs/hi.jsonl.gz
+```
+
+It prints three things in order: the published checkpoint's score on held-out pairs, the
+training run, and the same score again afterwards. The first is the number to beat — beating
+chance, or beating an untrained model, proves nothing about whether adaptation was worth
+doing. The verdict block, with the recorded Hindi figures filled in:
+
+```
+published checkpoint     recall@1 0.4238   MRR 0.5136
+after LoRA adaptation    recall@1 0.5451   MRR 0.6364
+
+recall@1 +0.1213  (+28.6%)   -> BETTER
+the model itself moved by <max change in a probe vector>
+```
+
+Two details there are the point rather than decoration. **The probe** — the last line —
+re-encodes sixteen anchors before and after and reports the largest change, which
+distinguishes "the adaptation did not help" from "the adaptation did not happen". Those two
+have opposite remedies, and without the probe they are the same line of output. **The
+declared mode**: `adaptation: in-distribution` in that config says what the run measures, it
+is checked against what the filters actually vary, and a run whose label and data disagree is
+refused before the model loads. The label outlives the command line, so it must not be able
+to be wrong.
+
+The command exits non-zero when the adapted model did not beat the checkpoint, so a shell
+pipeline that chains adaptation into a deployment step stops rather than shipping a
+regression. [The full Wikipedia run is below.](#training-on-wikipedia-in-multiple-languages)
+
 ### From Python
 
 ```python
@@ -545,6 +584,19 @@ qfme mine-pairs --source data/corpora/hi.jsonl.gz \
 ```
 
 Then adapt, on the GPU box:
+
+```bash
+qfme adapt --config examples/adaptation.yaml --profile configs/gpu.yaml \
+    --set adaptation.pairs=data/pairs/hi.jsonl.gz \
+    --save-adapter models/hi-v1 --output reports/hi-v1.json
+```
+
+The experiment file holds what decides the result and the profile holds what the box
+dictates, so the same command runs on a laptop by naming `configs/cpu.yaml` instead. `adapt`
+exits non-zero when the adapted model did not beat the checkpoint it started from, which is
+what makes it safe to chain into a deployment step.
+
+The same run as flags, which is how every figure below was produced:
 
 ```bash
 python scripts/adapt_pretrained.py \
@@ -1004,7 +1056,7 @@ An honest assessment. The cons are structural choices with reasons, not a defect
 | | Why it is this way |
 |---|---|
 | **The best models are not ours** | The shipped route starts from a published checkpoint. Pretraining scale cannot be reproduced on one consumer GPU, so the differentiation has to come from corpus and domain instead. Phase E exists for independence, not because it would be better. |
-| **Two CLIs, one of them a script** | `qfme` covers the corpus-to-static path; adaptation is `scripts/adapt_pretrained.py`. The experiment design was changing weekly while these results were produced, and freezing it into a subcommand would have meant a contract that had to break. It has settled now; `qfme adapt` is the next CLI work. |
+| **One command short of complete** | `qfme` covers the corpus-to-static path and the adaptation path. A transformer trained *from scratch* is still Python-API only: `TrainingPipeline` has no neural stage. Adaptation was the same story until recently — the experiment design was changing weekly and freezing it into a subcommand would have meant a contract that had to break — and `qfme adapt` is what that settling produced. |
 | **Search is exact only** | Brute-force cosine, right to ~10⁵–10⁶ vectors. Wrapping a poor ANN implementation would be worse than being honest about the ceiling; the vectors are plain float32 and export anywhere. |
 | **No CUDA in CI** | Development has no NVIDIA GPU. GPU claims are hand-verified and reproducible via `scripts/verify_e2e.py`, but a device regression reaches the training box before it reaches CI. |
 | **Everything measured is Wikipedia** | Both sides of every comparison so far. The corpus axis — does this survive contact with real contracts and invoices — is the untested one, and it is the one the business case rests on. |
@@ -1030,7 +1082,7 @@ quanfire-multilingual-embedding/
 │   │   └── neural/                 transformer, LoRA, gradcache, pretrained, adapter
 │   ├── cli.py                      the `qfme` command
 │   └── py.typed                    marks the package as typed for consumers
-├── tests/                          1228 tests mirroring the source layout
+├── tests/                          1326 tests mirroring the source layout
 ├── scripts/                        adapt_pretrained.py, verify_e2e.py, diagnose_audit.py
 ├── configs/                        compute profiles — cpu.yaml, gpu.yaml
 ├── examples/                       runnable end-to-end example and a walkthrough
@@ -1117,10 +1169,10 @@ Stated plainly, because knowing where a tool stops is part of using it well.
   training corpus contained parallel or comparable content.
 - **Language inference is script-based**, not statistical, and returns `None` for
   scripts shared across languages.
-- **The contextual and adapted encoders have no CLI path.** `qfme train` produces the
-  static model; the transformer is trained through the Python API and adaptation through
-  `scripts/adapt_pretrained.py`. Serving an adapter is one call, but there is no `qfme
-  adapt`.
+- **A transformer trained from scratch has no CLI path.** `qfme train` produces the static
+  model and `qfme adapt` runs the adaptation experiment, but `TrainingPipeline` has no
+  neural stage, so a contextual encoder trained from nothing is still driven through the
+  Python API.
 - **Training is single-process.** There is no data-loader parallelism and no
   distributed training; a run is bounded by one process on one device.
 - **External weights do not load into our own transformer.** It is pre-norm and most

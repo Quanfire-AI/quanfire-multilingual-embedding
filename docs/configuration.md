@@ -11,7 +11,9 @@ ExperimentConfig
 ├── corpus       CorpusConfig
 ├── tokenizer    TokenizerConfig
 ├── embedding    EmbeddingConfig
-└── evaluation   EvaluationConfig
+├── evaluation   EvaluationConfig
+├── adaptation   AdaptationConfig     read by `qfme adapt`
+└── compute      ComputeConfig        usually supplied by --profile
 ```
 
 !!! warning "Treat config objects as immutable"
@@ -33,6 +35,8 @@ ExperimentConfig
 | `tokenizer` | `TokenizerConfig` | see below | Subword model settings | Delegated |
 | `embedding` | `EmbeddingConfig` | see below | Word2vec hyperparameters | Delegated |
 | `evaluation` | `EvaluationConfig` | see below | Metrics and reporting | Delegated |
+| `adaptation` | `AdaptationConfig` | see below | The `qfme adapt` experiment | Delegated |
+| `compute` | `ComputeConfig` | see [compute profiles](compute-profiles.md) | Device, precision, batch size | Delegated |
 
 Derived read-only properties:
 
@@ -42,19 +46,20 @@ Derived read-only properties:
 | `tokenizer_directory` | `experiment_directory / "tokenizer"` |
 | `embedding_directory` | `experiment_directory / "embedding"` |
 
-!!! danger "`seed` does not propagate to `embedding.seed`"
-    The `ExperimentConfig.seed` docstring claims it is "propagated to the embedding
-    config when that config does not override it." **No code performs that
-    propagation.**
+!!! note "`seed` propagates at construction, not at use"
+    A section seed left at `None` inherits the top-level seed, and the inheritance is
+    resolved when the config is built rather than when it is read:
 
     ```python
     >>> ExperimentConfig(seed=7).embedding.seed
-    42
+    7
+    >>> ExperimentConfig(seed=7, embedding={"seed": 0}).embedding.seed
+    0
     ```
 
-    In practice `ExperimentConfig.seed` seeds only `EmbeddingEvaluator`'s random pair
-    sampling. Word2vec weight initialisation and negative sampling read
-    `embedding.seed` and nothing else. **Set both** if you want a fully seeded run.
+    Resolving it eagerly is what lets the config persisted next to a model record the
+    seed the run really used, rather than a `None` a reader has to re-derive. `0` is a
+    legitimate seed and is kept — a falsy check would read it as absent.
 
 ---
 
@@ -63,7 +68,7 @@ Derived read-only properties:
 | Field | Type | Default | Meaning | Validation |
 |---|---|---|---|---|
 | `source` | `Path \| None` | `None` | File or directory to read | Coerced to `Path`; required by any command that reads text |
-| `format` | `str` | `"auto"` | Reader selection. `"auto"` chooses by file extension | Must be one of `auto`, `text`, `jsonl` |
+| `format` | `str` | `"auto"` | Reader selection. `"auto"` chooses by file extension | Must be one of `auto`, `text`, `lines`, `jsonl` |
 | `patterns` | `list[str]` | `["*.txt", "*.jsonl"]` | Glob patterns applied when `source` is a directory | None |
 | `language` | `str \| None` | `None` | Default ISO 639-1 code for documents that declare none | None |
 | `encoding` | `str` | `"utf-8"` | Character encoding of source files | None |
@@ -79,24 +84,20 @@ a file with no terminators.
 `lowercase` is off by default on purpose: casing is a tokenizer concern, and
 destroying it at load time is irreversible.
 
-!!! bug "`text_field` is not wired through the config path"
-    `build_reader()` constructs the reader with `format`, `language`, `encoding` and
-    `patterns` only. It never passes `text_field`, so `JsonlReader` always falls back
-    to its own default of `"text"`:
+!!! note "`text_field` reaches the reader"
+    It did not always. `build_reader()` once constructed the reader from `format`,
+    `language`, `encoding` and `patterns` only, so a corpus keyed on anything but
+    `text` failed with an error naming the default rather than the setting. It is
+    passed through now:
 
     ```python
     >>> c = CorpusConfig(source="alt.jsonl", format="jsonl", text_field="content")
     >>> build_reader(c).text_field
-    'text'
+    'content'
     ```
 
-    Loading a corpus whose records use a different key therefore fails with
-    `CorpusFormatError: JSON Lines record is missing the text field
-    (text_field='text', keys=['content', 'id', 'language'])` — naming the default,
-    not what you configured.
-
-    **Workaround:** construct `JsonlReader(source, text_field="content")` directly, or
-    rename the field in your data.
+    The failure is recorded because of how it looked: the setting validated, persisted
+    into `config.yaml`, and did nothing.
 
 ---
 
@@ -142,17 +143,17 @@ Han than for Latin.
     inventory, which multilingual corpora hit easily — is reported separately and
     needs `vocab_size` **raised** or `character_coverage` lowered.
 
-!!! bug "`normalizers` and `pretokenizer` do not affect `qfme train`"
-    These fields configure `WordTokenizer`, which builds its normalizer chain and
-    pre-tokenizer from specs. But `TrainingPipeline` uses
-    `SentencePieceTrainerAdapter`, which reads only `model_type`, `vocab_size`,
-    `character_coverage`, `max_sentence_length` and `model_prefix`. SentencePiece
-    applies its own internal normalization.
+!!! note "`normalizers` applies at staging time, and must"
+    `SentencePieceTrainerAdapter` builds the configured chain and applies it as the
+    corpus is staged for training, so SentencePiece learns its pieces from normalized
+    bytes. `SentencePieceTokenizer` carries the same chain, and `TrainingPipeline`
+    hands it the one the adapter trained with — otherwise encode-time text would differ
+    from what the model saw, which is worse than not normalizing at all.
 
-    Setting `pretokenizer: {type: script}` in an experiment YAML has **no effect on a
-    `qfme train` run**. The fields are persisted into `config.yaml` regardless, which
-    makes them easy to mistake for settings that took effect. They are live only when
-    you construct a `WordTokenizer` yourself.
+    `pretokenizer` is the field that still does not reach a `qfme train` run:
+    SentencePiece does its own segmentation, and the adapter warns at construction
+    rather than at train time when the setting cannot take effect. It is live when you
+    construct a `WordTokenizer` yourself.
 
 ---
 
@@ -168,8 +169,7 @@ Han than for Latin.
 | `learning_rate` | `float` | `0.025` | Initial rate, decayed linearly | `> 0`; `>= min_learning_rate` |
 | `min_learning_rate` | `float` | `0.0001` | Floor for the decayed rate | `> 0` |
 | `subsample_threshold` | `float` | `0.001` | Frequency above which tokens are randomly discarded. `0` disables | `>= 0` |
-| `batch_size` | `int` | `32` | Documented as "sentences per progress update" | `> 0` — **unused** |
-| `seed` | `int` | `42` | Seed for weight init and sampling | **None — not validated** |
+| `seed` | `int \| None` | `None` | Seed for weight init and sampling. `None` inherits the top-level seed | `>= 0` when set |
 
 `window` is a maximum, not a fixed value: the effective window is redrawn uniformly
 from `[1, window]` per centre token, which weights nearer context more heavily without
@@ -188,8 +188,8 @@ of unrelated meanings. It is also why the trained vocabulary is smaller than
       spend an afternoon turning it. Naming either one now raises `TypeError` at
       construction. (`compute.batch_size` is a different setting on a different section,
       and it is genuinely read.)
-    - **`seed`** is the one `EmbeddingConfig` field with no validation rule, so a
-      negative value is accepted here even though `ExperimentConfig.seed` rejects one.
+    - **`seed`** is validated like every other field, and `None` means "inherit the
+      top-level seed", resolved at construction rather than at use.
 
 ---
 
@@ -215,6 +215,59 @@ When it is absent, `similarity_correlation` and `similarity_coverage` stay `None
 rather than defaulting to zero — a missing benchmark is never reported as a failing
 score. Note that words must match the tokenizer's vocabulary, which for SentencePiece
 means pieces such as `▁cat` rather than `cat`.
+
+---
+
+## `AdaptationConfig`
+
+Read by `qfme adapt` and ignored by everything else. This is the *science* half of an
+adaptation run — what is trained on what, and what the run claims to have measured.
+Everything the machine dictates lives in `compute` and is swapped by `--profile`.
+
+| Field | Type | Default | Meaning | Validation |
+|---|---|---|---|---|
+| `checkpoint` | `str` | `""` | Model name or local directory to adapt | — |
+| `pairs` | `Path \| None` | `None` | Mined pair file to train on | Coerced to `Path` when set |
+| `eval_pairs_file` | `Path \| None` | `None` | Score against this instead of `pairs`, held fixed | Coerced to `Path` when set |
+| `train_pairs` | `int` | `20000` | Pairs to train on | `> 0` |
+| `eval_pairs` | `int` | `2000` | Pairs to score against | `> 0` |
+| `sample_pairs` | `int \| None` | `None` | Pairs drawn from the file *before* filtering. `None` means `train_pairs + eval_pairs` | `> 0` when set |
+| `train_kinds` / `eval_kinds` | `tuple[str, ...]` | `()` | Pair kinds to train on / score on. Empty means every kind | Comma string or list, normalised |
+| `train_languages` / `eval_languages` | `tuple[str, ...]` | `()` | Languages to train on / score on. Empty means every language | Comma string or list, normalised |
+| `adaptation` | `str` | `in-distribution` | What the run claims to measure | One of the six modes below, and checked against the filters |
+| `epochs` | `int` | `1` | Contrastive passes over the training pairs | `> 0` |
+| `learning_rate` | `float` | `0.0001` | AdamW learning rate | `> 0` |
+| `rank` | `int` | `16` | LoRA rank | `> 0` |
+| `alpha` | `int \| None` | `None` | LoRA scaling. `None` means twice the rank | — |
+| `dropout` | `float` | `0.0` | Dropout on the LoRA path | `0.0 – 1.0` |
+| `targets` | `tuple[str, ...]` | `("query", "value")` | Module names LoRA attaches to | Comma string or list, normalised; must be non-empty |
+| `pooling` | `str` | `mean` | How token vectors become one vector | `mean` or `cls` |
+| `max_length` | `int` | `256` | Tokens per input | `> 0` |
+| `query_prefix` / `passage_prefix` | `str` | `""` | Prefixes the checkpoint expects — `"query: "` and `"passage: "` for the E5 family | — |
+| `save_adapter` | `Path \| None` | `None` | Where to write the trained adapter | Coerced to `Path` when set |
+| `report` | `Path \| None` | `None` | Where to write the full comparison as JSON | Coerced to `Path` when set |
+| `seed` | `int \| None` | `None` | Seeds pair sampling and training. `None` inherits the top-level seed | `>= 0` when set |
+
+Three fields are easier to get wrong than they look.
+
+**The prefixes are part of the model, not a convention of the caller.** An E5-family
+checkpoint served without them returns vectors of the right shape and the right norm, free
+of NaN, that encode the wrong thing. Nothing raises; the score is simply lower. They are
+written into `adapter.json` so that serving cannot lose them either.
+
+**`sample_pairs` stops binding when a filter is set.** Its default draws only
+`train_pairs + eval_pairs` from the file, which is right with no filter and wrong with one:
+a kind holding a sixth of the file yields a sixth of the sample, `train_pairs` goes unmet,
+and two runs naming different kinds silently differ in data volume as well as in shape. Set
+it explicitly whenever a kind or language filter is set.
+
+**`adaptation` is declared and then checked.** Each mode names the facets it requires to
+vary, and the check is two-sided: a `domain` run whose train and eval pairs come from the
+same file is refused, and so is a run whose filters vary a facet its label does not mention.
+The check runs before the checkpoint loads, so a mislabelled run costs a second rather than
+an hour of GPU time.
+
+`examples/adaptation.yaml` is a complete, annotated instance of this section.
 
 ---
 

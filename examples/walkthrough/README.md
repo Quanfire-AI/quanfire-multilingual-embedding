@@ -384,6 +384,25 @@ under 201 MB in both cases, because nothing is held in memory that does not have
 This is the step the project exists for, and it needs a GPU:
 
 ```bash
+qfme adapt --config examples/adaptation.yaml --profile configs/gpu.yaml \
+    --set adaptation.pairs=data/pairs/hi.jsonl.gz \
+    --set compute.batch_size=64 \
+    --rank 32 --epochs 2 \
+    --save-adapter models/hi-v1 --output reports/hi-v1.json
+```
+
+It scores the checkpoint first, then trains, then scores again on the same held-out pairs.
+The before/after comparison is the whole point — beating chance proves nothing, and
+fine-tuning a well-pretrained model on a narrow corpus can easily make it worse. The
+command exits non-zero if the adapted model lost, so this is safe to put in a script.
+
+`compute.batch_size` is set explicitly here because `gpu.yaml` raises it to 256 and the
+figures below came from a run at 64. Batch size is the one compute setting that changes the
+result as well as the memory use — it is also the number of in-batch negatives — so a
+comparison has to pin it. The flag-driven command that produced those figures still works
+unchanged:
+
+```bash
 python scripts/adapt_pretrained.py \
     --checkpoint intfloat/multilingual-e5-small \
     --pairs data/pairs/hi.jsonl.gz \
@@ -392,10 +411,6 @@ python scripts/adapt_pretrained.py \
     --sample-pairs 120000 --train-pairs 20000 --eval-pairs 2000 \
     --output reports/hi-v1.json --save-adapter models/hi-v1
 ```
-
-It scores the checkpoint first, then trains, then scores again on the same held-out pairs.
-The before/after comparison is the whole point — beating chance proves nothing, and
-fine-tuning a well-pretrained model on a narrow corpus can easily make it worse.
 
 Measured on an RTX 4070 Ti SUPER, against ~2,000 held-out pairs, training **0.50% of
 parameters**:
@@ -436,10 +451,10 @@ anywhere, adaptation needs CUDA.
 
 **Not shown, because it does not work yet:**
 
-- **The contextual and adapted encoders have no CLI path.** `qfme train` trains the static
-  model only. The transformer is Python-API only, and adaptation goes through
-  `scripts/adapt_pretrained.py` — there is no `qfme adapt`. The three families share the
-  `TextEncoder` contract, not the command line.
+- **A transformer trained from scratch has no CLI path.** `qfme train` trains the static
+  model and `qfme adapt` runs the adaptation experiment shown in step 11, but training the
+  contextual encoder in this repository from nothing is still Python-API only. The three
+  families share the `TextEncoder` contract; two of the three also share the command line.
 - **Cross-lingual retrieval.** A Hindi query does not find English passages. That needs
   aligned training pairs, and nothing here mines them.
 - **Hard negatives.** Contrastive training uses in-batch negatives only.

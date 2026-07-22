@@ -143,15 +143,31 @@ The files in this directory are loaded by the test suite rather than assumed cor
 typo in `gpu.yaml` would otherwise surface only on the training box, which is the machine
 furthest from a debugger.
 
-## What profiles do *not* cover yet
+## Where profiles reach
 
-`--profile` is wired into the config-driven subcommands — `train`, `evaluate` and the
-Python `TrainingPipeline`. `scripts/adapt_pretrained.py`, which is where published
-checkpoints are adapted, takes `--precision`, `--batch-size` and the rest as flags
-directly, because it has no config object to merge a profile into. The defaults there
-(`bf16`, batch 64) are GPU-shaped, so a run on a machine without one needs those flags set
-by hand rather than a profile named. Closing that gap arrives with `qfme adapt`, tracked in
-[`ROADMAP.md`](../ROADMAP.md).
+`--profile` is wired into every config-driven subcommand — `train`, `evaluate`, `adapt` —
+and into the Python `TrainingPipeline` and `AdaptationPipeline`.
+
+Adaptation is the case the split was built for. `AdaptationConfig` holds what decides the
+result — checkpoint, pairs, LoRA rank, learning rate, which facet varies — and
+`ComputeConfig` holds what the box dictates. So one experiment file describes the run on a
+laptop and on the training machine, and the two are comparable:
+
+```bash
+qfme adapt --config experiments/indic.yaml --profile configs/cpu.yaml
+qfme adapt --config experiments/indic.yaml --profile configs/gpu.yaml
+```
+
+One setting leaks across the split, and it is stated rather than hidden: `batch_size` is
+also the number of in-batch negatives, so it changes the result as well as the memory
+footprint. That is why it is recorded in `adapter.json` alongside the scores — a profile
+swap that changes it is a change to the experiment, and the artefact says so.
+
+`scripts/adapt_pretrained.py` is now a thin front end over the same pipeline. It still
+takes `--precision` and `--batch-size` as flags with GPU-shaped defaults (`bf16`, batch
+64), because the command lines that produced the published results were written that way
+and should keep working. Prefer `qfme adapt` for anything new: a config file can be
+committed and diffed, and a flag list cannot.
 
 ## Further reading
 

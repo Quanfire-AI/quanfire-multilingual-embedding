@@ -99,9 +99,10 @@ than fail.
 
 **Adapting a published checkpoint is implemented and proven.** `intfloat/multilingual-e5-small`
 adapted with LoRA on mined Wikipedia pairs gained **+28.6% recall@1 in Hindi and +40.9% in
-Tamil** from a 3.4 MB adapter training 0.50% of parameters. It is driven through
-`scripts/adapt_pretrained.py` and served with `SemanticSearchPipeline.from_adapter`; there
-is no `qfme adapt` subcommand yet.
+Tamil** from a 3.4 MB adapter training 0.50% of parameters. It runs as `qfme adapt` from a
+config file and a compute profile, and is served with `SemanticSearchPipeline.from_adapter`.
+`scripts/adapt_pretrained.py` is a thin front end over the same pipeline, kept so the
+command lines that produced those figures still work.
 
 Note what that does *not* say: the weights are not loaded into this project's transformer.
 That encoder is pre-norm while most published ones are post-norm, and the shapes match, so

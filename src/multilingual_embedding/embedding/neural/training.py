@@ -30,7 +30,7 @@ import math
 from collections.abc import Iterator, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 import torch
 from torch import Tensor, nn
@@ -41,12 +41,48 @@ from multilingual_embedding.core.exceptions import ValidationError
 from multilingual_embedding.core.logging import get_logger
 from multilingual_embedding.utils.validation import require_non_negative, require_positive
 
-from .encoder import NeuralTextEncoder, autocast_for
+from .encoder import autocast_for
 from .gradcache import cached_contrastive_backward
 
-__all__ = ["ContrastiveConfig", "ContrastiveTrainer", "TextPair", "TrainingReport"]
+__all__ = [
+    "ContrastiveConfig",
+    "ContrastiveTrainer",
+    "TextPair",
+    "Trainable",
+    "TrainingReport",
+]
 
 _logger = get_logger(__name__)
+
+
+class Trainable(Protocol):
+    """
+    What this trainer needs from an encoder, and nothing more.
+
+    Two unrelated classes satisfy it: :class:`NeuralTextEncoder`, wrapping
+    a model this project trained from scratch, and
+    :class:`PretrainedTextEncoder`, wrapping a published checkpoint from
+    ``transformers``. Neither inherits from the other and neither should —
+    a pre-norm architecture and a post-norm one have matching tensor
+    shapes, so a shared base class would make cross-loading their weights
+    *succeed* and be silently wrong.
+
+    Naming the requirement structurally instead is what lets one training
+    loop serve both without either knowing about the other. The
+    underscored member is here because it is genuinely part of the
+    contract between an encoder and its trainer, and pretending otherwise
+    by widening the annotation to a union would be less honest, not more.
+    """
+
+    @property
+    def device(self) -> torch.device:
+        """Where the model's tensors live."""
+
+    def train_mode(self) -> nn.Module:
+        """The underlying module, switched into training mode."""
+
+    def _prepare(self, texts: Sequence[str]) -> tuple[Tensor, Tensor]:
+        """Tokenise to input ids and an attention mask, on the encoder's device."""
 
 
 @dataclass(slots=True, frozen=True)
@@ -308,7 +344,7 @@ class ContrastiveTrainer:
 
     def __init__(
         self,
-        encoder: NeuralTextEncoder,
+        encoder: Trainable,
         config: ContrastiveConfig | None = None,
     ) -> None:
         self._encoder = encoder

@@ -181,13 +181,28 @@ known-good; delete it after.
 
 ## Why these are scripts and not `qfme` subcommands
 
-`qfme` covers the corpus-to-static-model path: `stats`, `validate`, `extract`, `mine-pairs`,
-`train`, `search`, `evaluate`. The contextual path has no CLI yet, and `adapt_pretrained.py`
-is the reason — it is where the experiment design lives, and that design was still changing
-weekly while these results were being produced. Freezing it into a subcommand before the
-facet model settled would have meant a CLI contract that had to break.
+`qfme` now covers both trained paths: `stats`, `validate`, `extract`, `mine-pairs`, `train`,
+`adapt`, `search`, `evaluate`.
 
-It has now settled. A `qfme adapt` command wrapping this script is tracked in `ROADMAP.md`
-and is the natural next piece of CLI work.
+`adapt_pretrained.py` used to be the exception, because it was where the experiment design
+lived and that design was still changing weekly while these results were being produced.
+Freezing it into a subcommand before the facet model settled would have meant a CLI contract
+that had to break.
+
+It settled, and the experiment moved into `multilingual_embedding.pipelines.adaptation`.
+This script is now a thin front end over that pipeline — it builds an `ExperimentConfig`
+from its flags and calls `AdaptationPipeline`, so there is one implementation rather than
+two that drift. Every original flag still works, because every command line in `ROADMAP.md`
+was written in this shape and those results should stay reproducible verbatim.
+
+Prefer `qfme adapt` for anything new. It takes a `--config` and a `--profile`, which means
+a GPU run is described by a file that can be committed and diffed rather than by a flag list
+in someone's shell history:
+
+```bash
+qfme adapt --config examples/adaptation.yaml --profile configs/gpu.yaml
+```
+
+Only the from-scratch contextual path is still API-only; it is tracked in `ROADMAP.md`.
 
 `verify_e2e.py` and `diagnose_audit.py` are diagnostics and will never be subcommands.

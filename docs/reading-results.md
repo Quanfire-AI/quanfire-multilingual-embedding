@@ -1,7 +1,6 @@
 # Reading a retrieval report
 
-How to tell a real result from a flattering one, using the reports
-`scripts/adapt_pretrained.py` produces.
+How to tell a real result from a flattering one, using the reports `qfme adapt` produces.
 
 The order below is deliberate. Each step can disqualify the ones after it, so working
 top-down stops you interpreting a number that was never valid.

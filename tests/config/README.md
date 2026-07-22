@@ -2,14 +2,14 @@
 
 > Tests for [`multilingual_embedding.config`](../../src/multilingual_embedding/config/README.md) — typed configuration, loading and compute profiles.
 
-**88 tests.** Run with `pytest tests/config -q`.
+**121 tests.** Run with `pytest tests/config -q`.
 
 ## Files
 
 | File | Covers |
 |---|---|
-| `test_config.py` | Per-section validation, derived directories, dict round trip, deep merge, file loading, environment overrides, `--set` parsing, persistence, seed propagation, nested-section coercion, the loader's error contract |
-| `test_compute_profiles.py` | `ComputeConfig` defaults and validation, `--profile` overlay semantics, error attribution, the profiles committed under `configs/` |
+| `test_config.py` | Per-section validation, derived directories, dict round trip, deep merge, file loading, environment overrides, `--set` parsing, persistence, seed propagation, nested-section coercion, the loader's error contract, and `AdaptationConfig` — name normalisation, the resolved sample size and alpha, and every mode being able to say what it measures |
+| `test_compute_profiles.py` | `ComputeConfig` defaults and validation, `--profile` overlay semantics, error attribution, the profiles committed under `configs/`, and the shipped `examples/adaptation.yaml` |
 
 ## What matters here
 
@@ -96,3 +96,9 @@ profile raises the batch, which is the contrastive quality knob, uses bf16, and 
 gradient caching to afford the larger batch. A profile pair that resolved to the same
 thing would be pure ceremony, and `gpu.yaml` is otherwise only ever exercised on the
 machine furthest from a debugger.
+
+**The shipped example is loaded too.** `examples/adaptation.yaml` is documentation that can
+be run, which makes it documentation that can be wrong. `TestShippedExample` loads it,
+asserts it keeps the E5 prefixes its checkpoint needs — a copied example that dropped them
+would teach the mistake — and runs the same declaration check the CLI runs, so a mode that
+no longer matches its filters fails here rather than on the training box.

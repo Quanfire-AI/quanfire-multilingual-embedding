@@ -345,6 +345,35 @@ base URL.
 - **Exit criterion:** p95 under 100 ms for a short input, and a client switches by
   changing only the base URL.
 
+#### The experiment became a command — 22 July 2026
+
+Every result above was produced by `scripts/adapt_pretrained.py` with flags set by hand.
+That is reproducible only if the shell history survives, and a run described by twenty flags
+cannot be committed, diffed or reviewed.
+
+The experiment now lives in `pipelines/adaptation.py` as `AdaptationPipeline`, with
+`AdaptationConfig` as its schema, and runs as `qfme adapt --config … --profile …`. The
+script is a thin front end over the same pipeline and keeps every flag it had, so the
+command lines that produced the figures above still work verbatim.
+
+Two things fell out of the move rather than being the point of it.
+
+`ContrastiveTrainer` was annotated as taking a `NeuralTextEncoder` and had been handed a
+`PretrainedTextEncoder` for months. The script escaped it because scripts are not
+type-checked; the pipeline did not. The fix is a structural `Trainable` protocol naming the
+three things the trainer actually touches — `device`, `train_mode()`, `_prepare()` — which
+is the same reasoning that keeps the encoder families apart rather than under a base class.
+
+The sampler was reading the leading `count * 4` lines and shuffling those. On a Hindi and
+Tamil pair file concatenated together the window covered the first 168,000 of 642,536 Hindi
+lines and never reached a Tamil pair, so a run set up as joint reported
+`by_language: {"hi": …}` and was read as one. It is now a reservoir over the whole file, and
+`tests/corpus/test_pair_io.py` asserts the tail is reachable.
+
+**What this does not close.** `TrainingPipeline` still has no neural stage, so a transformer
+trained from scratch remains Python-API only. That is the Phase D CLI item that is still
+open.
+
 #### The local path first — done, 22 July 2026
 
 Before an endpoint there has to be something to serve. `SemanticSearchPipeline.from_adapter`
@@ -465,7 +494,7 @@ preparation parallelises across 20 cores.
 | Transformer encoder | **Phase A** |
 | Contrastive training | **Phase B** |
 | Pair mining | **Phase C** |
-| Serving | **Phase D** — local path done (`from_adapter`); endpoint, ONNX, container outstanding |
+| Serving | **Phase D** — local path done (`from_adapter`) and the adaptation experiment is a command (`qfme adapt`); endpoint, ONNX, container and a neural stage in `TrainingPipeline` outstanding |
 | From-scratch pretraining | **Phase E** |
 
 ---

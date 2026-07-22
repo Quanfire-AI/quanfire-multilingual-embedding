@@ -1,6 +1,6 @@
 # tests
 
-> The test suite. 1228 tests, 94% statement coverage, mirroring the source layout.
+> The test suite. 1326 tests, 94% statement coverage, mirroring the source layout.
 
 ## Purpose
 
@@ -45,7 +45,7 @@ behave differently on genuine text.
 
 ```bash
 pytest                      # everything
-pytest -m "not slow"        # skip the model-training integration tests (1175 tests)
+pytest -m "not slow"        # skip the model-training integration tests (1297 tests)
 pytest --cov                # with coverage report
 pytest tests/corpus -q      # one package
 pytest -k segmentation      # by name

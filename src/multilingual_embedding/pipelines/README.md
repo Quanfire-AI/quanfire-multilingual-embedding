@@ -1,13 +1,14 @@
 # pipelines
 
-> Composes the layers below into two end-to-end workflows: training a model from raw text, and serving semantic search over a trained one.
+> Composes the layers below into three end-to-end workflows: training a model from raw text, adapting a published checkpoint to a domain, and serving semantic search over either.
 
 ## Purpose
 
 Every stage of this framework is usable on its own, which means something has to decide
 the order they run in, thread the artefacts between them and record what happened. That
 is all this layer does. `TrainingPipeline` runs corpus to evaluated model;
-`SemanticSearchPipeline` loads what it wrote and answers queries. Keeping orchestration
+`AdaptationPipeline` runs published checkpoint to measured adapter; `SemanticSearchPipeline`
+loads what either wrote and answers queries. Keeping orchestration
 in its own top layer is what stops ordering logic from leaking into the tokenizer or the
 embedding trainer, where it would make either of them unusable outside a full run.
 
@@ -17,6 +18,7 @@ embedding trainer, where it would make either of them unusable outside a full ru
 |---|---|
 | `training.py` | `TrainingPipeline`, the `TrainingResult` record of everything one run produced, and the `train` convenience wrapper. |
 | `search.py` | `SemanticSearchPipeline` over any `TextEncoder`, with its `from_static` / `from_directory` / `from_config` / `from_adapter` constructors, and the `SearchHit` result record. |
+| `adaptation.py` | `AdaptationPipeline`, the three-step score-adapt-score experiment behind `qfme adapt`; `AdaptationResult`; the facet filters `only` / `varying` / `prefixed`; and `check_adaptation`, which refuses a run whose declared mode disagrees with what its filters vary. |
 
 ## Key design decisions
 
@@ -150,13 +152,49 @@ Wiring a contrastive stage into `run` before there was anything to feed it would
 produced a stage with no input.
 
 **That justification has expired.** `corpus/pairs.py` mines pairs, `qfme mine-pairs` fronts
-it, and 1,536,059 pairs have been mined from Hindi and Tamil Wikipedia. What remains is
-plumbing rather than a missing capability — a config schema for the contrastive path, and a
-`qfme adapt` subcommand, both tracked in `ROADMAP.md`. Until they land, the honest statement
-is that an adapted model is trained by calling `scripts/adapt_pretrained.py` and served by
-pointing `from_adapter` at the directory it saved; a from-scratch contextual model is
-trained by driving `ContrastiveTrainer` from the Python API. Neither path goes through
-`TrainingPipeline`, and neither is reachable from the CLI.
+it, and 1,536,059 pairs have been mined from Hindi and Tamil Wikipedia. Half the remaining
+plumbing has now landed: `adaptation.py` makes the adaptation experiment a library object,
+`AdaptationConfig` gives it a schema, and `qfme adapt` runs it from a config file and a
+compute profile. `scripts/adapt_pretrained.py` is a thin front end over the same pipeline,
+kept so that the command lines that produced every result in `ROADMAP.md` still work.
+
+What is still missing is the *from-scratch* contextual path: `TrainingPipeline` trains the
+static model only, and a contextual encoder trained from nothing is still built by driving
+`ContrastiveTrainer` from the Python API. So the honest statement is now narrower — the
+adapted path is a pipeline and a subcommand; the from-scratch contextual path is neither,
+and is tracked in `ROADMAP.md`.
+
+### `adaptation.py` — adapting a published checkpoint
+
+Three steps, and the order is the argument: score the published checkpoint on held-out
+pairs, fine-tune it with LoRA, score it again on the same pairs. The first score is the
+number to beat, and it is the only honest baseline — beating chance, or beating an
+untrained model, proves nothing about whether adaptation was worth doing. If the third step
+does not beat the first, the adaptation did not work, and that is a result rather than a
+failure to hide.
+
+Two things in it are not about machine learning:
+
+**The declaration.** The same three steps answer different questions depending on what is
+held fixed between training and evaluation, so the question is *declared* rather than
+inferred. `adaptation: task` means the pair kinds must differ and everything else must not.
+`check_adaptation` compares the declaration against what the filters actually vary and
+refuses the run when they disagree — in both directions. A facet that should vary and does
+not is one failure; a facet that varies when it should have been held fixed is the more
+dangerous one, because the result cannot then be attributed to either change. The check runs
+before the checkpoint is loaded, so a mistake costs seconds rather than an hour on a GPU.
+
+**The probe.** Sixteen anchors are encoded before training and again after, and the largest
+absolute change is recorded. Without it, an unchanged score is ambiguous between "the
+adaptation did not help" and "the adaptation did not happen", and those two have opposite
+remedies — better pairs, or a larger learning rate.
+
+The science and the machine are split across two config sections. `AdaptationConfig` holds
+what decides the result; `ComputeConfig` holds what the box dictates — device, precision,
+batch size, gradient-cache chunk — and is what `--profile` swaps. That split is why one
+experiment file describes a laptop run and a GPU run and the two are comparable. The one
+leak is stated where it lives: batch size is also the number of in-batch negatives, so it
+does change the result, which is why it is recorded with the artefacts.
 
 ## Usage
 
@@ -240,11 +278,25 @@ roots.
 
 ## Tests
 
-`tests/pipelines/` holds **18 tests**, all on the search pipeline and all on the one
-failure the rest of the suite cannot see: a prefix that never reaches the encoder. They
-assert on the strings the encoder was actually handed rather than on retrieval quality,
-because retrieval quality is precisely the signal that goes quietly wrong.
-`test_search_adapter.py` needs the `neural` extra and skips without it.
+`tests/pipelines/` holds **68 tests**, in two groups.
+
+The search tests are all on the one failure the rest of the suite cannot see: a prefix that
+never reaches the encoder. They assert on the strings the encoder was actually handed rather
+than on retrieval quality, because retrieval quality is precisely the signal that goes
+quietly wrong.
+
+`test_adaptation.py` splits along the same line. The guards — the facet filters, the
+two-sided declaration check, the verdict a result reports — are pure functions and are
+tested without torch. The arithmetic of a run is tested end to end against a two-layer BERT
+built on disk rather than downloaded, so the whole path runs on a laptop with no network:
+the weights move, the held-out set is disjoint from the training set, a fixed evaluation
+file is recorded, the adapter carries its own scores, and the report records the run rather
+than the request. One test asserts the ordering that matters on a GPU box — a wrong
+declaration raises before the checkpoint is loaded, proved by naming a checkpoint that does
+not exist and still getting a `ConfigurationError`.
+
+`test_search_adapter.py` and the end-to-end half of `test_adaptation.py` need the `neural`
+and `pretrained` extras and skip without them.
 
 Both pipelines are additionally covered end to end by
 `tests/integration/test_end_to_end.py`, which trains once against
@@ -253,5 +305,5 @@ Both pipelines are additionally covered end to end by
 covers loading from a directory, indexing and querying.
 
 `.venv/bin/python -m pytest tests/pipelines tests/integration -q` reports
-**47 passed**. The rule that nothing below may import this package is enforced by
+**97 passed**. The rule that nothing below may import this package is enforced by
 `tests/test_architecture.py` (16 tests).

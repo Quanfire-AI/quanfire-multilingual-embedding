@@ -108,7 +108,7 @@ Everything else is reached through its own package, which keeps this module's im
 cost proportional to what a caller actually uses.
 
 `cli.py` is the entry point for the `qfme` console script, declared in `pyproject.toml`
-as `qfme = "multilingual_embedding.cli:main"`. Its seven subcommands:
+as `qfme = "multilingual_embedding.cli:main"`. Its eight subcommands:
 
 | Subcommand | Does |
 |---|---|
@@ -117,12 +117,22 @@ as `qfme = "multilingual_embedding.cli:main"`. Its seven subcommands:
 | `extract` | MediaWiki dump → corpus JSON Lines |
 | `mine-pairs` | corpus → contrastive pairs, three kinds, leakage measured |
 | `train` | tokenizer + static embeddings, then evaluation |
+| `adapt` | published checkpoint + mined pairs → LoRA adapter, scored before and after |
 | `search` | query a trained experiment |
 | `evaluate` | score a trained experiment and write a report |
 
-Adapting a published checkpoint has no subcommand yet; it is driven through
-[`scripts/adapt_pretrained.py`](../../scripts/README.md), which is where the experiment
-design lives.
+Two of these exit non-zero on a *result* rather than on a crash. `validate` fails when the
+corpus is unusable, before a model is trained on it. `adapt` fails when the adapted model
+did not beat the checkpoint it started from — a shell pipeline that chains adaptation into
+a deployment step cannot read a verdict off stdout, and shipping a model that made retrieval
+worse is the failure that prevents.
+
+`adapt` is the subcommand that most needed a `--profile`. Batch size, precision and
+gradient-cache chunk are properties of the box rather than of the experiment, so they live
+in a separate `compute` section and are swapped by a profile file, which is what makes a
+laptop run and a GPU run describable by the same experiment file.
+[`scripts/adapt_pretrained.py`](../../scripts/README.md) is now a thin front end over the
+same pipeline, kept so the command lines that produced the published results still work.
 
 `py.typed` marks the package as typed under PEP 561. Without it, mypy in a downstream
 project silently ignores every annotation this framework provides;

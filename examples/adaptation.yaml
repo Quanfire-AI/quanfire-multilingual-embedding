@@ -1,0 +1,86 @@
+# Adapting a published checkpoint to a domain.
+#
+#     qfme adapt --config examples/adaptation.yaml --profile configs/gpu.yaml
+#
+# Everything here decides the *result*. Nothing here decides how the
+# machine runs it — device, precision, batch size and gradient caching
+# live in a profile, which is why this file is unchanged between a laptop
+# run and a GPU run and the two stay comparable.
+#
+# Point `pairs` at a file written by `qfme mine-pairs` before running it.
+
+name: indic-e5-adaptation
+
+seed: 0
+
+adaptation:
+  # The baseline is this model as published. It is the only honest one:
+  # beating chance, or beating an untrained model, says nothing about
+  # whether adaptation was worth doing.
+  checkpoint: intfloat/multilingual-e5-small
+
+  pairs: verify-output/hi-pairs.jsonl.gz
+
+  # Hold the evaluation set fixed and two runs that train on different
+  # data become comparable. Without it, a run that changes what it trains
+  # on also changes what it is judged by, and the two cannot be
+  # separated. This moved once and two Hindi runs reported baselines of
+  # 0.4238 and 0.4764 for the same checkpoint — a difference in the
+  # measuring stick that looked like a difference in the model.
+  #
+  # eval_pairs_file: verify-output/hi-eval.jsonl.gz
+
+  train_pairs: 20000
+
+  eval_pairs: 2000
+
+  # How many pairs to draw from the file *before* filtering. The default
+  # is train_pairs + eval_pairs, which is right only when no filter is
+  # set: a kind holding a sixth of the file yields a sixth of the sample,
+  # train_pairs quietly stops binding, and two runs naming different
+  # kinds differ in data volume as well as in shape. Set it several times
+  # train_pairs whenever a filter below is non-empty.
+  sample_pairs: 120000
+
+  # What this run claims to measure, checked against what the filters
+  # below actually vary. The check is two-sided and refuses the run
+  # before the model loads. The label outlives the command line — it is
+  # what gets quoted six months later — so it must not be able to be
+  # wrong.
+  #
+  #   in-distribution  nothing varies: how much it helps where it trained
+  #   task             kinds differ:   retrieval, or the mining scheme?
+  #   language         languages differ: does it cross scripts?
+  #   domain           files differ:   does it survive your own text?
+  adaptation: in-distribution
+
+  # Empty means everything. Give a pair of these disjoint values to vary
+  # that facet; leave them equal to hold it fixed.
+  train_kinds: ""
+  eval_kinds: ""
+  train_languages: ""
+  eval_languages: ""
+
+  epochs: 1
+
+  learning_rate: 0.0001
+
+  # 3.4 MB and about 0.5% of the parameters at this rank on a 118M model.
+  # alpha defaults to twice the rank.
+  rank: 16
+  targets: query,value
+
+  # Properties of the checkpoint, not of the experiment. These two matter
+  # more than they look: an E5-family model served without them returns
+  # vectors that are the right shape, the right norm, free of NaN, and
+  # encode the wrong thing. Nothing raises; the score is merely lower.
+  # They are written into adapter.json so serving cannot lose them.
+  pooling: mean
+  max_length: 256
+  query_prefix: "query: "
+  passage_prefix: "passage: "
+
+  # Without this the run produces a measurement rather than a model.
+  save_adapter: artifacts/indic-adapter
+
+  report: artifacts/indic-adaptation.json

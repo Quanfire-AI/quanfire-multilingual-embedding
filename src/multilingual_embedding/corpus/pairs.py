@@ -28,12 +28,17 @@ keep them apart.
 
 from __future__ import annotations
 
+import gzip
 import itertools
+import json
+import random
 import re
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
+from multilingual_embedding.common.constants import DEFAULT_RANDOM_SEED
 from multilingual_embedding.core.exceptions import ValidationError
 from multilingual_embedding.core.logging import get_logger
 from multilingual_embedding.utils.hashing import hash_text
@@ -49,6 +54,7 @@ __all__ = [
     "PairStatistics",
     "iter_pairs",
     "mine_pairs",
+    "sample_pairs",
     "token_overlap",
 ]
 
@@ -137,6 +143,33 @@ class MinedPair:
             "language": self.language,
             "overlap": round(self.overlap, 4),
         }
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, Any]) -> MinedPair:
+        """
+        Rebuild from a JSON Lines record written by :meth:`to_record`.
+
+        Only ``anchor`` and ``positive`` are required. The provenance
+        fields are permitted to be absent so that a hand-written pair
+        file — the natural way to supply an evaluation set for a domain
+        nobody has mined yet — is readable without ceremony. What is
+        absent is absent rather than guessed: ``kind`` and ``document``
+        become empty strings and ``language`` stays ``None``, so a facet
+        filter over them selects nothing rather than selecting wrongly.
+        """
+
+        for name in ("anchor", "positive"):
+            if not str(record.get(name, "")).strip():
+                raise ValidationError(f"pair record has no {name}", record=dict(record))
+
+        return cls(
+            anchor=str(record["anchor"]),
+            positive=str(record["positive"]),
+            kind=str(record.get("kind") or ""),
+            document=str(record.get("document") or ""),
+            language=record.get("language"),
+            overlap=float(record.get("overlap", 0.0)),
+        )
 
 
 @dataclass(slots=True)
@@ -525,3 +558,79 @@ def mine_pairs(
     pairs = list(iter_pairs(documents, config, statistics))
 
     return pairs, statistics
+
+
+def sample_pairs(path: Path, count: int, *, seed: int = DEFAULT_RANDOM_SEED) -> list[MinedPair]:
+    """
+    Draw a uniform sample of ``count`` pairs from a mined pair file.
+
+    Reservoir sampling, in one pass, holding only the sample. Gzip is
+    handled by extension, since a mined pair file for a mid-sized
+    Wikipedia is millions of lines and is normally written compressed.
+
+    **Why not read the first N lines and shuffle those.** That was the
+    original implementation, and it was wrong in a way that produced a
+    plausible result rather than an error. A mined pair file is in corpus
+    order, and two concatenated files are in language order: for a Hindi
+    and Tamil pair set joined together, a window over the first 168,000
+    lines never reached a Tamil pair. The run reported
+    ``by_language: {"hi": ...}`` and was read as a joint experiment.
+
+    Reservoir sampling makes every line equally likely to be chosen. It
+    costs a full read of the file — seconds, against a training run —
+    and it cannot silently exclude whatever happens to sit past an
+    arbitrary cut-off.
+
+    Parameters
+    ----------
+    path:
+        A JSON Lines file of records written by
+        :meth:`MinedPair.to_record`, optionally gzipped.
+
+    count:
+        How many pairs to keep. A file shorter than this yields all of
+        it, and the caller is expected to check the length rather than
+        assume it got what it asked for.
+
+    seed:
+        Seeds both the reservoir and the final shuffle, so two runs
+        naming the same seed sample the same pairs.
+
+    Returns
+    -------
+    The sampled pairs, shuffled.
+    """
+
+    require_positive(count, name="count")
+
+    opener = gzip.open if path.suffix == ".gz" else open
+
+    rng = random.Random(seed)
+
+    reservoir: list[MinedPair] = []
+
+    seen = 0
+
+    with opener(path, "rt", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+
+            seen += 1
+
+            if len(reservoir) < count:
+                reservoir.append(MinedPair.from_record(json.loads(line)))
+
+                continue
+
+            # Each later line replaces a randomly chosen held one with
+            # probability count/seen, which leaves every line equally
+            # represented in the result.
+            index = rng.randrange(seen)
+
+            if index < count:
+                reservoir[index] = MinedPair.from_record(json.loads(line))
+
+    rng.shuffle(reservoir)
+
+    return reservoir

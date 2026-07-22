@@ -383,11 +383,15 @@ different shape does not.
 
 ## What is not here
 
-**No orchestration.** `pipelines/training.py` runs the static model only, and that is
-deliberate rather than an omission: contrastive training consumes pairs, and until
-`corpus/pairs.py` existed there was nothing to feed a stage with. Now that there is, the
-gap is a `qfme adapt` command wrapping `scripts/adapt_pretrained.py` — tracked in
-`ROADMAP.md`, not yet built.
+**No orchestration of the from-scratch path.** `pipelines/training.py` runs the static
+model only, and that is deliberate rather than an omission: contrastive training consumes
+pairs, and until `corpus/pairs.py` existed there was nothing to feed a stage with.
+
+Half of that gap is now closed. Adapting a *published* checkpoint is orchestrated by
+`pipelines/adaptation.py` and reachable as `qfme adapt`, which resolves a config file and a
+compute profile into an experiment and runs it. What is still missing is the from-scratch
+side: training the encoder in this package from nothing means driving `ContrastiveTrainer`
+directly, and a neural stage in `TrainingPipeline` is tracked in `ROADMAP.md`.
 
 **No pair mining.** That lives in [`corpus/pairs.py`](../../corpus/README.md), one layer
 down, because manufacturing pairs is a property of document structure rather than of

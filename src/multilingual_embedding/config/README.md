@@ -10,7 +10,7 @@ A training run has dozens of settings spread across corpus reading, tokenizer tr
 
 | Module | Responsibility |
 |---|---|
-| `base.py` | The config dataclasses — `CorpusConfig`, `TokenizerConfig`, `EmbeddingConfig`, `EvaluationConfig`, `ComputeConfig` and the root `ExperimentConfig` — each validating in `__post_init__`. `ExperimentConfig` also owns the derived artefact directories and `merged`. |
+| `base.py` | The config dataclasses — `CorpusConfig`, `TokenizerConfig`, `EmbeddingConfig`, `EvaluationConfig`, `AdaptationConfig`, `ComputeConfig` and the root `ExperimentConfig` — each validating in `__post_init__`. `ExperimentConfig` also owns the derived artefact directories and `merged`. Also the `ADAPTATIONS` table, which maps an adaptation mode to the facets it requires to vary. |
 | `loader.py` | Resolution from all sources: `load_config`, `save_config`, `config_from_env`, `parse_override`, and the `ENV_PREFIX` constant. |
 
 ## Key design decisions
@@ -50,6 +50,28 @@ There is deliberately no `workers` field. Training is single-process, so nothing
 This is what makes the profile split usable. A GPU profile has to be written, read, diffed and validated on the machine of whoever is editing it, which is rarely the GPU box; CI has no GPU either, and `tests/config/test_compute_profiles.py` loads the shipped profiles as part of the ordinary suite. Validating against availability would make every one of those operations fail on hardware that was never going to run the job — rejecting a file that is entirely correct, for a reason that has nothing to do with the file.
 
 An unavailable device still fails, just later, at the point where the runtime tries to use it and can say precisely what was missing. `precision` is checked the same way against `fp32` and `bf16`, since whether the hardware has native bfloat16 is likewise not a property of the file.
+
+### `AdaptationConfig` makes the experiment declare itself
+
+`AdaptationConfig` is the science half of an adaptation run, and `ComputeConfig` is the machine half — that split is what lets one file describe a laptop run and a GPU run. But the field that earns its place is `adaptation`, which does not configure anything. It states what the run *claims to measure*.
+
+The same three steps — score, adapt, score again — answer different questions depending on what is held fixed between training and evaluation. Training on `adjacent` pairs and scoring on `heading_section` pairs measures whether the model learned retrieval or the mining scheme. Training on Hindi and scoring on Tamil measures whether it crosses scripts. The steps are identical; only the filters differ, and the filters are four unremarkable fields near the bottom of a YAML file.
+
+So `ADAPTATIONS` maps each mode to the facets it requires to vary, and `check_adaptation` compares the declaration against what the filters actually do:
+
+```python
+ADAPTATIONS = {
+    "in-distribution": (),
+    "task": ("kind",),
+    "language": ("language",),
+    "domain": ("corpus",),
+    ...
+}
+```
+
+The check is two-sided and both sides matter. A facet that should vary and does not gives a report labelled as a transfer result that measured nothing of the sort. A facet that varies when it should have been held fixed is worse: the result is real but cannot be attributed to either change, and nothing in the numbers gives a hint. Either one refuses the run before the model is loaded.
+
+The reason this lives in the config rather than in the pipeline is that the label outlives the command line. Six months later there is a JSON report saying `"adaptation": "task"` and no record of the flags that produced it. Making that label unable to be wrong is cheaper than making it verifiable.
 
 ### The precedence chain
 
@@ -172,7 +194,7 @@ It **must not** import from `corpus`, `vocabulary`, `tokenizer`, `embedding`, `e
 
 ## Tests
 
-Tests live in `tests/config/`, 88 in total across two files:
+Tests live in `tests/config/`, 117 in total across two files:
 
 | Class | Tests | Coverage |
 |---|---|---|
@@ -187,6 +209,8 @@ Tests live in `tests/config/`, 88 in total across two files:
 | `TestComputeConfig` | 7 | Laptop-shaped defaults, `cuda` accepted on a machine without CUDA, unknown device and precision rejected, nested-dict coercion, a round trip, and a test asserting every setting is actually read by something. |
 | `TestProfileOverlay` | 4 | A profile overriding only what it names, the merge being deep, explicit overrides still beating the profile, and a broken profile naming itself in the error. |
 | `TestShippedProfiles` | 3 | Both files in `configs/` loading, and the GPU profile actually differing from the CPU one. |
+| `TestAdaptationConfig` | 29 | Comma-separated strings and YAML lists normalising to tuples, an empty filter staying empty rather than becoming a name nothing matches, string paths coerced, the sample size and LoRA alpha resolving from their defaults, every mode able to say what it measures, unknown modes and pooling refused with the supported list, impossible values refused parametrically, and seed inheritance in both directions. |
+| `TestShippedExample` | 4 | `examples/adaptation.yaml` loading, keeping the prefixes its E5 checkpoint needs, declaring a mode its own filters implement, and taking a compute profile without the experiment half moving. |
 
 `TestShippedProfiles` is the reason `device` is validated by shape: it loads `configs/gpu.yaml` on whatever machine runs the suite, none of which need a GPU.
 

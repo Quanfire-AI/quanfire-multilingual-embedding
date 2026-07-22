@@ -2,7 +2,7 @@
 
 > Tests for [`multilingual_embedding.evaluation`](../../src/multilingual_embedding/evaluation/README.md) — metrics, scoring and reports.
 
-**81 tests.** Run with `pytest tests/evaluation -q`.
+**89 tests.** Run with `pytest tests/evaluation -q`.
 
 ## Files
 

@@ -254,3 +254,63 @@ class TestShippedProfiles:
         assert gpu.precision == "bf16"
 
         assert gpu.gradient_checkpoint_chunk > 0
+
+
+class TestShippedExample:
+    """
+    ``examples/adaptation.yaml`` is documentation that can be run, which
+    makes it documentation that can be wrong. It is loaded here so that a
+    renamed field or a mode that no longer exists fails in CI rather than
+    on the training box.
+    """
+
+    EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "adaptation.yaml"
+
+    def test_it_loads(self) -> None:
+        config = load_config(self.EXAMPLE, use_environment=False)
+
+        assert config.adaptation.checkpoint
+
+        assert config.adaptation.pairs is not None
+
+    def test_it_keeps_the_prefixes_the_checkpoint_needs(self) -> None:
+        """
+        It names an E5-family model, and serving one of those without its
+        prefixes returns plausible vectors that encode the wrong thing.
+        An example that dropped them would teach the mistake.
+        """
+
+        adaptation = load_config(self.EXAMPLE, use_environment=False).adaptation
+
+        assert "e5" in adaptation.checkpoint
+
+        assert adaptation.query_prefix == "query: "
+
+        assert adaptation.passage_prefix == "passage: "
+
+    def test_it_declares_an_experiment_its_filters_implement(self) -> None:
+        """The check the CLI runs, run against the shipped example."""
+
+        from multilingual_embedding.pipelines.adaptation import check_adaptation, varying
+
+        adaptation = load_config(self.EXAMPLE, use_environment=False).adaptation
+
+        observed = {
+            facet
+            for facet, left, right in (
+                ("kind", adaptation.train_kinds, adaptation.eval_kinds),
+                ("language", adaptation.train_languages, adaptation.eval_languages),
+            )
+            if varying(left, right)
+        }
+
+        check_adaptation(adaptation.adaptation, observed)
+
+    def test_a_profile_overlays_it_without_touching_the_experiment(self) -> None:
+        """The whole reason the sections are separate."""
+
+        config = load_config(self.EXAMPLE, profile=CONFIGS / "gpu.yaml", use_environment=False)
+
+        assert config.compute.precision == "bf16"
+
+        assert config.adaptation.rank == 16

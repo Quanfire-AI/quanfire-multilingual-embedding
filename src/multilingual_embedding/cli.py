@@ -1,18 +1,22 @@
 """
 Command line interface.
 
-Installed as ``qfme``. Seven subcommands cover the lifecycle::
+Installed as ``qfme``. Eight subcommands cover the lifecycle::
 
     qfme stats    --source data/corpus.jsonl
     qfme validate --source data/corpus.jsonl
     qfme extract  --dump hiwiki.xml.bz2 --output hi.jsonl.gz --language hi
     qfme mine-pairs --source hi.jsonl.gz --output pairs/hi.jsonl.gz
     qfme train    --config experiments/demo.yaml
+    qfme adapt    --config experiments/indic.yaml --profile configs/gpu.yaml
     qfme search   --experiment artifacts/demo --query "machine learning"
     qfme evaluate --experiment artifacts/demo --source data/corpus.jsonl
 
-``validate`` audits a corpus before anything is trained on it and exits
-non-zero when the corpus is unusable, so a data pipeline can gate on it.
+Two of them exit non-zero on a result rather than on an error, so a data
+pipeline can gate on them. ``validate`` audits a corpus before anything
+is trained on it and fails when the corpus is unusable. ``adapt`` fails
+when the adapted model did not beat the checkpoint it started from —
+that is a legitimate outcome and one nothing should deploy.
 
 Every config-driven subcommand accepts ``--set key.path=value`` for ad
 hoc overrides, and ``--profile`` for the settings a machine dictates, so
@@ -20,6 +24,11 @@ one experiment runs unchanged on a laptop and a GPU box:
 
     qfme train --config demo.yaml --set embedding.dimension=256
     qfme train --config demo.yaml --profile configs/gpu.yaml
+
+``adapt`` is the subcommand that most needed this. The batch size,
+precision and gradient-checkpoint chunk that make a run fit on a 16 GB
+card belong to the machine, not to the experiment, and keeping them in a
+profile is what lets the same file describe the run in both places.
 
 Exit codes: ``0`` success, ``1`` a framework error the user can act on,
 ``130`` interrupted. Framework errors are reported as a single readable
@@ -38,7 +47,7 @@ from pathlib import Path
 from typing import Any
 
 from multilingual_embedding.common.version import __version__
-from multilingual_embedding.config.base import CorpusConfig, ExperimentConfig
+from multilingual_embedding.config.base import ADAPTATIONS, CorpusConfig, ExperimentConfig
 from multilingual_embedding.config.loader import load_config, parse_override
 from multilingual_embedding.core.exceptions import MultilingualEmbeddingError
 from multilingual_embedding.core.logging import configure_logging, get_logger
@@ -94,6 +103,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_train_parser(subparsers)
 
+    _add_adapt_parser(subparsers)
+
     _add_search_parser(subparsers)
 
     _add_evaluate_parser(subparsers)
@@ -124,6 +135,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "extract": _run_extract,
         "mine-pairs": _run_mine_pairs,
         "train": _run_train,
+        "adapt": _run_adapt,
         "search": _run_search,
         "evaluate": _run_evaluate,
     }
@@ -332,6 +344,99 @@ def _add_train_parser(subparsers: Any) -> None:
         action="store_true",
         help="Skip evaluation and produce only the trained artefacts",
     )
+
+
+def _add_adapt_parser(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "adapt",
+        help="Adapt a published checkpoint with LoRA, and score whether it helped",
+        description=(
+            "Score a published checkpoint on held-out pairs, fine-tune it with "
+            "LoRA, and score it again on the same pairs. The published model is "
+            "the baseline, because it is the only honest one. Every flag below "
+            "overrides the `adaptation` section of the configuration, so a run "
+            "assembled on the command line can be pinned to a file afterwards "
+            "and reproduced."
+        ),
+    )
+
+    _add_common_config_arguments(parser)
+
+    parser.add_argument("--name", help="Experiment name, recorded with the adapter")
+
+    parser.add_argument("--checkpoint", help="Model name or local directory to adapt")
+
+    parser.add_argument("--pairs", type=Path, help="Mined pair file to train on")
+
+    parser.add_argument(
+        "--eval-pairs-file",
+        type=Path,
+        help=(
+            "Score against this file instead of --pairs. Hold it fixed to "
+            "compare training sets: without it, a run that changes what it "
+            "trains on also changes what it is judged by"
+        ),
+    )
+
+    parser.add_argument("--train-pairs", type=int, help="Pairs to train on")
+
+    parser.add_argument("--eval-pairs", type=int, help="Pairs to score against")
+
+    parser.add_argument(
+        "--sample-pairs",
+        type=int,
+        help=(
+            "Pairs to draw from the file before filtering by kind. Defaults to "
+            "--train-pairs plus --eval-pairs, which is wrong when a kind filter "
+            "is set: a kind holding a sixth of the file yields a sixth of the "
+            "sample, and --train-pairs stops binding"
+        ),
+    )
+
+    parser.add_argument("--train-kinds", help="Comma-separated pair kinds to train on")
+
+    parser.add_argument("--eval-kinds", help="Comma-separated pair kinds to score on")
+
+    parser.add_argument("--train-languages", help="Comma-separated languages to train on")
+
+    parser.add_argument("--eval-languages", help="Comma-separated languages to score on")
+
+    parser.add_argument(
+        "--adaptation",
+        choices=sorted(ADAPTATIONS),
+        help=(
+            "What this run claims to measure. Checked against what the filters "
+            "actually do, and the run is refused if they disagree — the label "
+            "outlives the command line, so it must not be able to be wrong"
+        ),
+    )
+
+    parser.add_argument("--epochs", type=int)
+
+    parser.add_argument("--learning-rate", type=float)
+
+    parser.add_argument("--rank", type=int, help="LoRA rank")
+
+    parser.add_argument("--targets", help="Comma-separated module names LoRA attaches to")
+
+    parser.add_argument("--pooling", choices=["mean", "cls"])
+
+    parser.add_argument("--max-length", type=int)
+
+    parser.add_argument("--query-prefix", help='e.g. "query: " for E5')
+
+    parser.add_argument("--passage-prefix", help='e.g. "passage: " for E5')
+
+    parser.add_argument(
+        "--save-adapter",
+        type=Path,
+        help=(
+            "Directory to write the trained adapter to. Without it the run "
+            "produces a measurement rather than a model"
+        ),
+    )
+
+    parser.add_argument("--output", type=Path, help="Write the full comparison as JSON")
 
 
 def _add_search_parser(subparsers: Any) -> None:
@@ -573,6 +678,83 @@ def _run_train(args: argparse.Namespace) -> int:
     print(json.dumps(result.summary(), indent=2, ensure_ascii=False))
 
     return EXIT_SUCCESS
+
+
+# Flags that override the `adaptation` config section, mapped to the
+# field they set. Kept as data rather than as thirty lines of `if`, so
+# that adding a setting means adding a field and a flag, and the two
+# cannot drift apart in the wiring between them.
+_ADAPT_OVERRIDES = {
+    "checkpoint": "checkpoint",
+    "pairs": "pairs",
+    "eval_pairs_file": "eval_pairs_file",
+    "train_pairs": "train_pairs",
+    "eval_pairs": "eval_pairs",
+    "sample_pairs": "sample_pairs",
+    "train_kinds": "train_kinds",
+    "eval_kinds": "eval_kinds",
+    "train_languages": "train_languages",
+    "eval_languages": "eval_languages",
+    "adaptation": "adaptation",
+    "epochs": "epochs",
+    "learning_rate": "learning_rate",
+    "rank": "rank",
+    "targets": "targets",
+    "pooling": "pooling",
+    "max_length": "max_length",
+    "query_prefix": "query_prefix",
+    "passage_prefix": "passage_prefix",
+    "save_adapter": "save_adapter",
+    "output": "report",
+}
+
+
+def _run_adapt(args: argparse.Namespace) -> int:
+    """Adapt a published checkpoint and report whether it helped."""
+
+    from multilingual_embedding.pipelines.adaptation import AdaptationPipeline
+
+    overrides: dict[str, Any] = {}
+
+    for assignment in args.overrides:
+        _merge(overrides, parse_override(assignment))
+
+    section: dict[str, Any] = {}
+
+    for flag, field_name in _ADAPT_OVERRIDES.items():
+        value = getattr(args, flag, None)
+
+        # `is not None` rather than truthiness, so `--query-prefix ""`
+        # can deliberately clear a prefix the config file set. An empty
+        # prefix on an E5 model is a real choice, and a wrong one made
+        # silently is exactly what save_adapter records prefixes to
+        # prevent.
+        if value is not None:
+            section[field_name] = str(value) if isinstance(value, Path) else value
+
+    if section:
+        _merge(overrides, {"adaptation": section})
+
+    if args.name:
+        _merge(overrides, {"name": args.name})
+
+    config = load_config(args.config, profile=args.profile, overrides=overrides)
+
+    result = AdaptationPipeline(config).run()
+
+    print("\n" + "=" * 68)
+
+    print("DID ADAPTATION HELP?")
+
+    print("=" * 68)
+
+    print(result.summary())
+
+    # Non-zero when the adapter did not beat the checkpoint it started
+    # from. A pipeline that chains adaptation into a deployment step
+    # should stop there rather than ship a model that made things worse,
+    # and reading that off stdout is not something a shell script can do.
+    return EXIT_SUCCESS if result.helped else EXIT_ERROR
 
 
 def _run_search(args: argparse.Namespace) -> int:

@@ -12,7 +12,7 @@ construction and use :meth:`ExperimentConfig.merged` to derive variants.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -33,6 +33,9 @@ from multilingual_embedding.utils.validation import (
 )
 
 __all__ = [
+    "ADAPTATIONS",
+    "ADAPTATION_DESCRIPTIONS",
+    "AdaptationConfig",
     "ComputeConfig",
     "CorpusConfig",
     "EmbeddingConfig",
@@ -466,6 +469,248 @@ _PRECISIONS = frozenset({"fp32", "bf16"})
 
 _DEVICES = frozenset({"auto", "cpu", "cuda", "mps"})
 
+# What each declared experiment requires to vary. Everything not named
+# for a mode must be held fixed, and the check is two-sided: a `task` run
+# whose languages also differ is not a task result, it is two changes at
+# once wearing one name.
+ADAPTATIONS: dict[str, tuple[str, ...]] = {
+    "in-distribution": (),
+    "task": ("kind",),
+    "language": ("language",),
+    "domain": ("corpus",),
+    "task+language": ("kind", "language"),
+    "task+domain": ("kind", "corpus"),
+}
+
+ADAPTATION_DESCRIPTIONS: dict[str, str] = {
+    "in-distribution": "same task, same corpus — how much adaptation helps where it was trained",
+    "task": "same corpus, different task shape — did it learn retrieval or the mining scheme",
+    "language": "same task, different language — does the adaptation cross scripts",
+    "domain": "same task, different corpus — does it survive contact with your own text",
+    "task+language": "task shape and language both change",
+    "task+domain": "task shape and corpus both change",
+}
+
+
+@dataclass(slots=True)
+class AdaptationConfig:
+    """
+    Adapting a published checkpoint to a domain, and measuring whether it helped.
+
+    This is the science half of an adaptation run. Everything the
+    *machine* dictates — device, precision, batch size, gradient
+    caching — lives in :class:`ComputeConfig` and is swapped by
+    ``--profile``, so the same experiment file describes the run on a
+    laptop and on a GPU box and the two are comparable.
+
+    The one exception is stated in :class:`ComputeConfig`: batch size is
+    also the number of in-batch negatives, so it does change the result.
+    It is recorded with the artefacts for that reason.
+
+    Attributes
+    ----------
+    checkpoint:
+        Model name or local directory to adapt. The baseline is this
+        model as published, which is the only honest one — beating
+        chance, or beating an untrained model, says nothing about
+        whether adaptation was worth doing.
+
+    pairs:
+        Mined pair file to train on, as written by ``qfme mine-pairs``.
+
+    eval_pairs_file:
+        Score against this file instead of :attr:`pairs`. Holding it
+        fixed is what lets two runs that train on different data be
+        compared: without it, a run that changes what it trains on also
+        changes what it is judged by, and the two cannot be separated.
+
+    train_pairs, eval_pairs:
+        How many pairs to train on and to score against.
+
+    sample_pairs:
+        How many pairs to draw from the file *before* filtering by kind
+        or language. Defaults to ``train_pairs + eval_pairs``, which is
+        right when no filter is set and wrong when one is: a kind holding
+        a sixth of the file yields a sixth of the sample, ``train_pairs``
+        stops binding, and two runs naming different kinds silently
+        differ in data volume as well as in shape.
+
+    train_kinds, eval_kinds, train_languages, eval_languages:
+        Facet filters. Empty means everything. Give a pair of them
+        disjoint values to vary that facet; leave them equal to hold it
+        fixed.
+
+    adaptation:
+        What the run claims to measure, one of :data:`ADAPTATIONS`.
+        Checked against what the filters actually do, and the run is
+        refused if they disagree. The label outlives the command line —
+        it is what gets quoted six months later — so it must not be able
+        to be wrong.
+
+    epochs, learning_rate:
+        Contrastive training schedule.
+
+    rank, alpha, dropout, targets:
+        The LoRA update. ``alpha`` defaults to twice the rank when left
+        at ``None``, which is the usual convention. Nothing here trains
+        the base weights, so the comparison is between one model and
+        itself plus a small adapter rather than between two models that
+        differ in unknown ways.
+
+    pooling, max_length, query_prefix, passage_prefix:
+        Properties of the checkpoint rather than of the experiment. The
+        prefixes matter more than they look: an E5-family model served
+        without ``"query: "`` and ``"passage: "`` returns vectors that
+        are the right shape, the right norm, free of NaN, and encode the
+        wrong thing. Nothing raises; the score is simply lower.
+
+    save_adapter:
+        Directory to write the trained adapter to. Without it the run
+        produces a measurement rather than a model.
+
+    report:
+        Where to write the full before/after comparison as JSON.
+
+    seed:
+        Seeds pair sampling and training. ``None`` inherits
+        :attr:`ExperimentConfig.seed`.
+    """
+
+    checkpoint: str = ""
+
+    pairs: Path | None = None
+
+    eval_pairs_file: Path | None = None
+
+    train_pairs: int = 20_000
+
+    eval_pairs: int = 2_000
+
+    sample_pairs: int | None = None
+
+    train_kinds: tuple[str, ...] = ()
+
+    eval_kinds: tuple[str, ...] = ()
+
+    train_languages: tuple[str, ...] = ()
+
+    eval_languages: tuple[str, ...] = ()
+
+    adaptation: str = "in-distribution"
+
+    epochs: int = 1
+
+    learning_rate: float = 1e-4
+
+    rank: int = 16
+
+    alpha: int | None = None
+
+    dropout: float = 0.0
+
+    targets: tuple[str, ...] = ("query", "value")
+
+    pooling: str = "mean"
+
+    max_length: int = 256
+
+    query_prefix: str = ""
+
+    passage_prefix: str = ""
+
+    save_adapter: Path | None = None
+
+    report: Path | None = None
+
+    seed: int | None = None
+
+    def __post_init__(self) -> None:
+        # See CorpusConfig.__post_init__: YAML supplies paths as strings.
+        for name in ("pairs", "eval_pairs_file", "save_adapter", "report"):
+            value = getattr(self, name)
+
+            if value is not None:
+                setattr(self, name, Path(value))
+
+        # YAML has no tuple, and a comma-separated string is what the CLI
+        # hands over. Both are normalised here so that everything
+        # downstream sees a tuple and no caller has to guess.
+        for name in ("train_kinds", "eval_kinds", "train_languages", "eval_languages", "targets"):
+            setattr(self, name, _as_names(getattr(self, name)))
+
+        require_positive(self.train_pairs, name="train_pairs")
+
+        require_positive(self.eval_pairs, name="eval_pairs")
+
+        require_positive(self.epochs, name="epochs")
+
+        require_positive(self.learning_rate, name="learning_rate")
+
+        require_positive(self.rank, name="rank")
+
+        require_positive(self.max_length, name="max_length")
+
+        require_in_range(self.dropout, name="dropout", minimum=0.0, maximum=1.0)
+
+        if self.sample_pairs is not None:
+            require_positive(self.sample_pairs, name="sample_pairs")
+
+        if self.seed is not None:
+            require_non_negative(self.seed, name="seed")
+
+        if self.alpha is not None:
+            require_positive(self.alpha, name="alpha")
+
+        if self.adaptation not in ADAPTATIONS:
+            raise ConfigurationError(
+                "Unknown adaptation mode",
+                adaptation=self.adaptation,
+                supported=sorted(ADAPTATIONS),
+            )
+
+        if self.pooling not in {"mean", "cls"}:
+            raise ConfigurationError(
+                "Unsupported pooling",
+                pooling=self.pooling,
+                supported=["mean", "cls"],
+            )
+
+        if not self.targets:
+            raise ConfigurationError(
+                "LoRA must attach to at least one module",
+                targets=list(self.targets),
+            )
+
+    @property
+    def measures(self) -> str:
+        """One line saying what this run's declared mode actually answers."""
+
+        return ADAPTATION_DESCRIPTIONS[self.adaptation]
+
+    @property
+    def sampled(self) -> int:
+        """Pairs to draw before filtering, with the default resolved."""
+
+        return self.sample_pairs or (self.train_pairs + self.eval_pairs)
+
+    @property
+    def resolved_alpha(self) -> int:
+        """The LoRA numerator, with the twice-the-rank convention applied."""
+
+        return self.alpha if self.alpha is not None else 2 * self.rank
+
+
+def _as_names(value: object) -> tuple[str, ...]:
+    """Normalise a comma-separated string or any sequence into a tuple of names."""
+
+    if isinstance(value, str):
+        return tuple(name.strip() for name in value.split(",") if name.strip())
+
+    if isinstance(value, Sequence):
+        return tuple(str(name).strip() for name in value if str(name).strip())
+
+    raise ConfigurationError("Expected a comma-separated string or a list", value=repr(value))
+
 
 @dataclass(slots=True)
 class ExperimentConfig:
@@ -488,6 +733,12 @@ class ExperimentConfig:
     corpus, tokenizer, embedding, evaluation:
         Per stage configuration.
 
+    adaptation:
+        Adapting a published checkpoint. Read only by ``qfme adapt``;
+        the from-scratch training pipeline ignores it, and a config
+        that omits the section gets defaults rather than an error, so
+        one experiment file can carry both paths.
+
     compute:
         Machine-shaped settings. The section a profile swaps, and
         the only one expected to differ between a laptop and a
@@ -507,6 +758,8 @@ class ExperimentConfig:
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
 
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
+
+    adaptation: AdaptationConfig = field(default_factory=AdaptationConfig)
 
     compute: ComputeConfig = field(default_factory=ComputeConfig)
 
@@ -529,6 +782,8 @@ class ExperimentConfig:
 
         self.evaluation = _coerced_section(self.evaluation, EvaluationConfig, name="evaluation")
 
+        self.adaptation = _coerced_section(self.adaptation, AdaptationConfig, name="adaptation")
+
         self.compute = _coerced_section(self.compute, ComputeConfig, name="compute")
 
         require_non_negative(self.seed, name="seed")
@@ -542,6 +797,9 @@ class ExperimentConfig:
         # record of anything.
         if self.embedding.seed is None:
             self.embedding.seed = self.seed
+
+        if self.adaptation.seed is None:
+            self.adaptation.seed = self.seed
 
     @property
     def experiment_directory(self) -> Path:
@@ -593,15 +851,15 @@ class ExperimentConfig:
 
         base = self.to_dict()
 
-        embedding = base["embedding"]
-
-        # An embedding seed equal to the experiment seed carries no
-        # intent of its own: either it was inherited, or it was set to
-        # the same number, in which case moving them together is still
-        # what the caller asked for. Reset it to the inherit marker so
+        # A stage seed equal to the experiment seed carries no intent of
+        # its own: either it was inherited, or it was set to the same
+        # number, in which case moving them together is still what the
+        # caller asked for. Reset it to the inherit marker so
         # __post_init__ re-derives it from the incoming seed.
-        if "seed" in overrides and embedding.get("seed") == base["seed"]:
-            embedding["seed"] = None
+        if "seed" in overrides:
+            for section in ("embedding", "adaptation"):
+                if base[section].get("seed") == base["seed"]:
+                    base[section]["seed"] = None
 
         return ExperimentConfig.from_dict(_deep_merge(base, overrides))
 
