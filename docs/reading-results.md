@@ -159,6 +159,11 @@ Every result so far carries these, and they belong in any claim made from it:
   not generalisation to another task or corpus.
 - **Absolute levels on the hardest slice are low.** Tamil low-overlap retrieval more than
   doubled and is still 0.1868.
+- **The gain does not survive a change of query shape**, and this one is measured rather
+  than assumed. Training on `adjacent` and scoring on `heading_section` captured −17% of
+  the gain that training on `heading_section` achieved; training on Hindi and scoring on
+  Tamil captured 95%. An `in-distribution` number therefore transfers across languages and
+  not across task shapes. Attach "on the task it was trained for" whenever one is quoted.
 
 A relative gain on a weak absolute base is still a real gain. It is not the same as a
 solved problem, and the difference is worth stating before someone else does.
@@ -185,3 +190,9 @@ recall@1  0.3219 -> 0.4535   (+40.9%)
 **Conclusion:** adaptation improved Tamil retrieval by 40.9% on held-out in-domain pairs,
 with gains concentrated where lexical matching cannot help. Not: "our model is 40% better
 than E5."
+
+And not "40% better at retrieval" either. That run was `in-distribution` — trained and
+scored on the same mixture of pair kinds — and the `task` experiments since have shown a
+number like this does not carry to a query shape absent from training. It does carry to
+other languages. The full claim is *"40.9% better at the task it was trained for, in any
+of our languages."*

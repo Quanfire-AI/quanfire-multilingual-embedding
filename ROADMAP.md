@@ -225,6 +225,63 @@ It is also a caution on the framing. "Domain adaptation" has been the story thro
 this suggests a substantial part is *task* adaptation, and the two would need separating
 before the distinction is claimed in either direction.
 
+#### Task or language — separated, 22 July 2026
+
+The caution above was right. Four runs settle it, each varying exactly one facet with
+everything else held fixed, matched training volumes, and an evaluation set pinned by
+`--eval-pairs-file` so both arms of each pair scored an identical baseline.
+
+| varied | held fixed | achievable gain captured |
+|---|---|---:|
+| **task shape** — `adjacent` → `heading_section` | language, corpus | **−17%** |
+| **language** — Hindi → Tamil | task shape, corpus | **+95%** |
+
+*Task axis*, scored on Tamil and Hindi `heading_section`, 1,927 queries, baseline 489:
+
+| trained on | recall@1 | |
+|---|---:|---|
+| `heading_section` (20k) | 684/1927 | +39.9%, intervals disjoint |
+| `adjacent` (20k) | 455/1927 | −7.0%, no gain |
+
+*Language axis*, scored on Tamil `heading_section`, 1,272 queries, baseline 253:
+
+| trained on | recall@1 | |
+|---|---:|---|
+| Tamil (15k) | 388/1272 | +53.4% |
+| Hindi (15k) | 381/1272 | +50.6% |
+
+Seven queries apart out of 1,272, with intervals almost entirely overlapping. The mid
+overlap band is identical at 35/290.
+
+**The adaptation is language-general and task-specific**, which is the reverse of the
+intuitive assumption and the reverse of how this work was framed for months. Two
+consequences:
+
+- **Pairs transfer across languages.** Mine wherever the text is cleanest and most
+  abundant; the other languages get almost all of the benefit. The twenty scheduled
+  languages do not each need a corpus.
+- **Pairs do not transfer across query shapes.** Every shape to be served must be present
+  in the training mixture. This is where the collection cost actually sits.
+
+The second point is narrower than the −17% suggests. Training on all three kinds at once
+(`indic-v1`, 40,000 pairs) reached 178/458 on `heading_section` against a 129/458 baseline
+— +38.0%, recovering essentially the whole dedicated-training gain, while also delivering
++40.8% on `adjacent` from the same adapter. **A mixture containing the shape works; a
+single different shape does not.** So the requirement is to mine several shapes, not to
+predict which one users will type.
+
+One qualification worth carrying. The languages tie at recall@1 but not deeper: in-language
+training puts the answer in the top ten 797 times against 733, and leads on nDCG@10 (0.4473
+against 0.4222). Where a reranker consumes the top ten rather than the top hit, in-language
+data still buys something real.
+
+This supersedes the 80%/87% figures above, which compared specialists against joint
+training and so varied training composition as well as language. They pointed the same way;
+these are the controlled version.
+
+Still Wikipedia on both sides of every comparison, so the *corpus* axis remains untested —
+`--adaptation domain` exists for it and needs a non-Wikipedia pair file to run.
+
 ### Phase C — Pair mining from unlabelled text
 
 **The phase that makes domain-specific models possible**, and the one most likely to be
