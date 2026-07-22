@@ -1,6 +1,6 @@
 # tests
 
-> The test suite. 1103 tests, 94% statement coverage, mirroring the source layout.
+> The test suite. 1204 tests, 94% statement coverage, mirroring the source layout.
 
 ## Purpose
 
@@ -32,6 +32,7 @@ failure appears:
 | [`tokenizer/`](tokenizer/README.md) | 187 | Normalizers, pre-tokenizers, encoding, training, round trips |
 | [`embedding/`](embedding/README.md) | 148 | Matrix, word2vec, sentence encoders, index, contextual encoder, LoRA, gradient caching |
 | [`evaluation/`](evaluation/README.md) | 67 | Metric primitives, evaluators, report rendering |
+| [`pipelines/`](pipelines/README.md) | 18 | Query/passage prefixes, batched indexing, building a pipeline from a saved adapter |
 | [`integration/`](integration/README.md) | 29 | End-to-end training, search and CLI |
 | `test_architecture.py` | 16 | Layering rule, acyclic import graph, `py.typed` marker, encoder contract |
 
@@ -44,7 +45,7 @@ behave differently on genuine text.
 
 ```bash
 pytest                      # everything
-pytest -m "not slow"        # skip the model-training integration tests (1040 tests)
+pytest -m "not slow"        # skip the model-training integration tests (1175 tests)
 pytest --cov                # with coverage report
 pytest tests/corpus -q      # one package
 pytest -k segmentation      # by name
@@ -84,10 +85,11 @@ Nothing reaches the network. Model-training tests use deliberately small dimensi
 few epochs.
 
 **Optional dependencies skip rather than fail.** The contextual-encoder tests in
-`embedding/` require torch, which lives behind the `neural` extra. They use
-`pytest.importorskip`, so a checkout with only the core dependencies installed still
-runs green — it simply runs fewer tests. The counts in the table above are for a full
-install; without the extra, `embedding/` collects fewer.
+`embedding/` and the adapter test in `pipelines/` require torch, which lives behind the
+`neural` extra. They use `pytest.importorskip`, so a checkout with only the core
+dependencies installed still runs green — it simply runs fewer tests. The counts in the
+table above are for a full install; without the extra, those two directories collect
+fewer.
 
 ## Adding tests
 

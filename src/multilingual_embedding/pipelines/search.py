@@ -8,7 +8,19 @@ The pipeline depends on the
 :class:`~multilingual_embedding.embedding.encoder.TextEncoder` contract
 rather than on an embedding matrix, so it serves static and contextual
 models alike. :meth:`SemanticSearchPipeline.from_directory` builds the
-static path from a trained experiment directory.
+static path from a trained experiment directory;
+:meth:`SemanticSearchPipeline.from_adapter` builds the adapted
+contextual one from a saved LoRA adapter.
+
+**Queries and passages are not encoded identically, and the pipeline is
+where that asymmetry lives.** An E5-family model is trained with
+``query:`` on one side and ``passage:`` on the other, and served without
+them it still returns vectors — just worse ones, with nothing saying so.
+The encoder cannot apply them, because ``encode`` takes text and has no
+idea which side it is on. Only the caller of :meth:`index` versus
+:meth:`search` knows, and that caller is this class. So the prefixes are
+held here and applied automatically, rather than documented and left to
+be remembered.
 
 This is the inference counterpart to
 :mod:`multilingual_embedding.pipelines.training`. It deliberately loads
@@ -97,6 +109,13 @@ class SemanticSearchPipeline:
         separable one. ``None`` for a contextual model, whose tokenizer
         is internal to it.
 
+    query_prefix, passage_prefix:
+        Markers the model was trained to expect on each side, prepended
+        by :meth:`search` and :meth:`index` respectively. Empty for a
+        symmetric model, which is every static one. Prefer
+        :meth:`from_adapter`, which reads them from the artefact instead
+        of asking the caller to know them.
+
     Example
     -------
     ::
@@ -109,7 +128,15 @@ class SemanticSearchPipeline:
             print(hit.rank, round(hit.score, 3), hit.text)
     """
 
-    __slots__ = ("_encoder", "_index", "_matrix", "_texts", "_tokenizer")
+    __slots__ = (
+        "_encoder",
+        "_index",
+        "_matrix",
+        "_passage_prefix",
+        "_query_prefix",
+        "_texts",
+        "_tokenizer",
+    )
 
     def __init__(
         self,
@@ -117,12 +144,18 @@ class SemanticSearchPipeline:
         *,
         matrix: EmbeddingMatrix | None = None,
         tokenizer: SentencePieceTokenizer | None = None,
+        query_prefix: str = "",
+        passage_prefix: str = "",
     ) -> None:
         self._encoder = encoder
 
         self._matrix = matrix
 
         self._tokenizer = tokenizer
+
+        self._query_prefix = query_prefix
+
+        self._passage_prefix = passage_prefix
 
         self._index: SimilarityIndex | None = None
 
@@ -208,6 +241,87 @@ class SemanticSearchPipeline:
 
         return cls.from_directory(config.experiment_directory)
 
+    @classmethod
+    def from_adapter(
+        cls,
+        directory: str | Path,
+        *,
+        device: str | None = None,
+        local_files_only: bool = False,
+    ) -> SemanticSearchPipeline:
+        """
+        Build a pipeline over a saved LoRA adapter.
+
+        This is what turns an adaptation run's output into something that
+        answers queries. The base checkpoint named in the adapter's
+        metadata is loaded, the low-rank update is applied on top, and
+        **the recorded prefixes are carried into the pipeline** — which
+        is the whole reason this factory exists rather than leaving
+        callers to write ``cls(load_adapter(...)[0])``. That spelling
+        loads the right weights and then uses them wrongly, silently.
+
+        There is no matrix and no separable tokenizer, so
+        :meth:`similar_tokens` returns nothing here. A contextual model
+        has no per-token table to be similar in.
+
+        Parameters
+        ----------
+        directory:
+            An adapter directory as :func:`save_adapter` writes it.
+
+        device:
+            Where to run, e.g. ``"cuda"`` or ``"cpu"``. ``None`` picks
+            the best available.
+
+        local_files_only:
+            Refuse to fetch the base checkpoint from the network. Worth
+            setting whenever a served model must not change underneath
+            you because an upstream repository moved.
+
+        Raises
+        ------
+        ImportError
+            If the neural extra is not installed. A contextual encoder
+            needs torch; the static paths above do not, and that is why
+            the import is here rather than at module scope.
+
+        Example
+        -------
+        ::
+
+            pipeline = SemanticSearchPipeline.from_adapter("models/indic-v1")
+
+            pipeline.index(passages)
+
+            pipeline.search("संविधान में मौलिक अधिकार")
+        """
+
+        # Imported lazily: torch is an optional extra, and importing it
+        # at module scope would make the static search path — which
+        # needs none of it — uninstallable without a training stack.
+        from multilingual_embedding.embedding.neural.adapter import load_adapter
+
+        encoder, metadata = load_adapter(
+            directory,
+            device=device,
+            local_files_only=local_files_only,
+        )
+
+        _logger.info(
+            "Loaded adapted search pipeline",
+            extra={
+                "directory": str(directory),
+                "base": metadata.checkpoint,
+                "asymmetric": bool(metadata.query_prefix or metadata.passage_prefix),
+            },
+        )
+
+        return cls(
+            encoder,
+            query_prefix=metadata.query_prefix,
+            passage_prefix=metadata.passage_prefix,
+        )
+
     @property
     def encoder(self) -> TextEncoder:
         """The encoder queries and documents are embedded with."""
@@ -239,6 +353,20 @@ class SemanticSearchPipeline:
         return self._matrix
 
     @property
+    def prefixes(self) -> tuple[str, str]:
+        """
+        The query and passage markers, in that order.
+
+        Exposed so a serving layer can report what it is applying.
+        ``("", "")`` means the model is symmetric, which is not the same
+        as the prefixes having been forgotten — and the difference is
+        invisible in the vectors, which is why it is worth being able to
+        read off a running service.
+        """
+
+        return self._query_prefix, self._passage_prefix
+
+    @property
     def indexed_count(self) -> int:
         """Number of sentences currently indexed."""
 
@@ -252,24 +380,36 @@ class SemanticSearchPipeline:
         vector — because every token was out of vocabulary — are skipped,
         since they would otherwise match every query equally poorly and
         pollute the results.
+
+        The passage prefix is applied here and nowhere else, and the
+        stored text is the sentence as given: a result should return what
+        the caller indexed, not the marker the model needed to see.
+
+        Encoding goes through ``encode_batch`` in one call rather than
+        ``encode`` per sentence. For a transformer that is the difference
+        between one padded batch per forward pass and one sentence per
+        forward pass — roughly the difference between indexing a corpus
+        and waiting for it.
+
+        It also matters for
+        :class:`~multilingual_embedding.embedding.sentence.SifEncoder`,
+        whose common component is estimated from a batch and reused by
+        ``encode``. Indexing one sentence at a time never gave it a batch
+        to estimate from, so the component was never removed and SIF
+        quietly degraded to a weighted average. Corpus in :meth:`index`,
+        query in :meth:`search`, is the shape that encoder was written
+        for.
         """
 
-        texts: list[str] = []
+        given = [sentence for sentence in sentences if sentence.strip()]
 
-        vectors: list[NDArray[np.float32]] = []
+        encoded = self._encoder.encode_batch([self._passage_prefix + text for text in given])
 
-        for sentence in sentences:
-            if not sentence.strip():
-                continue
+        keep = [index for index, vector in enumerate(encoded) if np.any(vector)]
 
-            vector = self._encoder.encode(sentence)
+        texts = [given[index] for index in keep]
 
-            if not np.any(vector):
-                continue
-
-            texts.append(sentence)
-
-            vectors.append(vector)
+        vectors: list[NDArray[np.float32]] = [encoded[index] for index in keep]
 
         self._texts = texts
 
@@ -297,7 +437,7 @@ class SemanticSearchPipeline:
         if self._index is None or not self._texts:
             return []
 
-        vector = self._encoder.encode(query)
+        vector = self._encoder.encode(self._query_prefix + query)
 
         if not np.any(vector):
             _logger.debug("Query encoded to a zero vector", extra={"query": query})
@@ -325,7 +465,16 @@ class SemanticSearchPipeline:
         return self._matrix.most_similar(token, top_k)
 
     def __repr__(self) -> str:
+        # The prefixes appear only when set, so a static pipeline reads
+        # as it always did, and an asymmetric one cannot be mistaken for
+        # a symmetric one at a glance.
+        markers = (
+            f", query_prefix={self._query_prefix!r}, passage_prefix={self._passage_prefix!r}"
+            if self._query_prefix or self._passage_prefix
+            else ""
+        )
+
         return (
             f"SemanticSearchPipeline(indexed={self.indexed_count}, "
-            f"dimension={self._encoder.dimension})"
+            f"dimension={self._encoder.dimension}{markers})"
         )

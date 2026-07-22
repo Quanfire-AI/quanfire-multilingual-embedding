@@ -314,6 +314,40 @@ base URL.
 - **Exit criterion:** p95 under 100 ms for a short input, and a client switches by
   changing only the base URL.
 
+#### The local path first — done, 22 July 2026
+
+Before an endpoint there has to be something to serve. `SemanticSearchPipeline.from_adapter`
+loads a saved adapter, and `models/indic-v1` now answers queries rather than sitting on
+disk as 3.4 MB of proven numbers.
+
+The part worth recording is what the factory exists to prevent. `SemanticSearchPipeline`
+already accepted any `TextEncoder`, so `cls(load_adapter(directory)[0])` would have
+"worked" — loaded the right weights and then used them wrongly. An E5-family model is
+trained with `query:` on one side and `passage:` on the other; served without them it
+returns vectors of the right shape and norm, free of NaN, that encode the wrong thing.
+Nothing raises. The score is simply lower, which is indistinguishable from the model not
+being very good — and after the last two months of work, a quietly wrong retrieval number
+is the most expensive defect this repository could ship.
+
+So the prefixes are now the pipeline's, applied by `index` and `search` on their
+respective sides, read out of the artefact by `from_adapter`, and readable back off a
+`prefixes` property. `save_adapter` had been recording them since the start; nothing was
+using them.
+
+Two things came out of it that were not the goal:
+
+- `index` now encodes the corpus in one `encode_batch` call rather than one `encode` per
+  sentence. For a transformer that is the difference between indexing a corpus and waiting
+  for it.
+- That change fixed a silent bug in `SifEncoder`, whose common component is estimated from
+  a batch and reused by `encode`. Indexing one sentence at a time never supplied a batch,
+  so the component was never fitted and SIF had been degrading to a plain weighted average
+  — with the right shapes and plausible results throughout. There is a regression test on
+  it now.
+
+Not done, and still the bulk of the phase: the HTTP endpoint, model versioning, dimension
+truncation, ONNX export, the container image, auth and rate limiting.
+
 ### Phase E — From-scratch pretraining *(capability, not default)*
 
 Masked-language pretraining followed by contrastive training, producing a model owned end
@@ -400,7 +434,7 @@ preparation parallelises across 20 cores.
 | Transformer encoder | **Phase A** |
 | Contrastive training | **Phase B** |
 | Pair mining | **Phase C** |
-| Serving | **Phase D** |
+| Serving | **Phase D** — local path done (`from_adapter`); endpoint, ONNX, container outstanding |
 | From-scratch pretraining | **Phase E** |
 
 ---

@@ -16,7 +16,7 @@ embedding trainer, where it would make either of them unusable outside a full ru
 | Module | Responsibility |
 |---|---|
 | `training.py` | `TrainingPipeline`, the `TrainingResult` record of everything one run produced, and the `train` convenience wrapper. |
-| `search.py` | `SemanticSearchPipeline` over any `TextEncoder`, with its `from_static` / `from_directory` / `from_config` constructors, and the `SearchHit` result record. |
+| `search.py` | `SemanticSearchPipeline` over any `TextEncoder`, with its `from_static` / `from_directory` / `from_config` / `from_adapter` constructors, and the `SearchHit` result record. |
 
 ## Key design decisions
 
@@ -83,6 +83,36 @@ subdirectories is missing, rather than failing later on a partial load. It build
 path specifically; a contextual encoder is loaded with `NeuralTextEncoder.load` and passed
 to the constructor directly.
 
+**`from_adapter` loads an adaptation run's output into a working search path.** An
+adaptation run that reports a 39% improvement and writes 3.4 MB to disk has produced an
+artefact nothing can query. This constructor closes that gap: it calls `load_adapter`,
+which names the frozen base checkpoint, rebuilds it, applies the low-rank update, and
+returns the encoder alongside its metadata. The torch import is inside the method rather
+than at module scope, because the neural stack is an optional extra and the static search
+path must stay installable without it.
+
+**The query and passage prefixes live on the pipeline, because nothing else knows which
+side it is on.** An E5-family model is trained with `query:` on one side and `passage:` on
+the other, and served without them it returns vectors that are the right shape, the right
+norm, free of NaN, and encode the wrong thing. Nothing raises; the score is simply lower,
+which is indistinguishable from the model not being very good. The encoder cannot apply
+them — `encode` receives text and has no idea whether it is a query — and the caller
+should not have to, since the requirement is a property of the checkpoint rather than of
+the application. What does know is `index` versus `search`, which is why the two prefixes
+are constructor arguments, applied automatically on their respective sides, and readable
+back off the `prefixes` property. `from_adapter` reads them out of the artefact, so the
+information `save_adapter` recorded specifically to prevent this failure is actually used.
+The stored text is the sentence as given, so a hit returns what was indexed rather than
+what the model had to see. `repr` shows the prefixes only when set, so a symmetric model
+and a forgotten prefix do not look alike.
+
+**`index` encodes the corpus as one batch.** For a transformer this is the difference
+between one padded batch per forward pass and one sentence per forward pass. It also
+matters for `SifEncoder`, whose common component is estimated from a batch and reused by
+`encode`: indexing one sentence at a time never gave it a batch to estimate from, so the
+component was never removed and SIF quietly degraded to a weighted average. Corpus in
+`index`, query in `search`, is the shape that encoder documents.
+
 **Zero vectors are skipped rather than indexed.** `index` drops any sentence that encodes
 to an all-zero vector — every token out of vocabulary — because such a vector matches
 every query equally poorly and pollutes results. It passes `dimension` explicitly to
@@ -112,7 +142,8 @@ exist for the domains this is aimed at, so they have to be manufactured from doc
 structure. Wiring a contrastive stage into `run` before there is anything to feed it would
 produce a stage with no input. `ROADMAP.md` covers the mining work and the `qfme` command
 that will front it; the honest statement until then is that a contextual model is trained by
-calling the trainer, and served by handing the result to `SemanticSearchPipeline`.
+calling `scripts/adapt_pretrained.py`, and served by pointing `from_adapter` at the
+directory it saved.
 
 ## Usage
 
@@ -196,12 +227,18 @@ roots.
 
 ## Tests
 
-There is no `tests/pipelines/` directory. Both pipelines are covered end to end by
+`tests/pipelines/` holds **18 tests**, all on the search pipeline and all on the one
+failure the rest of the suite cannot see: a prefix that never reaches the encoder. They
+assert on the strings the encoder was actually handed rather than on retrieval quality,
+because retrieval quality is precisely the signal that goes quietly wrong.
+`test_search_adapter.py` needs the `neural` extra and skips without it.
+
+Both pipelines are additionally covered end to end by
 `tests/integration/test_end_to_end.py`, which trains once against
 `data/sample/corpus.jsonl` and shares the result across its assertions —
 `TestTrainingPipeline` covers the training stages and artefacts, `TestSearchPipeline`
 covers loading from a directory, indexing and querying.
 
-`.venv/bin/python -m pytest tests/integration/test_end_to_end.py -q` reports
-**29 passed**. The rule that nothing below may import this package is enforced by
+`.venv/bin/python -m pytest tests/pipelines tests/integration -q` reports
+**47 passed**. The rule that nothing below may import this package is enforced by
 `tests/test_architecture.py` (16 tests).
