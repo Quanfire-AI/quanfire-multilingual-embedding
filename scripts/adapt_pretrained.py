@@ -18,12 +18,45 @@ Nothing here trains the base weights. LoRA leaves them frozen, so the
 comparison is between one model and itself plus a small adapter, rather
 than between two models that differ in unknown ways.
 
+**Which experiment is being run is declared, not inferred.** The same
+three steps answer several different questions depending on what is held
+fixed between training and evaluation, and the questions are not
+interchangeable:
+
+===================  ==========================================
+``--adaptation``     what it measures
+===================  ==========================================
+``in-distribution``  how much adaptation helps where it trained
+``task``             whether it learned retrieval or the mining
+                     scheme — different pair kinds, same corpus
+``language``         whether it crosses scripts — same kinds,
+                     different languages
+``domain``           whether it survives your own text — same
+                     kinds, a different pair file
+===================  ==========================================
+
+The declaration is checked against what the filters actually do, and a
+run whose label and data disagree is refused before it starts. A report
+labelled `task` that quietly held the kinds identical is worse than no
+report, because the label is what gets quoted later.
+
 Usage::
 
+    # in-distribution: the default, nothing varies
     python scripts/adapt_pretrained.py \\
         --checkpoint intfloat/multilingual-e5-small \\
         --pairs verify-output/hi-pairs.jsonl.gz \\
         --query-prefix "query: " --passage-prefix "passage: "
+
+    # task adaptation: train on one pair shape, score on another
+    python scripts/adapt_pretrained.py ... \\
+        --adaptation task \\
+        --train-kinds adjacent --eval-kinds heading_section
+
+    # domain adaptation: train on Wikipedia, score on your own corpus
+    python scripts/adapt_pretrained.py ... \\
+        --adaptation domain \\
+        --pairs wiki-pairs.jsonl.gz --eval-pairs-file contracts.jsonl.gz
 """
 
 from __future__ import annotations
@@ -137,32 +170,121 @@ def prefixed(examples: list[Example], query: str, passage: str) -> list[Example]
     ]
 
 
-def only_kinds(examples: list[Example], kinds: str) -> list[Example]:
+def only(examples: list[Example], wanted: str, facet: str) -> list[Example]:
     """
-    Keep the named pair kinds, or everything when none are named.
+    Keep examples whose ``facet`` is named, or everything when none are.
 
-    Training on one kind and scoring on another is how a domain result is
-    told apart from a task result. The mined kinds differ in shape while
-    covering the same text: `adjacent` retrieves the paragraph following a
-    paragraph, `title_lead` retrieves a lead from a title. A model that
-    learned retrieval transfers between them; one that learned the mining
-    scheme does not.
+    Two facets are filterable, and which one is varied decides what the
+    run measures:
+
+    ``kind``
+        The shape of the retrieval task. `adjacent` retrieves the
+        paragraph following a paragraph; `title_lead` retrieves a lead
+        from a title. Same text, different question asked of it.
+
+    ``language``
+        The corpus the text comes from. Same question, different text.
+
+    Vary one and hold the other fixed, and the result attributes itself.
+    Vary both and it cannot.
     """
 
-    wanted = {kind.strip() for kind in kinds.split(",") if kind.strip()}
+    names = {name.strip() for name in wanted.split(",") if name.strip()}
 
-    if not wanted:
+    if not names:
         return examples
 
-    kept = [example for example in examples if example.kind in wanted]
+    kept = [example for example in examples if getattr(example, facet) in names]
 
     if not kept:
-        raise SystemExit(
-            f"no pairs of kind {sorted(wanted)}; the file holds "
-            f"{sorted({e.kind for e in examples if e.kind})}"
-        )
+        available = sorted({getattr(e, facet) for e in examples if getattr(e, facet)})
+
+        raise SystemExit(f"no pairs with {facet} in {sorted(names)}; the file holds {available}")
 
     return kept
+
+
+def values(examples: list[Example], facet: str) -> list[str]:
+    """The distinct values of a facet actually present, for reporting."""
+
+    return sorted({getattr(e, facet) for e in examples if getattr(e, facet)})
+
+
+def varying(train: list[str], held: list[str]) -> bool:
+    """
+    Whether a facet is varied between training and evaluation.
+
+    Varied means disjoint. Partial overlap is neither held fixed nor
+    varied, and a run built on it answers no clean question, so it is
+    reported as not varying and the declaration check rejects it.
+    """
+
+    return bool(train and held and not set(train) & set(held))
+
+
+# What each declared experiment requires to vary. Everything not listed
+# for a mode must be held fixed, and the check is two-sided: a `task` run
+# whose languages also differ is not a task result, it is two changes at
+# once with one name.
+ADAPTATIONS: dict[str, tuple[str, ...]] = {
+    "in-distribution": (),
+    "task": ("kind",),
+    "language": ("language",),
+    "domain": ("corpus",),
+    "task+language": ("kind", "language"),
+    "task+domain": ("kind", "corpus"),
+}
+
+_DESCRIPTIONS = {
+    "in-distribution": "same task, same corpus — how much adaptation helps where it was trained",
+    "task": "same corpus, different task shape — did it learn retrieval or the mining scheme",
+    "language": "same task, different language — does the adaptation cross scripts",
+    "domain": "same task, different corpus — does it survive contact with your own text",
+    "task+language": "task shape and language both change",
+    "task+domain": "task shape and corpus both change",
+}
+
+
+def check_adaptation(declared: str, observed: set[str]) -> None:
+    """
+    Refuse a run whose filters do not implement the experiment it claims.
+
+    The declaration is the point. Naming a run `--adaptation task` and
+    then leaving the kinds identical produces a report labelled as a
+    transfer result that measured nothing of the sort, and the label is
+    what gets quoted six months later. So the label is checked against
+    what the data actually does, and disagreement stops the run before it
+    spends an hour on a GPU.
+    """
+
+    required = set(ADAPTATIONS[declared])
+
+    if observed == required:
+        return
+
+    missing = sorted(required - observed)
+
+    extra = sorted(observed - required)
+
+    problems = []
+
+    if missing:
+        problems.append(
+            f"declared --adaptation {declared}, but {', '.join(missing)} is held fixed "
+            f"rather than varied"
+        )
+
+    if extra:
+        problems.append(
+            f"declared --adaptation {declared}, but {', '.join(extra)} varies too, so the "
+            f"result cannot be attributed to one of them"
+        )
+
+    raise SystemExit(
+        "\n".join(problems) + "\n\nvary a facet by giving --train-* and --eval-* disjoint values "
+        "(kind, language) or different files (corpus, via --eval-pairs-file).\n"
+        f"declared modes: {', '.join(sorted(ADAPTATIONS))}"
+    )
 
 
 def report(label: str, scores: Any) -> None:
@@ -253,6 +375,35 @@ def main() -> int:
     )
 
     parser.add_argument(
+        "--train-languages",
+        default="",
+        help=(
+            "Comma-separated languages to train on, e.g. 'hi'. Empty uses "
+            "all. The domain axis: set this and --eval-languages to "
+            "different values to measure whether the adaptation crosses "
+            "corpora rather than only the task shape"
+        ),
+    )
+
+    parser.add_argument(
+        "--eval-languages",
+        default="",
+        help="Comma-separated languages to score on. Empty uses all",
+    )
+
+    parser.add_argument(
+        "--adaptation",
+        default="in-distribution",
+        choices=sorted(ADAPTATIONS),
+        help=(
+            "What this run claims to measure. Checked against what the "
+            "filters actually do, and the run is refused if they disagree — "
+            "the label outlives the command line, so it must not be able to "
+            "be wrong"
+        ),
+    )
+
+    parser.add_argument(
         "--save-adapter",
         type=Path,
         help=(
@@ -308,47 +459,78 @@ def main() -> int:
 
     train_pool = [example for example in examples if example.positive not in held_texts]
 
+    selected = only(
+        only(train_pool, arguments.train_kinds, "kind"),
+        arguments.train_languages,
+        "language",
+    )
+
     train = prefixed(
-        only_kinds(train_pool, arguments.train_kinds)[: arguments.train_pairs],
+        selected[: arguments.train_pairs],
         arguments.query_prefix,
         arguments.passage_prefix,
     )
 
     held = prefixed(
-        only_kinds(evaluation, arguments.eval_kinds),
+        only(
+            only(evaluation, arguments.eval_kinds, "kind"),
+            arguments.eval_languages,
+            "language",
+        ),
         arguments.query_prefix,
         arguments.passage_prefix,
     )
 
-    languages = sorted({e.language for e in held if e.language})
+    train_kinds, eval_kinds = values(train, "kind"), values(held, "kind")
+
+    train_languages, languages = values(train, "language"), values(held, "language")
 
     print(f"\ntrain {len(train):,} pairs   held out {len(held):,} pairs")
 
-    print(f"languages in the held-out set: {', '.join(languages) or '<none recorded>'}")
+    # Laid out as a table because the whole design of the run is which row
+    # differs. Reading it off two prose sentences is how a run ends up
+    # varying two things at once without anyone noticing.
+    print(f"\n  {'facet':10} {'trained on':32} {'scored on':32}")
 
-    train_kinds = sorted({e.kind for e in train if e.kind})
+    observed: set[str] = set()
 
-    eval_kinds = sorted({e.kind for e in held if e.kind})
+    axes = (
+        ("kind", train_kinds, eval_kinds),
+        ("language", train_languages, languages),
+        # File names rather than full paths, so a deep --pairs path cannot
+        # push the VARIES column off the terminal — which is the one thing
+        # in this table anybody needs to read.
+        ("corpus", [Path(arguments.pairs).name], [Path(evaluation_source).name]),
+    )
 
-    print(f"trained on kinds: {', '.join(train_kinds)}")
+    for facet, left, right in axes:
+        differs = varying(left, right)
 
-    print(f"scored on kinds:  {', '.join(eval_kinds)}")
+        if differs:
+            observed.add(facet)
 
-    if train_kinds and eval_kinds and not set(train_kinds) & set(eval_kinds):
-        print("  -> disjoint: this measures whether the adaptation generalises across task shapes")
+        marker = "VARIES" if differs else "fixed"
 
-    # A kind filter that starves the training set turns a comparison of
+        print(f"  {facet:10} {','.join(left) or '-':30.30} {','.join(right) or '-':30.30} {marker}")
+
+    check_adaptation(arguments.adaptation, observed)
+
+    print(f"\n  --adaptation {arguments.adaptation}: {_DESCRIPTIONS[arguments.adaptation]}")
+
+    # A facet filter that starves the training set turns a comparison of
     # task shapes into a comparison of training-set sizes. Said out loud,
     # because it is invisible in the scores and it silently decided a run:
     # `--train-pairs 40000 --train-kinds title_lead` drew about 7,000
     # pairs from a 42,000 sample while `--train-kinds adjacent` drew
     # 25,000 from the same sample.
-    if arguments.train_kinds and len(train) < arguments.train_pairs:
+    filtered = arguments.train_kinds or arguments.train_languages
+
+    if filtered and len(train) < arguments.train_pairs:
         print(
             f"\n  WARNING: asked for {arguments.train_pairs:,} training pairs and the "
-            f"kind filter left {len(train):,}.\n"
+            f"filters left {len(train):,}.\n"
             f"  Raise --sample-pairs (currently {total:,}) until this stops, or runs "
-            f"naming different kinds will differ in data volume as well as shape."
+            f"naming different facets will differ in data volume as well as in shape."
         )
 
     if arguments.eval_pairs_file:
@@ -485,6 +667,9 @@ def main() -> int:
                 "trained_on": str(arguments.pairs),
                 "scored_against": str(evaluation_source),
                 "train_pairs": len(train),
+                "adaptation": arguments.adaptation,
+                "train_kinds": train_kinds,
+                "train_languages": train_languages,
                 "held_out_languages": languages,
                 "recall_at_1_before": round(before.overall.recall_at_1, 4),
                 "recall_at_1_after": round(after.overall.recall_at_1, 4),
@@ -509,8 +694,13 @@ def main() -> int:
                     "trained_on": str(arguments.pairs),
                     "scored_against": str(evaluation_source),
                     "held_out_languages": languages,
+                    "adaptation": arguments.adaptation,
+                    "measures": _DESCRIPTIONS[arguments.adaptation],
+                    "varying_facets": sorted(observed),
                     "train_kinds": train_kinds,
                     "eval_kinds": eval_kinds,
+                    "train_languages": train_languages,
+                    "eval_languages": languages,
                     # The counts actually used, not the ones requested. A
                     # kind filter can cut either far below its flag, and a
                     # report that records only the request describes a run

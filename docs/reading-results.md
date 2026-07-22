@@ -8,6 +8,33 @@ top-down stops you interpreting a number that was never valid.
 
 ---
 
+## Step 0 — Which question did the run ask?
+
+`recall@1 rose 28%` means four different things depending on what was held fixed between
+training and evaluation. The `adaptation` field says which, and the run refuses to start
+if the label and the filters disagree.
+
+| `--adaptation` | held fixed | varied | the question |
+|---|---|---|---|
+| `in-distribution` | everything | — | how much adaptation helps where it trained |
+| `task` | corpus, language | pair kind | did it learn retrieval, or the mining scheme |
+| `language` | corpus, pair kind | language | does it cross scripts |
+| `domain` | pair kind, language | the pair file | does it survive contact with your own text |
+
+Only `domain` licenses "this will help on our contracts". `in-distribution` is the weakest
+claim and the easiest to overstate, which is why it is the default — an unlabelled run
+should not be able to sound like a transfer result.
+
+**Exactly one facet may vary.** `varying_facets` in the report lists what actually did. Two
+at once and the gain cannot be attributed to either; the script rejects that combination
+rather than producing a report nobody can interpret.
+
+**Check the training volume too.** A facet filter is applied after sampling, so
+`--train-kinds title_lead` on a corpus where that kind is a sixth of the pairs yields a
+sixth of the sample. Two runs then differ in how much data they saw as well as in shape.
+`train_examples` records what was actually used; raise `--sample-pairs` until it equals
+`--train-pairs`.
+
 ## Step 1 — Is the measurement valid at all?
 
 Before reading any score, three fields decide whether it means anything.
@@ -88,6 +115,26 @@ they are large.
 **`by_kind` is a secondary version of the same check.** `title_lead` pairs are nearly
 solved before any adaptation, because a Wikipedia lead restates its title; a model
 improving mostly there has learned little.
+
+### Check the slice has headroom before using it as a probe
+
+A `task` run that trained on `adjacent` and scored on `title_lead` returned this:
+
+| | before | after |
+|---|---|---|
+| train `title_lead`, score `title_lead` | 327/331 | 329/331 |
+| train `adjacent`, score `title_lead` | 327/331 | 326/331 |
+
+Both are unreadable, and not because the transfer failed. The baseline was 0.9879, so there
+were **four** wrong answers available to fix; one run fixed two and the other broke one, and
+every interval overlaps. Worse, 326 of the 331 queries were high-overlap — `title_lead` is a
+string-matching task by construction, which is why the published checkpoint already scored
+98.8% on it cold.
+
+**Multiply the baseline by the query count before choosing an evaluation slice.** If the
+headroom is smaller than the noise, the run cannot answer the question no matter how it
+turns out, and a flat result will be misread as a negative one. `heading_section` sat at
+0.2817 on the same corpus and is the slice to use.
 
 ## Step 5 — Which metric to weight
 
