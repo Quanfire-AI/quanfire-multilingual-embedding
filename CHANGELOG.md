@@ -7,6 +7,58 @@ granularity for that question.
 Versions follow semantic versioning. Before 1.0 the minor number carries breaking
 changes, so treat `0.2 → 0.3` the way you would treat `1.0 → 2.0`.
 
+## Public API
+
+As of 0.2.0 these are the supported surface. Renaming or removing anything here is a
+breaking change and gets a minor bump. `tests/test_public_api.py` asserts each one, so
+the promise is checked rather than merely written down.
+
+| Import path | What a consumer gets |
+|---|---|
+| `multilingual_embedding.corpus` | Reading, cleaning, segmenting, streaming, pair mining, provenance |
+| `multilingual_embedding.vocabulary` | Vocabulary construction, special tokens, id spaces |
+| `multilingual_embedding.tokenizer` | Normalizers, pre-tokenizers, SentencePiece training and encoding |
+| `multilingual_embedding.evaluation` | `TokenizerEvaluator`, `TokenizerMetrics`, `language_fairness`, `evaluate_tokenizer` |
+| `multilingual_embedding.core.exceptions` | `MultilingualEmbeddingError` and its subclasses |
+
+**Guaranteed at the package boundary, not the module.** `TokenizerEvaluator` and
+`language_fairness` are promised as `from multilingual_embedding.evaluation import ...`
+— never from `...evaluation.tokenizer_eval`. The file may move; the import will not.
+Depending on the module path forfeits the guarantee.
+
+That distinction is the answer to "do not relocate `tokenizer_eval.py`": the request is
+granted in the form that matters and refused in the form that would freeze the layout.
+The instrument in question — `evaluate_by_language`, `evaluate_by_script`,
+`language_fairness` — is the one that says whether Devanagari and Tamil are tokenized
+worse than Latin, and it is why consumers depend on this package instead of copying from
+it. It sits in `evaluation/` rather than `tokenizer/` because it evaluates; a vendoring
+set of `corpus, vocabulary, tokenizer` misses it by one directory, which is an argument
+for the dependency, not for the file's address.
+
+**Torch-free on a base install.** All five import without pulling in torch. Torch is
+confined to `embedding/neural/` behind the `neural` extra, so a consumer keeps control of
+its own training stack. This is asserted in a clean subprocess against `sys.modules`, so
+it is tested here — where every extra is installed — rather than only where torch is
+absent.
+
+**Not public.** Everything else, `embedding/` and `pipelines/` included. They may move
+without a minor bump.
+
+## 0.2.1 — 2026-07-23
+
+### Added
+
+- `tests/test_public_api.py` — the public surface above, and the torch-free property,
+  asserted rather than documented.
+
+### Fixed
+
+- Two class-scoped fixtures in `tests/tokenizer/test_tokenizer.py` were defined as
+  instance methods. pytest builds a fresh instance per test, so `self` inside a
+  class-scoped fixture is not the instance any test receives; they are now
+  `@classmethod`. No warning is emitted at pytest 8.4.2 even under `-W error`, but the
+  instance form is on pytest's removal list and the binding was wrong regardless.
+
 ## 0.2.0 — 2026-07-23
 
 First tagged release. `0.1.0` was the version the project carried while it was only ever

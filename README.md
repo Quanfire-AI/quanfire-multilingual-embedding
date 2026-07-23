@@ -18,7 +18,7 @@ an **adapted** published checkpoint — LoRA over frozen `multilingual-e5-small`
 The last is what produces the models this project ships; the first is the floor the others
 are measured against. The second and third need the optional `neural` extra.
 
-**1342 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
+**1357 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
 
 **Proven on real data:** a published checkpoint adapted on mined Hindi and Tamil Wikipedia
 pairs beats itself by **+28.6% (Hindi)** and **+40.9% (Tamil)** recall@1 on held-out
@@ -1082,7 +1082,7 @@ quanfire-multilingual-embedding/
 │   │   └── neural/                 transformer, LoRA, gradcache, pretrained, adapter
 │   ├── cli.py                      the `qfme` command
 │   └── py.typed                    marks the package as typed for consumers
-├── tests/                          1342 tests mirroring the source layout
+├── tests/                          1357 tests mirroring the source layout
 ├── scripts/                        adapt_pretrained.py, verify_e2e.py, diagnose_audit.py
 ├── configs/                        compute profiles — cpu.yaml, gpu.yaml
 ├── examples/                       runnable end-to-end example and a walkthrough

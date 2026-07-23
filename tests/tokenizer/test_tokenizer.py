@@ -226,8 +226,14 @@ class TestSentencePieceNormalization:
         {"type": "whitespace"},
     ]
 
+    # Class-scoped fixtures are classmethods deliberately. pytest builds a
+    # fresh instance per test, so `self` inside a class-scoped fixture is
+    # not the instance any test receives — binding to the class says what
+    # is actually true about the lifetime, and pytest has signalled it
+    # intends to stop accepting the instance form.
     @pytest.fixture(scope="class")
-    def mixed_case_corpus(self) -> list[str]:
+    @classmethod
+    def mixed_case_corpus(cls) -> list[str]:
         """A corpus whose Latin sentences are shouted."""
 
         return [
@@ -243,8 +249,9 @@ class TestSentencePieceNormalization:
         ]
 
     @pytest.fixture(scope="class")
+    @classmethod
     def normalizing_model_path(
-        self,
+        cls,
         tmp_path_factory: pytest.TempPathFactory,
         mixed_case_corpus: list[str],
     ) -> Path:
@@ -254,7 +261,7 @@ class TestSentencePieceNormalization:
         config = TokenizerConfig(
             vocab_size=85,
             character_coverage=0.9995,
-            normalizers=self.NORMALIZERS,
+            normalizers=cls.NORMALIZERS,
         )
 
         directory = tmp_path_factory.mktemp("normalizing-model")

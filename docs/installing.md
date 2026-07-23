@@ -42,7 +42,7 @@ $ cd /tmp
 $ which qfme
 /Users/you/.local/bin/qfme
 $ qfme --version
-qfme 0.2.0
+qfme 0.2.1
 ```
 
 ### What it actually did
@@ -182,6 +182,34 @@ is what you want while developing.
 
 ---
 
+## Depend on it: from another project
+
+Everything above installs a command. This installs a library — the case for a sibling
+QuanFire repository that wants the corpus, vocabulary, tokenizer or evaluation layers
+without reimplementing them.
+
+```bash
+uv add "quanfire-multilingual-embedding @ git+ssh://git@github.com/<owner>/quanfire-multilingual-embedding.git@v0.2.1"
+```
+
+**Pin a tag, never a branch.** `uv tool upgrade` re-fetching the default branch is fine
+for a person running a command; it is not fine for a repository whose test suite depends
+on this one, because the dependency then changes under it without any commit on its side
+saying so. `uv` records the resolved commit in `uv.lock`, so a tag gives a reproducible
+install and a deliberate upgrade.
+
+The base install is `numpy`, `pandas`, `pyyaml`, `sentencepiece` and `tqdm` — **no
+torch**. That is deliberate: a consumer preparing text keeps full control of its own
+training stack, including its own CUDA build. Add `[neural]` only if you want this
+project's models too.
+
+What you may depend on is listed in [`CHANGELOG.md`](../CHANGELOG.md) under **Public
+API**, and asserted by `tests/test_public_api.py`. In short: `corpus`, `vocabulary`,
+`tokenizer`, `evaluation` and `core.exceptions`, imported from the package rather than
+from the module that defines them. Everything else may move without notice.
+
+The SSH prerequisites in the next section apply here too.
+
 ## Giving it to someone else
 
 The repository is private, and staying that way for now. That is not a blocker: **anyone
@@ -241,7 +269,7 @@ without a deploy key, or someone you would rather not add to the repository:
 ```bash
 uv build --wheel                    # writes dist/*.whl
 # send the file, then on their machine:
-uv tool install ./quanfire_multilingual_embedding-0.2.0-py3-none-any.whl
+uv tool install ./quanfire_multilingual_embedding-0.2.1-py3-none-any.whl
 ```
 
 The trade is that they get a frozen copy with no upgrade path — `uv tool upgrade` has

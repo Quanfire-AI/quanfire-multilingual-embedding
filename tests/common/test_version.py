@@ -1,6 +1,9 @@
-from importlib.metadata import version as installed_version
+import tomllib
+from pathlib import Path
 
 from multilingual_embedding.common.version import __version__
+
+PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
 
 
 def test_version_is_string() -> None:
@@ -11,19 +14,34 @@ def test_version_not_empty() -> None:
     assert __version__ != ""
 
 
-def test_the_installed_distribution_reports_the_same_version() -> None:
-    """The packaged version and the importable one must not drift apart.
+def test_the_packaged_version_is_read_from_this_module() -> None:
+    """There must be exactly one version literal in the repository.
 
     ``pyproject.toml`` declares ``dynamic = ["version"]`` and points
-    hatchling at :mod:`multilingual_embedding.common.version`, so there is
-    one literal. This asserts that wiring still holds, because reverting it
-    to a hardcoded ``version =`` in ``pyproject.toml`` would break nothing
-    visible: the package would still build, still install and still import.
-    It would simply publish one number while every evaluation report
-    stamped another, and the provenance recorded beside a published metric
-    would be wrong with nothing raising.
+    hatchling at this module. Reverting that to a hardcoded ``version =``
+    would break nothing visible — the package would still build, install
+    and import — while allowing a wheel published as one number to
+    generate evaluation reports stamped with another, so the provenance
+    recorded beside a published metric would be wrong with nothing
+    raising. It matters more now that sibling repositories pin by version.
 
-    It matters more now that sibling repositories pin this one by version.
+    The build wiring is asserted rather than the installed metadata.
+    Comparing against ``importlib.metadata`` would be closer to the thing
+    that matters, but an editable install writes its version at install
+    time, so it would fail after every bump until the next ``uv sync`` —
+    and a test that routinely fails for an uninteresting reason gets
+    ignored when it fails for an interesting one.
     """
 
-    assert installed_version("quanfire-multilingual-embedding") == __version__
+    pyproject = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+
+    assert "version" in pyproject["project"]["dynamic"]
+
+    assert "version" not in pyproject["project"], (
+        "pyproject.toml carries a static version again — it is now a second "
+        "source of truth that nothing keeps in step with this module"
+    )
+
+    assert pyproject["tool"]["hatch"]["version"]["path"] == (
+        "src/multilingual_embedding/common/version.py"
+    )

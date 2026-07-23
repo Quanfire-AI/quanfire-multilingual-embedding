@@ -1,6 +1,6 @@
 # tests
 
-> The test suite. 1342 tests, 94% statement coverage, mirroring the source layout.
+> The test suite. 1357 tests, 94% statement coverage, mirroring the source layout.
 
 ## Purpose
 
@@ -18,6 +18,12 @@ failure appears:
    structurally: every registered encoder must satisfy `TextEncoder`, and the search
    pipeline must build without an embedding matrix. Those are architectural rather than
    behavioural, because a contextual encoder has no per-token table to hand over.
+4. **Public API tests** (`test_public_api.py`) hold the contract offered to the sibling
+   repositories that install this package by pinned version. They import each promised
+   module in a clean subprocess and assert that none of them pulls in torch. Both
+   properties fail silently otherwise: a rename that looks internal here breaks a
+   consumer's CI, and an import added to an `__init__.py` by someone who has torch drags
+   the training stack into a base install without anything here noticing.
 
 ## Layout
 
@@ -35,6 +41,7 @@ failure appears:
 | [`pipelines/`](pipelines/README.md) | 68 | Query/passage prefixes, batched indexing, building a pipeline from a saved adapter |
 | [`integration/`](integration/README.md) | 44 | End-to-end training, search and CLI, and verifying a copied adapter |
 | `test_architecture.py` | 16 | Layering rule, acyclic import graph, `py.typed` marker, encoder contract |
+| `test_public_api.py` | 15 | The surface sibling repositories pin, and that a base install stays torch-free |
 
 `conftest.py` holds shared fixtures, including the multilingual sample texts used
 throughout. Those are real sentences in each script rather than placeholder text,

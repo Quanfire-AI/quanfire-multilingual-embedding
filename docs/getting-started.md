@@ -60,7 +60,7 @@ uv run qfme --version
 ```
 
 ```
-qfme 0.2.0
+qfme 0.2.1
 ```
 
 ### Running `qfme`

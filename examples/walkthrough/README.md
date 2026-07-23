@@ -28,7 +28,7 @@ python -c "import torch; print('torch', torch.__version__)"
 ```
 
 ```
-qfme 0.2.0
+qfme 0.2.1
 torch 2.2.2
 ```
 
