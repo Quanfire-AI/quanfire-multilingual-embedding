@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from collections.abc import Iterator
 from pathlib import Path
@@ -12,8 +13,14 @@ import sentencepiece
 from multilingual_embedding.common.enums import TokenizerModel
 from multilingual_embedding.config.base import TokenizerConfig
 from multilingual_embedding.core.exceptions import ConfigurationError, ValidationError
-from multilingual_embedding.tokenizer.trainer import SentencePieceTrainerAdapter
-from multilingual_embedding.vocabulary.special_tokens import BOS_ID, EOS_ID, PAD_ID, UNK_ID
+from multilingual_embedding.tokenizer.trainer import SentencePieceTrainerAdapter, trainer_for
+from multilingual_embedding.vocabulary.special_tokens import (
+    BOS_ID,
+    EOS_ID,
+    PAD_ID,
+    UNK_ID,
+    SpecialTokenSet,
+)
 
 TRAINABLE_VOCAB_SIZE = 150
 
@@ -330,3 +337,122 @@ class TestStaging:
             "tokenizer.model",
             "tokenizer.vocab",
         ]
+
+
+class TestTrainerFor:
+    """
+    Building a trainer without naming a non-public type.
+
+    The class is published and the only type its constructor accepts is
+    not, which made a change this project would call internal able to
+    break a consumer's build. These tests hold the door shut: the
+    settings still arrive, the omitted ones still come from one place,
+    and the signature stays free of anything a consumer may not import.
+    """
+
+    def test_the_signature_names_no_non_public_type(self) -> None:
+        """
+        The point of the function, asserted rather than assumed.
+
+        A parameter annotated with a type from ``config`` would put the
+        consumer back where they started — reachable only by importing
+        something this package does not promise to keep. Annotations are
+        strings here because of ``from __future__ import annotations``,
+        so the check reads them as written.
+        """
+
+        annotations = [
+            str(parameter.annotation)
+            for parameter in inspect.signature(trainer_for).parameters.values()
+        ]
+
+        assert annotations
+
+        for annotation in annotations:
+            assert "TokenizerConfig" not in annotation
+
+            assert "config" not in annotation
+
+    def test_settings_reach_the_adapter(self) -> None:
+        trainer = trainer_for(vocab_size=200, model_type="bpe")
+
+        assert trainer.vocab_size == 200
+
+        assert trainer.model_type == "bpe"
+
+    def test_an_omitted_setting_keeps_the_framework_default(self) -> None:
+        """
+        Not a copy of the default restated in the signature.
+
+        Two copies of a default drift, and the copy in a signature
+        drifts silently — so the test compares against the config rather
+        than against a literal written here.
+        """
+
+        assert trainer_for().vocab_size == TokenizerConfig().vocab_size
+
+        assert trainer_for().model_type == TokenizerConfig().model_type.value
+
+    def test_normalizers_are_applied_by_the_trainer_it_builds(self, tmp_path: Path) -> None:
+        corpus_path = tmp_path / "corpus.txt"
+
+        trainer = trainer_for(normalizers=[{"type": "lowercase"}])
+
+        trainer._stage_corpus(["MIXED Case"], corpus_path)
+
+        assert corpus_path.read_text(encoding="utf-8").splitlines() == ["mixed case"]
+
+    def test_a_caller_literal_is_not_aliased_into_the_config(self) -> None:
+        """
+        The config owns mutable containers; the caller's literal is theirs.
+
+        Sharing them means a later append on either side silently
+        reconfigures the other, and nothing raises at the point of the
+        mistake.
+        """
+
+        normalizers = [{"type": "lowercase"}]
+
+        pretokenizer = {"type": "whitespace"}
+
+        trainer = trainer_for(normalizers=normalizers, pretokenizer=pretokenizer)
+
+        normalizers.append({"type": "nfkc"})
+
+        normalizers[0]["type"] = "nfkd"
+
+        pretokenizer["type"] = "character"
+
+        assert trainer.config.normalizers == [{"type": "lowercase"}]
+
+        assert trainer.config.pretokenizer == {"type": "whitespace"}
+
+    def test_special_tokens_are_carried_through(self) -> None:
+        """The second constructor argument is not lost on the way."""
+
+        trainer = trainer_for(special_tokens=SpecialTokenSet(pad="<blank>"))
+
+        assert trainer._special.pad == "<blank>"
+
+    def test_an_unsupported_model_type_is_refused(self) -> None:
+        with pytest.raises(ConfigurationError):
+            trainer_for(model_type="wordpiece")
+
+    def test_an_out_of_range_setting_is_refused(self) -> None:
+        with pytest.raises(ValidationError):
+            trainer_for(character_coverage=1.5)
+
+    def test_it_trains(self, tmp_path: Path, multilingual_sentences: list[str]) -> None:
+        """End to end, because the point is a trainer and not a config."""
+
+        model_path = trainer_for(vocab_size=TRAINABLE_VOCAB_SIZE).train(
+            multilingual_sentences, tmp_path
+        )
+
+        assert model_path.exists()
+
+        processor = sentencepiece.SentencePieceProcessor()
+
+        processor.load(str(model_path))
+
+        assert processor.pad_id() == PAD_ID

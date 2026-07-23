@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import pytest
 
 from multilingual_embedding.config.base import CorpusConfig
+from multilingual_embedding.core.exceptions import MultilingualEmbeddingError
 from multilingual_embedding.corpus.corpus import Corpus
 from multilingual_embedding.corpus.exceptions import CorpusFormatError
-from multilingual_embedding.corpus.loader import build_reader, load_corpus, stream_sentences
+from multilingual_embedding.corpus.loader import (
+    build_reader,
+    corpus_from,
+    documents_from,
+    load_corpus,
+    sentences_from,
+    stream_sentences,
+)
 from multilingual_embedding.corpus.reader import (
     JsonlReader,
     LineReader,
@@ -220,6 +229,104 @@ class TestLoader:
         config = CorpusConfig(source=text_corpus_directory, patterns=["*.txt"])
 
         assert len(list(stream_sentences(config, limit=2))) == 2
+
+
+class TestLoadingWithoutAConfig:
+    """
+    The same three access patterns, reachable without a private import.
+
+    ``load_corpus``, ``stream_documents`` and ``stream_sentences`` are
+    public and take only a ``CorpusConfig``, which is not — so the
+    published functions could be reached only through a type this
+    repository may change in a patch release. These twins close that,
+    and a consumer found the shape.
+    """
+
+    def test_the_signatures_name_no_non_public_type(self) -> None:
+        """
+        The point of the three functions, asserted rather than assumed.
+
+        Annotations are strings here because of ``from __future__ import
+        annotations``, so the check reads them as written.
+        """
+
+        for function in (documents_from, corpus_from, sentences_from):
+            for parameter in inspect.signature(function).parameters.values():
+                annotation = str(parameter.annotation)
+
+                assert "CorpusConfig" not in annotation
+
+                assert "config" not in annotation
+
+    def test_corpus_from_matches_the_config_form(self, text_corpus_directory: Path) -> None:
+        config = CorpusConfig(source=text_corpus_directory, patterns=["*.txt"])
+
+        assert list(
+            corpus_from(text_corpus_directory, patterns=["*.txt"]).sentence_texts()
+        ) == list(load_corpus(config).sentence_texts())
+
+    def test_settings_reach_the_reader_and_the_filter(self, tmp_path: Path) -> None:
+        path = tmp_path / "data.txt"
+
+        path.write_text("HELLO THERE FRIEND. A. Another good sentence.", encoding="utf-8")
+
+        corpus = corpus_from(path, min_sentence_characters=5, lowercase=True)
+
+        assert all(len(text) >= 5 and text.islower() for text in corpus.sentence_texts())
+
+    def test_an_omitted_setting_keeps_the_framework_default(
+        self, text_corpus_directory: Path
+    ) -> None:
+        """Not a copy of the default restated in three signatures."""
+
+        assert list(sentences_from(text_corpus_directory)) == list(
+            stream_sentences(CorpusConfig(source=text_corpus_directory))
+        )
+
+    def test_sentences_from_is_reiterable_and_honours_limit(
+        self, text_corpus_directory: Path
+    ) -> None:
+        stream = sentences_from(text_corpus_directory, patterns=["*.txt"])
+
+        assert list(stream) == list(stream)
+
+        assert len(list(sentences_from(text_corpus_directory, patterns=["*.txt"], limit=2))) == 2
+
+    def test_documents_from_streams_and_deduplicates(self, tmp_path: Path) -> None:
+        for name in ["a.txt", "b.txt"]:
+            (tmp_path / name).write_text("Identical content here.", encoding="utf-8")
+
+        assert len(list(documents_from(tmp_path, patterns=["*.txt"]))) == 1
+
+        assert len(list(documents_from(tmp_path, patterns=["*.txt"], deduplicate=False))) == 2
+
+    def test_a_caller_literal_is_not_aliased_into_the_config(self, tmp_path: Path) -> None:
+        """The config owns the pattern list; the caller's literal is theirs."""
+
+        (tmp_path / "a.txt").write_text("Some content here.", encoding="utf-8")
+
+        (tmp_path / "b.md").write_text("Other content here.", encoding="utf-8")
+
+        patterns = ["*.txt"]
+
+        stream = sentences_from(tmp_path, patterns=patterns)
+
+        patterns.append("*.md")
+
+        assert len(list(stream)) == 1
+
+    def test_a_missing_source_raises_at_iteration_not_construction(self, tmp_path: Path) -> None:
+        """
+        The generator note next to ``CorpusReader``, as a test.
+
+        A ``try`` around the call translates nothing, because the body
+        has not run yet. This is what a consumer hit.
+        """
+
+        documents = documents_from(tmp_path / "absent.txt")
+
+        with pytest.raises(MultilingualEmbeddingError):
+            list(documents)
 
 
 class TestConfiguredTextField:

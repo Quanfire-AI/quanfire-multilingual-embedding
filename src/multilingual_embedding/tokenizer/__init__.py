@@ -13,6 +13,11 @@ registered by name so a YAML file can select it::
 :class:`SentencePieceTrainerAdapter` produces the subword model that
 :class:`SentencePieceTokenizer` consumes; :class:`WordTokenizer` is the
 dependency-free alternative that trains its own vocabulary in a pass.
+
+Build the trainer with :func:`trainer_for`, which takes plain settings.
+Its constructor takes a ``TokenizerConfig``, and ``config`` is internal —
+so constructing the class directly means importing a type this package
+does not promise to keep.
 """
 
 from __future__ import annotations
@@ -45,7 +50,7 @@ from .tokenizer import (
     Tokenizer,
     WordTokenizer,
 )
-from .trainer import SentencePieceTrainerAdapter
+from .trainer import SentencePieceTrainerAdapter, trainer_for
 
 __all__ = [
     "NORMALIZERS",
@@ -71,4 +76,5 @@ __all__ = [
     "WhitespaceNormalizer",
     "WhitespacePreTokenizer",
     "WordTokenizer",
+    "trainer_for",
 ]

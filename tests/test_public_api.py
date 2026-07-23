@@ -41,6 +41,16 @@ PUBLIC_MODULES = (
 # Named individually because a consumer pins against these specifically:
 # the tokenizer fairness instrument, and the exception base it must catch.
 PUBLIC_NAMES = (
+    # Named here because it exists to close a hole a consumer found: the
+    # trainer class is public and the only type its constructor accepts is
+    # not, so this is the supported way to build one. Removing it would
+    # push consumers back onto importing `config`.
+    ("multilingual_embedding.tokenizer", "trainer_for"),
+    ("multilingual_embedding.tokenizer", "SentencePieceTrainerAdapter"),
+    ("multilingual_embedding.corpus", "reader_for"),
+    ("multilingual_embedding.corpus", "corpus_from"),
+    ("multilingual_embedding.corpus", "documents_from"),
+    ("multilingual_embedding.corpus", "sentences_from"),
     ("multilingual_embedding.evaluation", "TokenizerEvaluator"),
     ("multilingual_embedding.evaluation", "TokenizerMetrics"),
     ("multilingual_embedding.evaluation", "language_fairness"),

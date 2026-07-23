@@ -42,7 +42,7 @@ $ cd /tmp
 $ which qfme
 /Users/you/.local/bin/qfme
 $ qfme --version
-qfme 0.3.0
+qfme 0.3.2
 ```
 
 ### What it actually did
@@ -191,7 +191,7 @@ QuanFire repository that wants the corpus, vocabulary, tokenizer or evaluation l
 without reimplementing them.
 
 ```bash
-uv add "quanfire-multilingual-embedding @ git+ssh://git@github.com/<owner>/quanfire-multilingual-embedding.git@v0.3.0"
+uv add "quanfire-multilingual-embedding @ git+ssh://git@github.com/<owner>/quanfire-multilingual-embedding.git@v0.3.2"
 ```
 
 **Pin a tag, never a branch.** `uv tool upgrade` re-fetching the default branch is fine
@@ -209,6 +209,23 @@ What you may depend on is listed in [`CHANGELOG.md`](../CHANGELOG.md) under **Pu
 API**, and asserted by `tests/test_public_api.py`. In short: `corpus`, `vocabulary`,
 `tokenizer`, `evaluation` and `core.exceptions`, imported from the package rather than
 from the module that defines them. Everything else may move without notice.
+
+**`config` is not public, so use the entry points that do not need it.** Several classes
+and functions here are configured by a type from `config`, which is free to change in a
+patch release; each has a twin taking a source and plain settings, and those are the ones
+to call:
+
+| Instead of | Call |
+|---|---|
+| `SentencePieceTrainerAdapter(TokenizerConfig(...))` | `trainer_for(vocab_size=..., model_type=...)` |
+| `build_reader(config)` | `reader_for(source, format=...)` |
+| `stream_sentences(config)` | `sentences_from(source, ...)` |
+| `stream_documents(config)` | `documents_from(source, ...)` |
+| `load_corpus(config)` | `corpus_from(source, ...)` |
+
+Every argument on the right is optional and omitting one keeps this project's default.
+The versions on the left still work; they are for callers inside this repository, which
+already hold a config because a YAML file produced one.
 
 The SSH prerequisites in the next section apply here too.
 
@@ -271,7 +288,7 @@ without a deploy key, or someone you would rather not add to the repository:
 ```bash
 uv build --wheel                    # writes dist/*.whl
 # send the file, then on their machine:
-uv tool install ./quanfire_multilingual_embedding-0.3.0-py3-none-any.whl
+uv tool install ./quanfire_multilingual_embedding-0.3.2-py3-none-any.whl
 ```
 
 The trade is that they get a frozen copy with no upgrade path — `uv tool upgrade` has

@@ -2,7 +2,7 @@
 
 > Tests for [`multilingual_embedding.tokenizer`](../../src/multilingual_embedding/tokenizer/README.md) — normalizers, pre-tokenizers, SentencePiece.
 
-**187 tests.** Run with `pytest tests/tokenizer -q`.
+**196 tests.** Run with `pytest tests/tokenizer -q`.
 
 ## Files
 
@@ -13,7 +13,7 @@
 | `test_normalizer.py` | Each normalizer, the registry, and the composed pipeline |
 | `test_tokenizer.py` | SentencePiece and word tokenizers, encode-time normalisation, round trips, persistence |
 | `test_encoding.py` | The `Encoding` container: construction, `to_dict`, truncation, padding |
-| `test_trainer.py` | Training, staging and artefact publication, the two opposite `vocab_size` failures, normalizer application, the pre-tokenizer inapplicability report |
+| `test_trainer.py` | Training, staging and artefact publication, the two opposite `vocab_size` failures, normalizer application, the pre-tokenizer inapplicability report, and `trainer_for` — including that its signature names no non-public type |
 
 ## What matters here
 
@@ -67,6 +67,16 @@ a sentence containing an embedded newline would silently become two training exa
 `TestStaging` asserts newlines are folded to spaces rather than split on, that blank
 sentences are skipped, and that the staging directory does not survive training — a
 leftover temporary corpus in the artefact directory would be shipped alongside the model.
+
+**A public constructor must not require a private import.** `SentencePieceTrainerAdapter`
+is published; the only type its constructor accepted, `TokenizerConfig`, is not, so a
+consumer could reach the public class only through a type this repo is free to change in
+a patch release. `trainer_for` closes that, and `TestTrainerFor` asserts the guarantee
+rather than trusting review: no annotation in its signature mentions `TokenizerConfig` or
+`config`. The rest of the class covers the settings arriving, omitted arguments coming
+from `TokenizerConfig` rather than a restated copy in the signature, the caller's
+`normalizers` and `pretokenizer` literals not being aliased into the config, and one end
+to end train — because the deliverable is a trainer, not a config.
 
 ## Speed
 

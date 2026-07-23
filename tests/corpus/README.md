@@ -2,7 +2,7 @@
 
 > Tests for [`multilingual_embedding.corpus`](../../src/multilingual_embedding/corpus/README.md) — the document tree, segmentation, readers, statistics, auditing, Wikipedia extraction and pair mining.
 
-**493 tests**, the largest group in the suite by a wide margin. Run with
+**506 tests**, the largest group in the suite by a wide margin. Run with
 `pytest tests/corpus -q`; the whole group takes under a second.
 
 ## Files
@@ -12,8 +12,8 @@
 | `test_indian_languages.py` | 166 | The 22 scheduled languages plus English: script detection, terminator, word count, code normalisation and naming, and the shared-script cases |
 | `test_analysis.py` | 74 | Language utilities, offset arithmetic, streaming iteration, statistics, length summaries, filters, deduplication, document validation |
 | `test_script.py` | 33 | Script detection, range-table invariants, mixed-script flagging, whitespace-delimitation flags |
-| `test_io.py` | 31 | Readers, writers and the config-driven loader, including gzip and malformed input, plus the format-name agreement check |
-| `test_pairs.py` | 30 | Pair mining: the three kinds, lexical overlap, the bigram path for non-spaced scripts, rejection accounting, streaming |
+| `test_io.py` | 39 | Readers, writers and the config-driven loader, including gzip and malformed input, the format-name agreement check, and the config-free loading twins |
+| `test_pairs.py` | 35 | Pair mining: the three kinds, lexical overlap, the bigram path for non-spaced scripts, rejection accounting, streaming, the hard-negative field riding along |
 | `test_wikipedia.py` | 30 | Dump extraction: markup stripping, namespace and redirect filtering, boilerplate headings, deduplication, section preservation |
 | `test_segmentation.py` | 25 | Sentence, paragraph and word splitting across scripts; abbreviations, initials, decimals, quotes; span integrity |
 | `test_audit.py` | 25 | Corpus auditing: extraction failures, quality warnings, finding shape, `qfme validate` |

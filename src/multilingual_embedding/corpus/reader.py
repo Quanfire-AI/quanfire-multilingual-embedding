@@ -59,6 +59,28 @@ class CorpusReader(ABC):
 
     patterns:
         Glob patterns used when ``source`` is a directory.
+
+    Notes
+    -----
+    :meth:`iter_documents` is a generator, so constructing a reader
+    raises nothing about the corpus — not a missing file, not a malformed
+    line. Its body does not run until the caller iterates, by which time
+    a ``try`` around the construction has already exited. Wrap the
+    iteration to translate corpus errors::
+
+        reader = reader_for(path)             # raises nothing yet
+
+        try:
+            for document in reader.iter_documents():
+                ...
+        except MultilingualEmbeddingError as error:
+            ...
+
+    The one error that does surface at construction is an explicit
+    ``format`` naming no registered reader, which
+    :func:`reader_for` raises as a ``RegistryError``. Under
+    ``format="auto"`` even that is silent: an unrecognised extension
+    falls back to :class:`TextFileReader`.
     """
 
     def __init__(

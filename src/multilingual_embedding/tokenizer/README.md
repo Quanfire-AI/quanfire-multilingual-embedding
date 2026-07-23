@@ -12,7 +12,7 @@ The embedding model consumes integer ids and nothing else. Getting from a string
 | `pretokenizer.py` | `PreTokenizer` base, the `PRETOKENIZERS` registry, and the whitespace, character, punctuation and script-aware implementations. |
 | `tokenizer.py` | `Tokenizer` base, the `TOKENIZERS` registry, `SentencePieceTokenizer` and `WordTokenizer`, with save/load. |
 | `encoding.py` | `Encoding` — ids, surface pieces, spans and attention mask, with `truncate` and `pad_to`. |
-| `trainer.py` | `SentencePieceTrainerAdapter` — stages a corpus, pins the special ids, translates SentencePiece failures. |
+| `trainer.py` | `SentencePieceTrainerAdapter` — stages a corpus, pins the special ids, translates SentencePiece failures — plus `trainer_for`, which builds one from plain settings. |
 
 ## The four stages
 
@@ -119,6 +119,16 @@ A single generic "vocab_size is wrong" message would be actively harmful. The fi
 
 Training runs into a `tempfile.TemporaryDirectory`, and `_publish` moves the `.model` and `.vocab` files out through `atomic_write_path` only once training has returned. An interrupted run therefore never leaves a half-written model where the next run will load it. `_publish` also uses string concatenation rather than `Path.with_suffix`, which would replace an existing dotted component of a prefix such as `tokenizer.v2`.
 
+### `trainer_for` exists because a public class took a non-public argument
+
+`SentencePieceTrainerAdapter` is named in the published surface. The only type its constructor accepted was `TokenizerConfig`, which lives in `config` — deliberately internal, and free to change in a patch release. A consumer pinning this package could therefore reach the public class only by importing a private type, which means a change this repo would call internal was able to break their build without being breaking on this repo's own terms. That is a hole rather than a design, and a sibling repo found it.
+
+`trainer_for(vocab_size=..., model_type=..., normalizers=...)` closes it, in the same shape as `corpus.reader_for` — the pattern that had already solved the same problem on the corpus side. Three properties make its signature reachable with no private import: `TokenizerModel` is a `StrEnum`, so `model_type: str` accepts both the string and the member; `SpecialTokenSet` is already public; and everything else is a builtin or a `Mapping` of them. `tests/test_public_api.py` names the function, and `TestTrainerFor` asserts that no annotation in its signature mentions `TokenizerConfig` or `config` — the guarantee is the point, so it is tested rather than reviewed.
+
+Every argument defaults to `None` meaning *keep the framework default*, rather than restating the defaults in the signature. Two copies of a default drift, and the copy in a signature drifts silently; there is exactly one place the values live, and the test compares against `TokenizerConfig()` rather than against a literal.
+
+The read-back path is closed the same way: `adapter.vocab_size` and `adapter.model_type` return an `int` and a `str`, so inspecting a trainer no longer requires touching `.config` either. `.config` remains, and its docstring now says what it returns and what to use instead.
+
 ### `Encoding` carries pieces and spans, and returns new instances
 
 `Encoding` deliberately carries the surface pieces and their spans alongside the ids. Without them a prediction over token positions cannot be mapped back onto the source characters.
@@ -200,13 +210,13 @@ Must **not** import `embedding`, `evaluation` or `pipelines`. Enforced by `tests
 Consumed by `pipelines/training.py`, `pipelines/search.py` and `cli.py`.
 
 ## Tests
-Package total: **187 tests** across `tests/tokenizer`.
+Package total: **196 tests** across `tests/tokenizer`.
 
 - `tests/tokenizer/test_pretokenizer.py` — 57 tests
 - `tests/tokenizer/test_normalizer.py` — 44 tests
 - `tests/tokenizer/test_tokenizer.py` — 40 tests
 - `tests/tokenizer/test_encoding.py` — 23 tests
-- `tests/tokenizer/test_trainer.py` — 23 tests
+- `tests/tokenizer/test_trainer.py` — 32 tests
 - `tests/tokenizer/conftest.py` — shared fixtures, no tests of its own
 
 The full pipeline is additionally exercised by `tests/integration/test_end_to_end.py`, and the tokenizer's own quality metrics live in `evaluation/tokenizer_eval.py` with tests in `tests/evaluation/test_evaluators.py`.

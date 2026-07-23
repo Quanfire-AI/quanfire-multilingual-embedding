@@ -11,6 +11,12 @@ The hierarchy is::
 
 Each node stores its span relative to its parent, so any unit can be
 mapped back to its exact position in the source text.
+
+Load text with :func:`reader_for`, :func:`sentences_from`,
+:func:`documents_from` or :func:`corpus_from`, all of which take a source
+and plain settings. The ``build_*``/``stream_*``/``load_corpus`` forms
+take a ``CorpusConfig``, and ``config`` is internal — so calling them
+means importing a type this package does not promise to keep.
 """
 
 from __future__ import annotations
@@ -36,7 +42,10 @@ from .language import (
 from .loader import (
     build_filter,
     build_reader,
+    corpus_from,
+    documents_from,
     load_corpus,
+    sentences_from,
     stream_documents,
     stream_sentences,
 )
@@ -122,7 +131,9 @@ __all__ = [
     "build_filter",
     "build_reader",
     "compute_statistics",
+    "corpus_from",
     "detect_script",
+    "documents_from",
     "expected_script",
     "infer_language",
     "is_whitespace_delimited",
@@ -132,6 +143,7 @@ __all__ = [
     "reader_for",
     "resolve_reader_type",
     "script_histogram",
+    "sentences_from",
     "split_paragraphs",
     "split_sentences",
     "split_words",

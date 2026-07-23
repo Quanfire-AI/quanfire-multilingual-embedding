@@ -28,8 +28,9 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import sentencepiece
 
@@ -52,7 +53,7 @@ from multilingual_embedding.vocabulary.special_tokens import (
 
 from .normalizer import NormalizerPipeline
 
-__all__ = ["SentencePieceTrainerAdapter"]
+__all__ = ["SentencePieceTrainerAdapter", "trainer_for"]
 
 _logger = get_logger(__name__)
 
@@ -121,9 +122,33 @@ class SentencePieceTrainerAdapter:
 
     @property
     def config(self) -> TokenizerConfig:
-        """The tokenizer settings this adapter trains with."""
+        """
+        The tokenizer settings this adapter trains with.
+
+        Returns a type from ``config``, which is **not** part of the
+        published surface, so a consumer pinning this package should read
+        :attr:`vocab_size` and :attr:`model_type` instead and construct
+        through :func:`trainer_for`.
+        """
 
         return self._config
+
+    @property
+    def vocab_size(self) -> int:
+        """
+        Target vocabulary size, including special tokens.
+
+        Here so that reading back what a trainer was built with does not
+        require touching a non-public type.
+        """
+
+        return self._config.vocab_size
+
+    @property
+    def model_type(self) -> str:
+        """The subword algorithm, as the string that names it."""
+
+        return str(self._config.model_type.value)
 
     @property
     def normalizer(self) -> NormalizerPipeline:
@@ -366,3 +391,116 @@ class SentencePieceTrainerAdapter:
                 shutil.copyfile(source, temporary)
 
         return model_path
+
+
+def trainer_for(
+    *,
+    vocab_size: int | None = None,
+    model_type: str | None = None,
+    character_coverage: float | None = None,
+    normalizers: Sequence[Mapping[str, Any]] | None = None,
+    pretokenizer: Mapping[str, Any] | None = None,
+    max_sentence_length: int | None = None,
+    model_prefix: str | None = None,
+    special_tokens: SpecialTokenSet | None = None,
+) -> SentencePieceTrainerAdapter:
+    """
+    Construct a trainer from plain settings, with no config object.
+
+    :class:`SentencePieceTrainerAdapter` is published; the only type its
+    constructor accepts is not, because ``config`` is deliberately
+    internal and free to change in a patch release. That combination is a
+    hole rather than a design: a consumer could reach the public class
+    only by importing a private type, and a change this project would call
+    internal would break their build. This function closes it, and is the
+    same shape as :func:`~multilingual_embedding.corpus.reader_for`,
+    which solved it on the corpus side.
+
+    Every argument defaults to ``None`` meaning *keep the framework
+    default*, rather than restating those defaults here — two copies of a
+    default drift, and the copy in a signature drifts silently.
+
+    Parameters
+    ----------
+    vocab_size:
+        Target vocabulary size, including special tokens.
+
+    model_type:
+        Subword algorithm: ``"unigram"``, ``"bpe"``, ``"word"`` or
+        ``"char"``. A name outside that set raises
+        :class:`~multilingual_embedding.core.exceptions.ConfigurationError`
+        listing the supported values.
+
+    character_coverage:
+        Fraction of corpus characters the model must cover, in
+        ``(0.0, 1.0]``.
+
+    normalizers:
+        Ordered ``{"type": ...}`` specifications applied to the training
+        corpus as it is staged, and which the resulting tokenizer must
+        re-apply at encode time.
+
+    pretokenizer:
+        Pre-tokenizer specification. SentencePiece has nowhere to honour
+        one, so anything other than the whitespace default logs a warning
+        at construction.
+
+    max_sentence_length:
+        Longest training sentence, in bytes.
+
+    model_prefix:
+        Base filename for the artefacts written by :meth:`train`.
+
+    special_tokens:
+        Surface forms for the reserved pieces. Must match the vocabulary
+        the trained model will be paired with.
+
+    Returns
+    -------
+    A trainer ready for :meth:`SentencePieceTrainerAdapter.train`.
+
+    Raises
+    ------
+    ConfigurationError
+        If ``model_type`` names no supported algorithm.
+
+    ValidationError
+        If a numeric setting is out of range.
+
+    Example
+    -------
+    ::
+
+        trainer = trainer_for(vocab_size=8000, model_type="bpe")
+
+        model_path = trainer.train(sentences, "artifacts/tokenizer")
+    """
+
+    settings: dict[str, Any] = {}
+
+    for name, value in (
+        ("vocab_size", vocab_size),
+        ("model_type", model_type),
+        ("character_coverage", character_coverage),
+        ("normalizers", normalizers),
+        ("pretokenizer", pretokenizer),
+        ("max_sentence_length", max_sentence_length),
+        ("model_prefix", model_prefix),
+    ):
+        if value is None:
+            continue
+
+        settings[name] = value
+
+    # Copied rather than referenced: the config owns mutable containers
+    # and would otherwise share them with the caller's literal.
+    if "normalizers" in settings:
+        settings["normalizers"] = [dict(item) for item in settings["normalizers"]]
+
+    if "pretokenizer" in settings:
+        settings["pretokenizer"] = dict(settings["pretokenizer"])
+
+    return SentencePieceTrainerAdapter(
+        TokenizerConfig(**settings),
+        special_tokens=special_tokens,
+    )

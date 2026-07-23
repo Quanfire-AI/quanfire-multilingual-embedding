@@ -21,13 +21,13 @@ Two modules extend that remit at the ends. `wikipedia.py` is the **front door**:
 | `offsets.py` | Span arithmetic: `resolve_chain`, `to_absolute`, `invert_spans`, `merge_overlapping`, ordering and containment checks. |
 | `reader.py` | `CorpusReader` and the registered `TextFileReader` ("text"), `LineReader` ("lines"), `JsonlReader` ("jsonl"), plus `reader_for` and `resolve_reader_type`; all lazy generators. |
 | `writer.py` | `CorpusWriter` base, `JsonlCorpusWriter` (full fidelity), `PlainTextCorpusWriter` (one sentence per line) and `write_sentences`; all atomic. |
-| `loader.py` | Configuration-driven entry points: `load_corpus` for random access, `stream_documents` and `stream_sentences` for streaming, plus `build_reader` and `build_filter`. |
+| `loader.py` | Configuration-driven entry points: `load_corpus` for random access, `stream_documents` and `stream_sentences` for streaming, plus `build_reader` and `build_filter` — and the config-free twins `corpus_from`, `documents_from` and `sentences_from`. |
 | `iterator.py` | `SentenceStream` — a re-iterable, not an iterator — plus `batched` and `take`. |
 | `statistics.py` | `StatisticsAccumulator` and `CorpusStatistics`; streaming, with bounded word and length tables. |
 | `validators.py` | `SentenceFilter`, `DocumentDeduplicator`, `FilterReport`, `validate_document`. |
 | `audit.py` | `audit_corpus` and its `CorpusAudit`, `Finding` and `Severity`; judges a corpus rather than describing it. |
 | `wikipedia.py` | `WikipediaArticle`, `iter_articles`, `extract_dump`, `WikipediaExtractionError`; MediaWiki dump → corpus JSON Lines, sections preserved. |
-| `pairs.py` | `MinedPair`, `PairKind`, `PairConfig`, `PairStatistics`, `iter_pairs`, `mine_pairs`, `token_overlap`; corpus → contrastive training pairs, with leakage measured. |
+| `pairs.py` | `MinedPair`, `PairKind`, `PairConfig`, `PairStatistics`, `iter_pairs`, `mine_pairs`, `token_overlap`; corpus → contrastive training pairs, with leakage measured. Carries a `negatives` field this layer never fills in. |
 | `exceptions.py` | `CorpusError` and its subclasses `CorpusFormatError`, `SegmentationError`, `EmptyCorpusError`. |
 | `base/` | Structural base classes for nodes — see `base/README.md`. |
 | `metadata/` | Metadata records for each level — see `metadata/README.md`. |
@@ -121,7 +121,17 @@ All three names are accepted by `CorpusConfig.format` and by the `--format` opti
 
 `CorpusReader.iter_documents` is a generator, and so is every `read_file` implementation, so a corpus larger than memory flows through the pipeline one document at a time. `paths()` sorts, so two runs over the same directory produce the same document sequence — reproducibility that matters because document order feeds `Corpus.split`'s shuffle and the vocabulary's tie-breaking.
 
+The consequence for error handling caught a consumer, and is now written next to `CorpusReader` itself: constructing a reader raises nothing about the corpus. A `try` around `reader_for(path)` translates no missing file and no malformed line, because `iter_documents`' body has not run yet — it runs when the caller iterates, after the handler has exited. Wrap the *iteration*. The single exception is an explicit `format` naming no registered reader, which raises `RegistryError` at construction; under `auto` even that is silent, since an unrecognised extension falls back to `TextFileReader`.
+
 `SentenceStream` is the subtler piece. It implements `Iterable[str]`, **not** `Iterator[str]`: it holds a `factory` callable and calls it afresh in every `__iter__`. Training makes several passes over the sentences, and a plain generator is exhausted after one — the natural workaround, materialising the sentences into a list, bounds corpus size by RAM and defeats the streaming readers entirely. Because each pass restarts the reader, multi-epoch training over a corpus larger than memory works with no special handling at the call site. `map` and `limited` return new streams rather than mutating, so a stream can be shared. `count()` is documented as costing a full pass precisely because the type invites forgetting that.
+
+### The loader's public functions took a private type
+
+`load_corpus`, `stream_documents`, `stream_sentences`, `build_reader` and `build_filter` are all exported from `multilingual_embedding.corpus`, and every one of them accepted a `CorpusConfig` and nothing else. `CorpusConfig` lives in `config`, which `CHANGELOG.md` puts outside the public guarantee — so a published function was reachable only through a type this repo may change in a patch release, and a change this repo would call internal could break a consumer's build. A sibling repository found the same shape on `SentencePieceTrainerAdapter` and worked around this one.
+
+`corpus_from`, `documents_from` and `sentences_from` take a source and plain settings instead. The config forms stay: inside this repository a `CorpusConfig` already exists, because a YAML file produced it, and threading ten keyword arguments through the pipelines layer to avoid a type it already holds would be worse. `build_reader` needs no twin — the public `reader_for` already is one.
+
+Each argument defaults to `None` meaning *keep the framework default*, so the defaults have exactly one home, and a test asserts the values match `CorpusConfig`'s rather than a copy restated in three signatures. A second test asserts no annotation in any of the three names `CorpusConfig` or `config`, because that guarantee is the whole point of them and review does not catch a regression in it.
 
 ### `Corpus.split()` splits documents, not sentences
 
@@ -211,6 +221,8 @@ Contrastive training needs an anchor and a positive — a query and the passage 
 `token_overlap` had a silent bug worth stating, because it disabled the safety check for exactly the scripts that need it most. Overlap was computed on whitespace-split words, so for Han, Kana and Thai — which put no spaces between words — a whole sentence was a single token, two texts sharing every character intersected in nothing, and every such pair reported an overlap of `0.0` and passed the leakage filter however contaminated it was. `_units` now branches on `is_whitespace_delimited` and uses **character bigrams** for non-delimited scripts. Crude, but it compares what is actually shared, and the measure now means the same thing in Hindi, English and Japanese.
 
 **A second, quieter problem is the false negative.** Contrastive training treats every other passage in the batch as a negative, so two pairs mined from the *same* article punish the model for noticing they are related. Every `MinedPair` therefore carries the `document` identifier it came from, which is what lets a sampler keep them apart. `language` is carried for the same class of reason: a mixed-language pair set has to stay separable, or a per-language result cannot be computed afterwards.
+
+**Hard negatives ride on the record but are not produced here.** `MinedPair.negatives` holds passages a model confuses with the right answer, and finding one requires a model — which this layer sits below and must not learn about. So the split follows the layering: `corpus` owns the file format, `embedding.negatives` owns the algorithm. The field defaults to empty and is *omitted* from `to_record()` when it is, so a pair file written before it existed round-trips to a byte-identical line and a million-line file is not inflated by a million empty lists. Blank entries are dropped on the way back in, because an empty string encodes to a zero vector and would become a training column every anchor scores at exactly zero.
 
 Rejections are counted **against their reason**, not into a single number. `_candidates` yields before any filtering so that `PairStatistics` can report `short_anchor`, `short_positive`, `overlap` and `duplicate` separately — an unexpectedly small pair set is then traceable to the rule responsible rather than guessed at. Duplicates are exact-match on a hash of `anchor\x00positive`, so the same lead paragraph reached from two directions counts once.
 

@@ -17,11 +17,20 @@ Both apply the filtering configured in
 :class:`~multilingual_embedding.config.base.CorpusConfig`, so cleaning
 rules cannot be accidentally skipped by one caller and applied by
 another.
+
+Each has a config-free twin — :func:`documents_from`, :func:`corpus_from`
+and :func:`sentences_from` — taking a source and plain settings. Those
+are what a repository pinning this one should call: ``CorpusConfig``
+belongs to ``config``, which is internal and free to change in a patch
+release, so a public function that can only be reached through it is a
+promise with a hole in it.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
+from pathlib import Path
+from typing import Any
 
 from multilingual_embedding.config.base import CorpusConfig
 from multilingual_embedding.core.exceptions import ConfigurationError
@@ -36,7 +45,10 @@ from .validators import DocumentDeduplicator, SentenceFilter
 __all__ = [
     "build_filter",
     "build_reader",
+    "corpus_from",
+    "documents_from",
     "load_corpus",
+    "sentences_from",
     "stream_documents",
     "stream_sentences",
 ]
@@ -168,6 +180,211 @@ def stream_sentences(
                 yield sentence.text
 
     return SentenceStream(factory, limit=limit)
+
+
+def _settings(
+    source: str | Path,
+    *,
+    format: str | None,
+    patterns: Sequence[str] | None,
+    language: str | None,
+    encoding: str | None,
+    text_field: str | None,
+    min_sentence_characters: int | None,
+    max_sentence_characters: int | None,
+    lowercase: bool | None,
+) -> CorpusConfig:
+    """
+    Assemble the internal config the three public twins delegate to.
+
+    Private, and deliberately so: it returns the very type those
+    functions exist to keep out of a consumer's imports. ``None`` means
+    *keep the framework default* rather than restating it here, because
+    two copies of a default drift and the copy in a signature drifts
+    silently.
+    """
+
+    given: dict[str, Any] = {}
+
+    for name, value in (
+        ("format", format),
+        ("patterns", patterns),
+        ("language", language),
+        ("encoding", encoding),
+        ("text_field", text_field),
+        ("min_sentence_characters", min_sentence_characters),
+        ("max_sentence_characters", max_sentence_characters),
+        ("lowercase", lowercase),
+    ):
+        if value is None:
+            continue
+
+        given[name] = value
+
+    # Copied rather than referenced: the config owns the list and would
+    # otherwise share it with the caller's literal.
+    if "patterns" in given:
+        given["patterns"] = list(given["patterns"])
+
+    return CorpusConfig(source=Path(source), **given)
+
+
+def documents_from(
+    source: str | Path,
+    *,
+    format: str | None = None,
+    patterns: Sequence[str] | None = None,
+    language: str | None = None,
+    encoding: str | None = None,
+    text_field: str | None = None,
+    min_sentence_characters: int | None = None,
+    max_sentence_characters: int | None = None,
+    lowercase: bool | None = None,
+    deduplicate: bool = True,
+) -> Iterator[Document]:
+    """
+    :func:`stream_documents`, from a source and plain settings.
+
+    The config-taking form is for callers inside this repository, which
+    already hold a ``CorpusConfig`` because a YAML file produced one.
+    This is the form for callers outside it.
+
+    Parameters
+    ----------
+    source:
+        File or directory to read.
+
+    format:
+        Reader name, or ``"auto"`` to choose by extension.
+
+    patterns:
+        Glob patterns used when ``source`` is a directory.
+
+    language:
+        Language code applied to documents that do not declare one.
+
+    encoding:
+        Character encoding of the source files.
+
+    text_field:
+        Record key holding the text, for record-structured formats.
+
+    min_sentence_characters, max_sentence_characters:
+        Sentence length bounds, applied as documents stream past.
+
+    lowercase:
+        Fold case while loading. Off by default — casing is a tokenizer
+        concern, and folding it here destroys it for every consumer of
+        the corpus at once.
+
+    deduplicate:
+        Drop documents whose text was already seen. Memory grows by one
+        hash per distinct document.
+
+    Notes
+    -----
+    A generator: nothing is read, and nothing about the corpus raises,
+    until the caller iterates. A ``try`` around this call translates no
+    missing file and no malformed line — wrap the iteration instead.
+
+    Omit any setting to keep the framework default rather than restating
+    it at the call site.
+    """
+
+    return stream_documents(
+        _settings(
+            source,
+            format=format,
+            patterns=patterns,
+            language=language,
+            encoding=encoding,
+            text_field=text_field,
+            min_sentence_characters=min_sentence_characters,
+            max_sentence_characters=max_sentence_characters,
+            lowercase=lowercase,
+        ),
+        deduplicate=deduplicate,
+    )
+
+
+def corpus_from(
+    source: str | Path,
+    *,
+    format: str | None = None,
+    patterns: Sequence[str] | None = None,
+    language: str | None = None,
+    encoding: str | None = None,
+    text_field: str | None = None,
+    min_sentence_characters: int | None = None,
+    max_sentence_characters: int | None = None,
+    lowercase: bool | None = None,
+    deduplicate: bool = True,
+    name: str | None = None,
+) -> Corpus:
+    """
+    :func:`load_corpus`, from a source and plain settings.
+
+    Materialises everything into memory; prefer :func:`sentences_from`
+    for training and use this when random access or splitting is
+    required. Arguments are :func:`documents_from`'s, plus ``name`` for
+    the resulting corpus.
+    """
+
+    return load_corpus(
+        _settings(
+            source,
+            format=format,
+            patterns=patterns,
+            language=language,
+            encoding=encoding,
+            text_field=text_field,
+            min_sentence_characters=min_sentence_characters,
+            max_sentence_characters=max_sentence_characters,
+            lowercase=lowercase,
+        ),
+        deduplicate=deduplicate,
+        name=name,
+    )
+
+
+def sentences_from(
+    source: str | Path,
+    *,
+    format: str | None = None,
+    patterns: Sequence[str] | None = None,
+    language: str | None = None,
+    encoding: str | None = None,
+    text_field: str | None = None,
+    min_sentence_characters: int | None = None,
+    max_sentence_characters: int | None = None,
+    lowercase: bool | None = None,
+    deduplicate: bool = True,
+    limit: int | None = None,
+) -> SentenceStream:
+    """
+    :func:`stream_sentences`, from a source and plain settings.
+
+    Returns a re-iterable stream that restarts the reader on every pass,
+    so it can be iterated once per training epoch without holding the
+    corpus in memory. Arguments are :func:`documents_from`'s, plus
+    ``limit`` as a cap on sentences per pass.
+    """
+
+    return stream_sentences(
+        _settings(
+            source,
+            format=format,
+            patterns=patterns,
+            language=language,
+            encoding=encoding,
+            text_field=text_field,
+            min_sentence_characters=min_sentence_characters,
+            max_sentence_characters=max_sentence_characters,
+            lowercase=lowercase,
+        ),
+        deduplicate=deduplicate,
+        limit=limit,
+    )
 
 
 def _lowercase_document(document: Document) -> None:
