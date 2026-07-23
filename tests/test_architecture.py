@@ -32,6 +32,7 @@ LAYERS: tuple[str, ...] = (
     "embedding",
     "evaluation",
     "pipelines",
+    "serving",
 )
 
 LAYER_RANK: dict[str, int] = {name: index for index, name in enumerate(LAYERS)}

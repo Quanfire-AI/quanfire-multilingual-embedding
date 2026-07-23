@@ -343,7 +343,8 @@ base URL.
 - **Deliverables:** embeddings endpoint; batching; model versioning; dimension
   truncation; ONNX export and quantisation; container image; auth and rate limiting.
 - **Exit criterion:** p95 under 100 ms for a short input, and a client switches by
-  changing only the base URL.
+  changing only the base URL — amended below, because the second half of that turned out
+  to be the wrong thing to want.
 
 #### The experiment became a command — 22 July 2026
 
@@ -405,8 +406,53 @@ Two things came out of it that were not the goal:
   — with the right shapes and plausible results throughout. There is a regression test on
   it now.
 
-Not done, and still the bulk of the phase: the HTTP endpoint, model versioning, dimension
-truncation, ONNX export, the container image, auth and rate limiting.
+#### The endpoint — done, 23 July 2026
+
+`qfme serve --adapter models/indic-v1` puts a saved adapter behind the de facto
+industry-standard embeddings schema. Three routes — `/health`, `/v1/models`,
+`/v1/embeddings` — in a new top layer above `pipelines`, behind a `serve` extra so that
+FastAPI stays optional for every other use. A test asserts in a fresh interpreter that
+building the CLI parser leaves `fastapi` out of `sys.modules`, so an import moved to module
+scope by a later edit fails the build rather than making the extra mandatory for
+`qfme stats`.
+
+The design question was not how to write the routes. It was that **the standard schema has
+no field for the one thing this model cannot be served without.** There is nowhere to say
+whether a string is a query or a passage. Three ways out, and only one whose failure mode is
+visible:
+
+| | Consequence |
+|---|---|
+| Default to `query` | Every passage-indexing job is silently wrong, and the symptom is a slightly worse index nobody attributes to this. |
+| Default to `passage` | The same, on the other side. |
+| Refuse, name both values, offer an operator default | One line of client code, once, per deployment. |
+
+So an asymmetric model with no configured default answers `400` naming both valid values,
+and `--default-input-type` exists for the deployment that genuinely is single-sided. That
+gives up strict one-line client compatibility, which was the phase's stated exit criterion,
+and it is the right trade: a client that changes only its base URL and gets quietly worse
+retrieval has been served badly. The exit criterion should have said so.
+
+The decisive test compares the vectors returned for the same text on each side and requires
+them to differ. A server that stored `query: `, reported it in `prefix_applied` and never
+prepended it would answer 200 with the right dimension, unit norm and no NaN, and every
+other assertion would still pass.
+
+Two defects surfaced while writing the model card, both of the same kind — a confident
+number that was wrong:
+
+- `max_length` came from `getattr(encoder, "max_length", 0)` and published `0` for a model
+  whose real limit is 256. A client sizing its chunks from that field had no way to know.
+  It now reads `adapter.json`, with defaults matching `load_adapter`'s exactly.
+- Chasing that found `load_adapter` recording `normalize` in the manifest since format 1
+  and never reading it back. An encoder saved with normalization off reloaded with it on:
+  cosine scores unaffected, dot-product scores not, nothing raised. Fixed, with a test that
+  asserts the property rather than the flag.
+
+Not done, and the remainder of the phase: model versioning beyond a single served adapter,
+cross-request batching, dimension truncation, ONNX export and quantisation, the container
+image, auth and rate limiting. The endpoint binds `127.0.0.1` by default because of that
+last one.
 
 ### Phase E — From-scratch pretraining *(capability, not default)*
 
@@ -494,7 +540,7 @@ preparation parallelises across 20 cores.
 | Transformer encoder | **Phase A** |
 | Contrastive training | **Phase B** |
 | Pair mining | **Phase C** |
-| Serving | **Phase D** — local path done (`from_adapter`) and the adaptation experiment is a command (`qfme adapt`); endpoint, ONNX, container and a neural stage in `TrainingPipeline` outstanding |
+| Serving | **Phase D** — local path (`from_adapter`), the adaptation experiment as a command (`qfme adapt`) and the HTTP endpoint (`qfme serve`) all done; dimension truncation, ONNX, container, auth and a neural stage in `TrainingPipeline` outstanding |
 | From-scratch pretraining | **Phase E** |
 
 ---

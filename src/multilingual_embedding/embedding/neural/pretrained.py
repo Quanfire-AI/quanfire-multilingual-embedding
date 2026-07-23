@@ -228,6 +228,7 @@ class PretrainedTextEncoder:
         device: str | torch.device | None = None,
         batch_size: int = 32,
         max_length: int = 512,
+        normalize: bool = True,
         local_files_only: bool = False,
         **options: Any,
     ) -> PretrainedTextEncoder:
@@ -288,6 +289,7 @@ class PretrainedTextEncoder:
             device=device,
             batch_size=batch_size,
             max_length=max_length,
+            normalize=normalize,
             name=name,
         )
 

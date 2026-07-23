@@ -18,7 +18,7 @@ an **adapted** published checkpoint — LoRA over frozen `multilingual-e5-small`
 The last is what produces the models this project ships; the first is the floor the others
 are measured against. The second and third need the optional `neural` extra.
 
-**1357 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
+**1405 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
 
 **Proven on real data:** a published checkpoint adapted on mined Hindi and Tamil Wikipedia
 pairs beats itself by **+28.6% (Hindi)** and **+40.9% (Tamil)** recall@1 on held-out
@@ -51,7 +51,7 @@ retrieval, training **0.50%** of its parameters into a **3.4 MB** artefact.
 - [Limitations](#limitations)
 
 > **Where this is going:** [ROADMAP.md](ROADMAP.md) tracks the remaining work — domain pair
-> miners, hard negatives, a serving API, and from-scratch pretraining.
+> miners, hard negatives, dimension truncation, and from-scratch pretraining.
 > [ECOSYSTEM.md](ECOSYSTEM.md) places this repository within the wider QuanFire AI stack;
 > everything outside embeddings lives there and nowhere in this README.
 
@@ -741,6 +741,8 @@ it — enforced by [`tests/test_architecture.py`](tests/test_architecture.py), w
 parses the source and fails on any upward or sideways import.
 
 ```
+serving          the embeddings endpoint
+    |
 pipelines        training and search workflows
     |
 evaluation       metrics, scoring, reports
@@ -776,6 +778,7 @@ example:
 | [`embedding/neural`](src/multilingual_embedding/embedding/neural/README.md) | Transformer encoder, contrastive training, LoRA, gradient caching, pretrained adaptation, the adapter artefact |
 | [`evaluation`](src/multilingual_embedding/evaluation/README.md) | Metrics, scoring, reports |
 | [`pipelines`](src/multilingual_embedding/pipelines/README.md) | Training and search workflows |
+| [`serving`](src/multilingual_embedding/serving/README.md) | The embeddings endpoint, and the query/passage side it refuses to guess |
 
 Outside the package, [`scripts/`](scripts/README.md) holds the adaptation experiment, the
 end-to-end verifier and one diagnostic, and [`data/`](data/README.md) documents the corpus
@@ -924,15 +927,43 @@ against. The `cpu` profile trains a worse model on purpose. Full treatment in
 
 ## Running in production
 
-The framework is a library and a CLI, not a service. There is no server, scheduler or
-database to operate. Production use means two separable concerns: an offline training
-job, and an online inference process that loads its artefacts.
+The framework is a library, a CLI and — behind the optional `serve` extra — a single
+HTTP endpoint. There is no scheduler or database to operate. Production use means two
+separable concerns: an offline training job, and an online inference process that loads
+its artefacts.
 
 ### Separate training from serving
 
 Training is a batch job — CPU-bound, memory-flat, minutes to hours depending on corpus
 size. Serving loads the artefacts and answers queries. Do not train inside a request
 path.
+
+### The endpoint
+
+`qfme serve` puts a saved adapter behind the de facto industry-standard embeddings
+schema, so a client migrates by changing a base URL:
+
+```bash
+uv sync --extra serve --extra pretrained --extra neural
+
+qfme serve --adapter models/indic-v1 --port 8000
+
+curl localhost:8000/v1/embeddings \
+  -H 'content-type: application/json' \
+  -d '{"input": "संविधान में मौलिक अधिकार", "input_type": "query"}'
+```
+
+`input_type` is the one field that is not in the standard schema, and it is not
+optional decoration. An E5-family model is trained with `query: ` on one side and
+`passage: ` on the other; served without them it returns vectors of the right shape and
+norm, free of NaN, that encode the wrong thing. So an asymmetric model answers `400`
+naming both valid values rather than guessing, and a deployment that genuinely is
+single-sided sets `--default-input-type` once. See
+[`serving/README.md`](src/multilingual_embedding/serving/README.md).
+
+The endpoint has no authentication and no rate limiting, which is why it binds
+`127.0.0.1` by default. Exposing it is `--host 0.0.0.0` behind something that terminates
+TLS and checks credentials.
 
 ```
    [ batch job ]                        [ long-lived process ]
@@ -1078,11 +1109,12 @@ quanfire-multilingual-embedding/
 │   ├── common/  core/  config/  utils/
 │   ├── corpus/                     tree, segmentation, readers, wikipedia.py, pairs.py
 │   ├── vocabulary/  tokenizer/  evaluation/  pipelines/
+│   ├── serving/                    the embeddings endpoint (`serve` extra)
 │   ├── embedding/                  word2vec and the TextEncoder contract
 │   │   └── neural/                 transformer, LoRA, gradcache, pretrained, adapter
 │   ├── cli.py                      the `qfme` command
 │   └── py.typed                    marks the package as typed for consumers
-├── tests/                          1357 tests mirroring the source layout
+├── tests/                          1405 tests mirroring the source layout
 ├── scripts/                        adapt_pretrained.py, verify_e2e.py, diagnose_audit.py
 ├── configs/                        compute profiles — cpu.yaml, gpu.yaml
 ├── examples/                       runnable end-to-end example and a walkthrough

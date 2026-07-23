@@ -567,7 +567,7 @@ platform alone.
 `pytest.importorskip("torch")`, so a core-only checkout collects fewer and still runs green.
 `test_pretrained.py` and `test_adapter.py` build a small BERT locally rather than
 downloading one — nothing here reaches the network. The layering rule described above is
-enforced separately by `tests/test_architecture.py` (16 tests).
+enforced separately by `tests/test_architecture.py` (17 tests).
 
 ## What is not here
 

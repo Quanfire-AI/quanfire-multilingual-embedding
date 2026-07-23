@@ -241,6 +241,13 @@ def load_adapter(
         pooling=payload.get("pooling", "mean"),
         device=device,
         max_length=int(payload.get("max_length", 512)),
+        # Restored rather than left to default. An encoder saved with
+        # normalization off and reloaded with it on returns vectors of a
+        # different magnitude for the same text: cosine scores are
+        # unchanged, dot-product scores are not, and nothing raises. The
+        # manifest has recorded this since format 1; it was simply not
+        # being read.
+        normalize=bool(payload.get("normalize", True)),
         local_files_only=local_files_only,
     )
 

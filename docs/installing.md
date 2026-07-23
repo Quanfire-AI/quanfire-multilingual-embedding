@@ -42,7 +42,7 @@ $ cd /tmp
 $ which qfme
 /Users/you/.local/bin/qfme
 $ qfme --version
-qfme 0.2.1
+qfme 0.3.0
 ```
 
 ### What it actually did
@@ -77,10 +77,12 @@ characters.
 | Extra | Adds | Omitting it means |
 |---|---|---|
 | `neural` | PyTorch | No contextual encoder. Everything else works. |
+| `pretrained` | transformers | No adapting or loading a published checkpoint. |
 | `wikipedia` | mwparserfromhell | `qfme extract` refuses to run, saying so clearly. |
+| `serve` | FastAPI, uvicorn | `qfme serve` reports what to install and exits 1. |
 
-Omit both for a small install — corpus handling, tokenizer, vocabulary, word2vec, search
-and evaluation do not need either.
+Omit them all for a small install — corpus handling, tokenizer, vocabulary, word2vec,
+search and evaluation need none of them.
 
 ---
 
@@ -168,7 +170,7 @@ source afterwards changes nothing.
 
 ```bash
 git clone <url> && cd quanfire-multilingual-embedding
-uv sync --extra neural --extra wikipedia
+uv sync --extra neural --extra pretrained --extra wikipedia --extra serve
 source .venv/bin/activate
 pytest -q
 ```
@@ -189,7 +191,7 @@ QuanFire repository that wants the corpus, vocabulary, tokenizer or evaluation l
 without reimplementing them.
 
 ```bash
-uv add "quanfire-multilingual-embedding @ git+ssh://git@github.com/<owner>/quanfire-multilingual-embedding.git@v0.2.1"
+uv add "quanfire-multilingual-embedding @ git+ssh://git@github.com/<owner>/quanfire-multilingual-embedding.git@v0.3.0"
 ```
 
 **Pin a tag, never a branch.** `uv tool upgrade` re-fetching the default branch is fine
@@ -269,7 +271,7 @@ without a deploy key, or someone you would rather not add to the repository:
 ```bash
 uv build --wheel                    # writes dist/*.whl
 # send the file, then on their machine:
-uv tool install ./quanfire_multilingual_embedding-0.2.1-py3-none-any.whl
+uv tool install ./quanfire_multilingual_embedding-0.3.0-py3-none-any.whl
 ```
 
 The trade is that they get a frozen copy with no upgrade path — `uv tool upgrade` has

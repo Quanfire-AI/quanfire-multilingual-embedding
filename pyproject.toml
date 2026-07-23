@@ -48,6 +48,16 @@ pretrained = [
     "transformers>=4.40,<5",
 ]
 
+# The HTTP endpoint. Optional because serving is one deployment of this
+# project and every other use — training, evaluation, the CLI, a library
+# consumer — needs none of it.
+#
+#     uv sync --extra serve
+serve = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
+]
+
 # Wikipedia extraction. Optional because most callers consume a corpus
 # rather than build one, and because MediaWiki markup is the only reason
 # this dependency exists — the parser is not used anywhere else.
@@ -73,6 +83,9 @@ packages = ["src/multilingual_embedding"]
 [dependency-groups]
 dev = [
     "build>=1,<2",
+    # Starlette's TestClient is built on httpx, so exercising the serving
+    # layer in-process needs it. Test-only: the server itself does not.
+    "httpx>=0.27,<1",
     "mkdocs>=1.6,<2",
     "mkdocs-material>=9,<10",
     "mypy>=1.17,<2",

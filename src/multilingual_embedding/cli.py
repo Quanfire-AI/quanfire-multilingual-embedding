@@ -1,7 +1,7 @@
 """
 Command line interface.
 
-Installed as ``qfme``. Eight subcommands cover the lifecycle::
+Installed as ``qfme``. Nine subcommands cover the lifecycle::
 
     qfme stats    --source data/corpus.jsonl
     qfme validate --source data/corpus.jsonl
@@ -11,6 +11,7 @@ Installed as ``qfme``. Eight subcommands cover the lifecycle::
     qfme adapt    --config experiments/indic.yaml --profile configs/gpu.yaml
     qfme search   --experiment artifacts/demo --query "machine learning"
     qfme evaluate --experiment artifacts/demo --source data/corpus.jsonl
+    qfme serve    --adapter models/indic-v1 --port 8000
 
 Two of them exit non-zero on a result rather than on an error, so a data
 pipeline can gate on them. ``validate`` audits a corpus before anything
@@ -109,6 +110,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_evaluate_parser(subparsers)
 
+    _add_serve_parser(subparsers)
+
     return parser
 
 
@@ -138,6 +141,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "adapt": _run_adapt,
         "search": _run_search,
         "evaluate": _run_evaluate,
+        "serve": _run_serve,
     }
 
     try:
@@ -484,6 +488,52 @@ def _add_evaluate_parser(subparsers: Any) -> None:
     parser.add_argument("--format", default="auto", choices=["auto", "text", "lines", "jsonl"])
 
     parser.add_argument("--output", type=Path, help="Write the report JSON here")
+
+
+def _add_serve_parser(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "serve",
+        help="Serve an adapter over HTTP",
+        description=(
+            "Serve an adapter behind an embeddings endpoint. Requires the "
+            "`serve` extra: uv sync --extra serve --extra pretrained"
+        ),
+    )
+
+    parser.add_argument(
+        "--adapter",
+        type=Path,
+        required=True,
+        help="Adapter directory produced by `qfme adapt --save-adapter`",
+    )
+
+    parser.add_argument(
+        "--model-id",
+        default="",
+        help="Name clients use (default: the adapter directory's own name)",
+    )
+
+    parser.add_argument(
+        "--default-input-type",
+        choices=["query", "passage"],
+        help=(
+            "Side to assume when a request omits input_type. Without it an "
+            "asymmetric model answers 400 rather than guessing, because "
+            "embedding text on the wrong side returns a plausible vector "
+            "that encodes the wrong thing. Set it only when every caller of "
+            "this deployment is on one side."
+        ),
+    )
+
+    parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
+
+    parser.add_argument("--port", type=int, default=8000, help="Bind port (default: 8000)")
+
+    parser.add_argument(
+        "--local-files-only",
+        action="store_true",
+        help="Refuse to fetch the base checkpoint from the network",
+    )
 
 
 # ----------------------------------------------------------------------
@@ -835,6 +885,49 @@ def _run_evaluate(args: argparse.Namespace) -> int:
         print(f"Wrote report to {args.output}")
     else:
         print(report.to_markdown())
+
+    return EXIT_SUCCESS
+
+
+def _run_serve(args: argparse.Namespace) -> int:
+    """Serve an adapter over HTTP until interrupted.
+
+    Binds the loopback address by default. The endpoint has no
+    authentication and no rate limiting, so a default of ``0.0.0.0``
+    would put an unauthenticated GPU-backed service on whatever network
+    the host happens to be on the first time someone runs this. Reaching
+    it from elsewhere is an explicit ``--host 0.0.0.0`` behind something
+    that terminates TLS and checks credentials.
+    """
+
+    try:
+        import uvicorn
+
+        from multilingual_embedding.serving.app import ServingConfig, create_app
+    except ImportError as error:  # pragma: no cover - depends on the install
+        print(
+            f"error: serving needs the `serve` extra ({error.name} is missing). "
+            "Install it with: uv sync --extra serve --extra pretrained",
+            file=sys.stderr,
+        )
+
+        return EXIT_ERROR
+
+    config = ServingConfig(
+        adapter_directory=Path(args.adapter),
+        model_id=args.model_id,
+        default_input_type=args.default_input_type,
+        local_files_only=args.local_files_only,
+    )
+
+    # Built here rather than passed as a factory string so that a broken
+    # adapter fails now, with this process's error handling, instead of
+    # inside uvicorn's startup after it has already claimed the port.
+    app = create_app(config)
+
+    print(f"Serving {config.resolved_model_id()} on http://{args.host}:{args.port}")
+
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
     return EXIT_SUCCESS
 

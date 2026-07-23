@@ -44,6 +44,42 @@ absent.
 **Not public.** Everything else, `embedding/` and `pipelines/` included. They may move
 without a minor bump.
 
+## 0.3.0 — 2026-07-23
+
+Minor bump for one behaviour change in a saved artefact's reload path. Nothing in the
+public surface above moved, and a consumer using only that surface can take this as a
+patch.
+
+### Added
+
+- **An HTTP embeddings endpoint.** `qfme serve --adapter models/indic-v1` puts a saved
+  adapter behind the de facto industry-standard schema — `/health`, `/v1/models`,
+  `/v1/embeddings` — so a client migrates by changing a base URL. New `serving` layer,
+  new `serve` extra (FastAPI, uvicorn).
+
+  One field is an addition rather than a copy. The standard schema has nowhere to say
+  whether a string is a query or a passage, and an E5-family model served on the wrong
+  side returns a vector of the right shape and norm, free of NaN, that encodes the wrong
+  thing. So an asymmetric model with no configured default answers `400` naming both
+  valid values rather than guessing; `--default-input-type` covers the deployment that
+  genuinely is single-sided. Every response echoes `prefix_applied`.
+
+  The endpoint has no authentication or rate limiting and binds `127.0.0.1` by default.
+
+- `PretrainedTextEncoder.load` now accepts `normalize`.
+
+### Fixed
+
+- **`load_adapter` was dropping normalization.** `save_adapter` has recorded `normalize`
+  in the manifest since `format_version: 1` and the loader never read it, so an encoder
+  saved with normalization off reloaded with it on. Cosine scores are unaffected; a
+  dot-product index built over those vectors ranks differently, and nothing raised. Any
+  adapter saved with `normalize=False` will now reload — and serve — differently than it
+  did on 0.2.x, which is what the minor bump is for. Adapters saved with the default are
+  unaffected.
+- The served model card read `max_length` off the encoder via `getattr` and published
+  `0` for a model whose real limit is 256. It reads `adapter.json` now.
+
 ## 0.2.1 — 2026-07-23
 
 ### Added

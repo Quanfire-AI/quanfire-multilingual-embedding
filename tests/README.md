@@ -1,6 +1,6 @@
 # tests
 
-> The test suite. 1357 tests, 94% statement coverage, mirroring the source layout.
+> The test suite. 1405 tests, 94% statement coverage, mirroring the source layout.
 
 ## Purpose
 
@@ -39,8 +39,9 @@ failure appears:
 | [`embedding/`](embedding/README.md) | 177 | Matrix, word2vec, sentence encoders, index, contextual encoder, LoRA, gradient caching, pretrained checkpoints, adapter save/load |
 | [`evaluation/`](evaluation/README.md) | 89 | Metric primitives, evaluators, report rendering |
 | [`pipelines/`](pipelines/README.md) | 68 | Query/passage prefixes, batched indexing, building a pipeline from a saved adapter |
+| [`serving/`](serving/README.md) | 46 | The endpoint: prefixes across an HTTP boundary, the refusal to guess a side, request validation, `qfme serve` |
 | [`integration/`](integration/README.md) | 44 | End-to-end training, search and CLI, and verifying a copied adapter |
-| `test_architecture.py` | 16 | Layering rule, acyclic import graph, `py.typed` marker, encoder contract |
+| `test_architecture.py` | 17 | Layering rule, acyclic import graph, `py.typed` marker, encoder contract |
 | `test_public_api.py` | 15 | The surface sibling repositories pin, and that a base install stays torch-free |
 
 `conftest.py` holds shared fixtures, including the multilingual sample texts used
@@ -52,7 +53,7 @@ behave differently on genuine text.
 
 ```bash
 pytest                      # everything
-pytest -m "not slow"        # skip the model-training integration tests (1297 tests)
+pytest -m "not slow"        # skip the model-training integration tests (1361 tests)
 pytest --cov                # with coverage report
 pytest tests/corpus -q      # one package
 pytest -k segmentation      # by name
@@ -92,7 +93,7 @@ Nothing reaches the network. Model-training tests use deliberately small dimensi
 few epochs.
 
 **Optional dependencies skip rather than fail.** The contextual-encoder tests in
-`embedding/`, the adapter test in `pipelines/` and all of
+`embedding/`, the adapter test in `pipelines/`, all of `serving/test_app.py` and all of
 `integration/test_saved_adapter.py` require torch, which lives behind the `neural` extra.
 They use `pytest.importorskip`, so a checkout with only the core dependencies installed
 still runs green — it simply runs fewer tests. The counts in the table above are for a

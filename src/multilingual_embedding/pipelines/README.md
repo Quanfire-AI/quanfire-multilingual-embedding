@@ -306,4 +306,4 @@ covers loading from a directory, indexing and querying.
 
 `.venv/bin/python -m pytest tests/pipelines tests/integration -q` reports
 **97 passed**. The rule that nothing below may import this package is enforced by
-`tests/test_architecture.py` (16 tests).
+`tests/test_architecture.py` (17 tests).

@@ -151,6 +151,38 @@ class TestTheArtefactCarriesHowToUseIt:
 
         assert metadata.passage_prefix == "passage: "
 
+    def test_normalization_survives(self) -> None:
+        """
+        The manifest has recorded this since format 1, and the loader was
+        not reading it.
+
+        An encoder saved with normalization off and reloaded with it on
+        returns unit vectors for text that should have produced vectors
+        of varying magnitude. Cosine scores are unaffected, so a search
+        pipeline looks fine; a dot-product index built over those vectors
+        ranks differently, and nothing anywhere raises.
+        """
+
+        directory = base_checkpoint()
+
+        encoder = PretrainedTextEncoder.load(
+            str(directory / "base"), device="cpu", max_length=32, normalize=False
+        )
+
+        config = LoRAConfig(rank=8, alpha=16, targets=("query", "value"))
+
+        apply_lora(encoder._model, config)
+
+        save_adapter(encoder, directory / "saved", lora=config)
+
+        reloaded, _ = load_adapter(directory / "saved", device="cpu")
+
+        assert reloaded._normalize is False
+
+        # The property, not just the flag: unnormalized vectors have no
+        # reason to land on the unit sphere.
+        assert not np.allclose(np.linalg.norm(reloaded.encode_batch(PROBE), axis=1), 1.0)
+
     def test_provenance_survives(self) -> None:
         directory = base_checkpoint()
 
