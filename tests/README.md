@@ -1,10 +1,10 @@
 # tests
 
-> The test suite. 1499 tests, 94% statement coverage, mirroring the source layout.
+> The test suite. 1504 tests, 94% statement coverage, mirroring the source layout.
 
 ## Purpose
 
-Tests here serve three distinct jobs, and it is worth knowing which is which when a
+Tests here serve five distinct jobs, and it is worth knowing which is which when a
 failure appears:
 
 1. **Unit tests** verify one module against its contract. They live in a directory
@@ -24,6 +24,11 @@ failure appears:
    properties fail silently otherwise: a rename that looks internal here breaks a
    consumer's CI, and an import added to an `__init__.py` by someone who has torch drags
    the training stack into a base install without anything here noticing.
+5. **Data policy tests** (`test_data_policy.py`) assert what the git history is allowed
+   to carry: no customer text, and a declared synthetic origin on every record of every
+   tracked corpus file. This is the one job in the list where a failure caught late
+   cannot be undone — text committed once stays in the history after the file is
+   deleted — so it is asserted rather than left to review.
 
 ## Layout
 
@@ -43,6 +48,7 @@ failure appears:
 | [`integration/`](integration/README.md) | 49 | End-to-end training, search and CLI, verifying a copied adapter, and the documents → pairs → negatives → trained model chain |
 | `test_architecture.py` | 17 | Layering rule, acyclic import graph, `py.typed` marker, encoder contract |
 | `test_public_api.py` | 21 | The surface sibling repositories pin, and that a base install stays torch-free |
+| `test_data_policy.py` | 5 | That no real text is in the history: every tracked corpus file declares synthetic provenance on every record |
 
 `conftest.py` holds shared fixtures, including the multilingual sample texts used
 throughout. Those are real sentences in each script rather than placeholder text,

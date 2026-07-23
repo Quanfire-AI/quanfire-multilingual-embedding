@@ -79,6 +79,39 @@ Ignore everything, then re-admit exactly two things. Written this way round beca
 alternative — listing each thing to ignore — fails open: a new `data/bengali-dump/` would be
 committed by accident, and a 250 MB blob in a git history is not something you undo.
 
+### The rule, stated: no customer text, anywhere
+
+**No customer or client text is committed to this repository, and none is used to train
+anything in it.** Every model this project has published was adapted on Wikipedia. The two
+corpora tracked here are generated from templates. Nothing else has ever been in the
+history.
+
+Size is the reason the `.gitignore` rule was written; this is the reason it matters. A
+corpus deleted in a later commit is still in the history, so there is no version of this
+mistake that gets corrected afterwards — which makes it one of the few decisions here worth
+enforcing rather than remembering.
+
+[`tests/test_data_policy.py`](../tests/test_data_policy.py) asserts the part of that a
+machine can check: every JSON Lines file git tracks, anywhere in the repository, declares a
+`source` on every record, and every one of those begins `synthetic-`. A sample added with
+no `source` field fails, which is deliberate — the file most likely to be real is the one
+whose provenance nobody thought to write down.
+
+Two things it cannot check, and that therefore stay a matter of judgement:
+
+- **Text that is not in a corpus file.** A client sentence pasted into a Python fixture, a
+  docstring or a markdown example is invisible to it. Nothing here reads prose looking for
+  a name.
+- **The weights.** A model adapted on customer text carries that text, and an adapter is
+  opaque to every check above. `models/indic-v1/adapter.json` records `trained_on` as a
+  *path*, which says nothing about provenance — see [done and pending](#done-and-pending).
+
+If a domain-adapted model is ever wanted for real QuanFire documents, that is the decision
+to take first and explicitly: public domain-specific text, synthetic text written to the
+same shape (which is what `sample/domain-corpus.jsonl` demonstrates), or a per-tenant
+arrangement with a contractual basis. It is not a decision to arrive at by default because
+a pair file happened to be on the training machine.
+
 The dumps currently sitting here on the development machine are a good illustration of why:
 
 | File | Size |
@@ -492,6 +525,8 @@ judgement.
 | Hard-negative mining | ⬜ pending — Phase C's remaining piece |
 | Cross-lingual / translation pairs | ⬜ pending |
 | Dataset versioning, checksums, dump-date provenance | ⬜ pending |
+| No-customer-text policy, asserted on every tracked corpus file | ✅ done — `tests/test_data_policy.py` |
+| Training-data provenance recorded in a saved adapter | ⬜ pending — `adapter.json` records a path, not an origin |
 | `qfme fetch` for dumps | ❌ not planned — `curl` does this better |
 
 Related reading: [`../src/multilingual_embedding/corpus/README.md`](../src/multilingual_embedding/corpus/README.md)

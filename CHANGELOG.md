@@ -55,6 +55,29 @@ absent.
 **Not public.** Everything else, `embedding/` and `pipelines/` included. They may move
 without a minor bump.
 
+## Unreleased
+
+### Added
+
+- **A no-customer-text policy, asserted rather than described.**
+  `tests/test_data_policy.py` requires every JSON Lines file git tracks — anywhere in the
+  repository — to declare a `source` on every record, and every one of those to begin
+  `synthetic-`. A sample added with no `source` fails, because the file most likely to be
+  real is the one whose provenance nobody wrote down. It also holds `data/` to exactly the
+  sample corpora plus its README, and refuses any tracked `.gz`, `.bz2`, `.csv`,
+  `.parquet` or `.xml`.
+
+  `.gitignore` already said most of this, but an ignore rule is a convention held up by
+  whoever writes the next commit, and the failure mode is permanent: text committed once
+  stays in the history after the file is deleted. `examples/walkthrough/broken-extraction.jsonl`
+  gained `"source": "synthetic-broken"` on all six records so it satisfies the rule; the
+  deliberate encoding damage and the `qfme validate` output the walkthrough quotes are
+  unchanged.
+
+  Two gaps the test cannot close and that stay a matter of judgement: text pasted somewhere
+  that is not a corpus file, and the weights — a model adapted on customer text carries it,
+  and `adapter.json` records `trained_on` as a path rather than an origin.
+
 ## 0.3.2 — 2026-07-23
 
 A hole in the public surface, found by a consumer and closed. Additive: nothing that
