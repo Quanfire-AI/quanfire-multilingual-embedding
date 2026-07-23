@@ -1,6 +1,6 @@
 # tests
 
-> The test suite. 1341 tests, 94% statement coverage, mirroring the source layout.
+> The test suite. 1342 tests, 94% statement coverage, mirroring the source layout.
 
 ## Purpose
 
@@ -23,7 +23,7 @@ failure appears:
 
 | Directory | Tests | Covers |
 |---|---|---|
-| [`common/`](common/README.md) | 20 | Spans, enums, type aliases, constants, version |
+| [`common/`](common/README.md) | 21 | Spans, enums, type aliases, constants, version |
 | [`core/`](core/README.md) | 29 | Registry, factory, logging, exception context |
 | [`config/`](config/README.md) | 121 | Config validation, merging, precedence, compute profiles, persistence |
 | [`utils/`](utils/README.md) | 61 | Validation, hashing, filesystem, I/O, serialization |

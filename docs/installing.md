@@ -42,7 +42,7 @@ $ cd /tmp
 $ which qfme
 /Users/you/.local/bin/qfme
 $ qfme --version
-qfme 0.1.0
+qfme 0.2.0
 ```
 
 ### What it actually did
@@ -241,7 +241,7 @@ without a deploy key, or someone you would rather not add to the repository:
 ```bash
 uv build --wheel                    # writes dist/*.whl
 # send the file, then on their machine:
-uv tool install ./quanfire_multilingual_embedding-0.1.0-py3-none-any.whl
+uv tool install ./quanfire_multilingual_embedding-0.2.0-py3-none-any.whl
 ```
 
 The trade is that they get a frozen copy with no upgrade path — `uv tool upgrade` has

@@ -1,6 +1,9 @@
 [project]
 name = "quanfire-multilingual-embedding"
-version = "0.1.0"
+# Read from src/multilingual_embedding/common/version.py — see the note
+# there. A literal here would be a second source of truth that nothing
+# checks, and evaluation reports stamp the version they were produced by.
+dynamic = ["version"]
 description = "Production-ready multilingual NLP and embedding framework"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -60,6 +63,9 @@ qfme = "multilingual_embedding.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/multilingual_embedding/common/version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/multilingual_embedding"]

@@ -2,7 +2,7 @@
 
 > Tests for [`multilingual_embedding.common`](../../src/multilingual_embedding/common/README.md) — spans, enums, type aliases, constants.
 
-**20 tests.** Run with `pytest tests/common -q`.
+**21 tests.** Run with `pytest tests/common -q`.
 
 ## Files
 
@@ -12,7 +12,7 @@
 | `test_enums.py` | `TokenizerModel` and `SpecialToken` member values |
 | `test_types.py` | The text-hierarchy type aliases hold the shapes they claim |
 | `test_constants.py` | Framework constants are present and within sane bounds |
-| `test_version.py` | `__version__` is a non-empty string |
+| `test_version.py` | `__version__` is a non-empty string, and the installed distribution reports the same one |
 
 ## What matters here
 
