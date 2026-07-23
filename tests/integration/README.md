@@ -2,7 +2,7 @@
 
 > End-to-end tests exercising the real pipeline across every layer.
 
-**44 tests**, all marked `slow`. Run with `pytest tests/integration -q`, or skip them
+**49 tests**, all marked `slow`. Run with `pytest tests/integration -q`, or skip them
 with `pytest -m "not slow"`.
 
 Fifteen of them — the whole of `test_saved_adapter.py` — skip unless a trained adapter
@@ -15,6 +15,7 @@ Face cache. That is the normal state of a fresh checkout, not a failure.
 |---|---|
 | `test_end_to_end.py` | Training pipeline, evaluation results, search pipeline, CLI |
 | `test_saved_adapter.py` | A trained adapter copied from the GPU machine: that it is intact, that it reloads, and that it serves |
+| `test_hard_negatives.py` | Documents → pairs → negatives mined with a real torch encoder → a model that trains on them |
 
 ## Purpose
 

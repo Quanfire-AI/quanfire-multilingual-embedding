@@ -98,6 +98,34 @@ class TestPrefixes:
 
         assert prefixed(original, "", "") == original
 
+    def test_mined_negatives_take_the_passage_marker(self) -> None:
+        """
+        A negative is a passage — the model is being taught not to
+        retrieve it — so marking it as a query would put a whole class of
+        candidate columns in the wrong half of the space. The batch would
+        then find them easy for the wrong reason, and the loss would fall
+        to prove it.
+        """
+
+        one = MinedPair(
+            anchor="क्या",
+            positive="उत्तर",
+            kind="adjacent",
+            document="doc-1",
+            language="hi",
+            overlap=0.1,
+            negatives=("गलत उत्तर",),
+        )
+
+        [result] = prefixed([one], "query: ", "passage: ")
+
+        assert result.negatives == ("passage: गलत उत्तर",)
+
+    def test_a_pair_without_negatives_gains_none(self) -> None:
+        [result] = prefixed([pair()], "query: ", "passage: ")
+
+        assert result.negatives == ()
+
 
 class TestFacetFilter:
     def test_naming_nothing_keeps_everything(self) -> None:

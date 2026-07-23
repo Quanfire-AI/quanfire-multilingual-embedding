@@ -109,6 +109,11 @@ raising.**
 | Gradient caching with dropout on | wrong gradients, by a wide margin | RNG state captured and restored per chunk |
 | fp16 without a `GradScaler` | small gradients flush to zero | fp16 is **rejected**; bf16 or fp32 only |
 | Duplicate passage in a contrastive batch | model punished for a correct answer | sampler de-duplicates |
+| Mined negative that is a correct answer | **loss improves**, retrieval degrades | identity, provenance and ceiling guards in `negatives.py`; audit sample for the rest |
+
+The last one is the exception that proves the rule: it is the only entry whose symptom is a
+*better*-looking number rather than a mediocre one, and the only one no threshold can close
+completely — see the hard-negative section in the [layer README](../README.md).
 
 None of these raise on their own. All of them look like "the model is not very good",
 which is indistinguishable from the model not being very good. That is why the checks are
@@ -127,6 +132,13 @@ pick from 1024. Published sentence encoders train at 1024 and above.
 
 A 16 GB card fits perhaps 8–16 sequences of 512 tokens with activations retained. That gap
 is memory, not time, and no amount of patience closes it.
+
+**Mined hard negatives buy back some of that gap.** A `TextPair` may carry a `negatives`
+tuple; those texts become extra candidate columns, so a batch of 16 with 4 mined negatives
+each poses a harder task than a batch of 16 alone — and a harder one than a random batch of
+64, because the extra candidates were chosen for being confusable rather than drawn at
+random. The columns are shared and deduplicated across the batch. A pair set without
+negatives yields zero extra columns and trains exactly as before.
 
 Temperature scales the logits before the softmax; 0.05 is the default and the usual
 starting point. Weight decay applies to weight matrices only — decaying a LayerNorm gain
@@ -375,8 +387,13 @@ different shape does not.
 - **First use reaches the network.** `PretrainedTextEncoder` downloads and caches weights.
   This is opt-in behind an extra; `local_files_only=True` refuses the network entirely,
   which is what a reproducible experiment should set.
-- **No hard-negative mining.** Negatives are in-batch only. Mined hard negatives are the
-  single largest remaining quality lever and are Phase C work.
+- **Hard negatives are mined but their false-negative rate is unmeasured.** `qfme
+  mine-negatives` produces them and the trainer consumes them; what no code here can tell
+  you is how many of them are correct answers in disguise. `--audit` writes the hardest
+  sample for a person to label, and until someone does, the run reports the population that
+  rate is drawn from and refuses to name a rate.
+- **The lever is unproven on this corpus.** Mining is implemented and tested; whether it
+  improves `models/indic-v1` is a GPU experiment that has not been run.
 - **No ONNX export or quantisation**, so serving runs the torch stack.
 
 ---
@@ -406,14 +423,17 @@ endpoint, versioning, dimension truncation, ONNX and the container image are Pha
 
 | File | Tests | Covers |
 |---|---|---|
-| `tests/embedding/test_neural.py` | 32 | Architecture, contract conformance, retrieval quality, persistence, pipeline service, precision |
+| `tests/embedding/test_neural.py` | 49 | Architecture, contract conformance, retrieval quality, persistence, pipeline service, precision, the candidate columns |
 | `tests/embedding/test_lora_gradcache.py` | — | LoRA init/freeze/learn/merge, adapter checkpoints, exact gradient caching, chunk sizing |
 | `tests/embedding/test_pretrained.py` | — | Checkpoint loading, pooling strategies, failure messages |
 | `tests/embedding/test_adapter.py` | — | Byte-identical round trip, prefixes surviving, mismatch failing loudly |
+| `tests/integration/test_hard_negatives.py` | 5 | Documents → pairs → mined negatives → a model that trains, across three layers |
 | `tests/pipelines/test_search_adapter.py` | 6 | `from_adapter`, and prefixes reaching the encoder |
 
 All require the `neural` extra and use `pytest.importorskip`, so a core-only checkout runs
-green with fewer tests. Checkpoints in tests are **built, not downloaded** — a 1,000-token
+green with fewer tests. The mining algorithm itself does not — it takes the `TextEncoder`
+contract, so `tests/embedding/test_negatives.py` (35) runs on a base install and this file's
+job is only to show that a torch-backed encoder satisfies that contract in practice. Checkpoints in tests are **built, not downloaded** — a 1,000-token
 vocabulary and a two-layer 64-dimension BERT written to `tmp_path`. Nothing reaches the
 network.
 

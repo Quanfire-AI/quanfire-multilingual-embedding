@@ -33,6 +33,11 @@ from multilingual_embedding.embedding.neural import (  # noqa: E402
     TextPair,
     TransformerEncoderModel,
 )
+
+# Private, and deliberately tested directly. It decides the column order
+# the cross-entropy target depends on, and every way it can be wrong
+# produces a model that trains without complaint.
+from multilingual_embedding.embedding.neural.training import _candidates  # noqa: E402
 from multilingual_embedding.pipelines.search import SemanticSearchPipeline  # noqa: E402
 
 VOCABULARY = 64
@@ -672,3 +677,185 @@ class TestLossIsNotEvidenceOnItsOwn:
         ).train(self._pairs())
 
         assert report.to_dict()["measurable"] is False
+
+
+class TestTheCandidateColumns:
+    """
+    How mined negatives join a batch.
+
+    This is the seam where hard-negative training goes wrong quietly.
+    The loss labels column ``i`` as the correct answer for anchor ``i``,
+    so anything that disturbs the order or duplicates a column teaches
+    the model that a right answer is wrong — and the loss falls while it
+    happens, because the model is learning what it was told.
+    """
+
+    @staticmethod
+    def _batch() -> list[TextPair]:
+        return [
+            TextPair("a0", "p0", ("n0",)),
+            TextPair("a1", "p1", ("n1",)),
+        ]
+
+    def test_positives_come_first_in_batch_order(self) -> None:
+        """The cross-entropy target is the diagonal, and this is why."""
+
+        assert _candidates(self._batch())[:2] == ["p0", "p1"]
+
+    def test_mined_negatives_extend_the_columns_to_the_right(self) -> None:
+        assert _candidates(self._batch()) == ["p0", "p1", "n0", "n1"]
+
+    def test_no_negatives_means_no_extra_columns(self) -> None:
+        """The in-batch objective is the case where the extras number zero."""
+
+        batch = [TextPair("a0", "p0"), TextPair("a1", "p1")]
+
+        assert _candidates(batch) == ["p0", "p1"]
+
+    def test_a_negative_that_is_another_anchors_positive_is_not_duplicated(self) -> None:
+        """
+        The poison case. Two columns of the same text, one labelled
+        correct and one labelled wrong, make the loss punish a correct
+        match — which is precisely the mistake mining is most likely to
+        introduce, since the candidate pool *is* the set of positives.
+        """
+
+        batch = [
+            TextPair("a0", "p0", ("p1",)),
+            TextPair("a1", "p1"),
+        ]
+
+        assert _candidates(batch) == ["p0", "p1"]
+
+    def test_a_negative_equal_to_its_own_positive_is_dropped(self) -> None:
+        batch = [TextPair("a0", "p0", ("p0",)), TextPair("a1", "p1")]
+
+        assert _candidates(batch) == ["p0", "p1"]
+
+    def test_one_negative_mined_twice_becomes_one_column(self) -> None:
+        """
+        Shared, not per anchor. A negative mined for one query is a
+        negative for every other query in the batch and is already
+        encoded, so a second copy costs memory and teaches nothing.
+        """
+
+        batch = [
+            TextPair("a0", "p0", ("shared",)),
+            TextPair("a1", "p1", ("shared",)),
+        ]
+
+        assert _candidates(batch) == ["p0", "p1", "shared"]
+
+
+class TestTrainingWithHardNegatives:
+    """
+    The trainer end to end with mined negatives present.
+
+    Mirrors :class:`TestGradientCachingInTheTrainer`, because both step
+    implementations had to change to make room for the extra columns and
+    a divergence between them would be invisible in any single run.
+    """
+
+    @staticmethod
+    def _pairs() -> list[TextPair]:
+        weather = ["rain", "storm", "cloud", "wind", "thunder", "drizzle"]
+
+        finance = ["bank", "loan", "credit", "market", "invoice", "ledger"]
+
+        pairs: list[TextPair] = []
+
+        for index in range(16):
+            first, second = weather[index % 6], weather[(index + 3) % 6]
+
+            # The negative is drawn from the other topic, so it is a
+            # genuine negative rather than a paraphrase — these tests are
+            # about the plumbing, not about mining quality.
+            pairs.append(
+                TextPair(
+                    f"{first} {second}",
+                    f"{second} {first} today",
+                    (f"{finance[index % 6]} {finance[(index + 3) % 6]} today",),
+                )
+            )
+
+        return pairs
+
+    def test_it_still_learns(self) -> None:
+        report = ContrastiveTrainer(
+            build_encoder(dropout=0.0),
+            ContrastiveConfig(epochs=6, batch_size=8, learning_rate=3e-3, seed=1),
+        ).train(self._pairs())
+
+        assert report.improved, f"loss did not fall: {report.losses}"
+
+    def test_caching_agrees_with_the_uncached_step(self) -> None:
+        """
+        Both step implementations slice the stacked vectors at
+        ``len(batch)`` now rather than halving them. If only one of them
+        did, this is the test that would say so.
+        """
+
+        pairs = self._pairs()
+
+        def train(chunk: int) -> list[float]:
+            return (
+                ContrastiveTrainer(
+                    build_encoder(dropout=0.0),
+                    ContrastiveConfig(
+                        epochs=3,
+                        batch_size=8,
+                        learning_rate=3e-3,
+                        seed=1,
+                        gradient_checkpoint_chunk=chunk,
+                    ),
+                )
+                .train(pairs)
+                .losses
+            )
+
+        for epoch, (expected, found) in enumerate(zip(train(0), train(4), strict=True)):
+            assert found == pytest.approx(expected, abs=1e-4), (
+                f"epoch {epoch}: caching changed the loss, {expected} vs {found}"
+            )
+
+    def test_the_negatives_change_the_result(self) -> None:
+        """
+        Same seed, same pairs, negatives attached or not. If the extra
+        columns never reached the loss the two runs would be identical,
+        and every other test here would still pass.
+        """
+
+        with_negatives = self._pairs()
+
+        without = [TextPair(pair.anchor, pair.positive) for pair in with_negatives]
+
+        def train(pairs: list[TextPair]) -> float:
+            return (
+                ContrastiveTrainer(
+                    build_encoder(dropout=0.0),
+                    ContrastiveConfig(epochs=2, batch_size=8, learning_rate=3e-3, seed=1),
+                )
+                .train(pairs)
+                .final_loss
+            )
+
+        assert train(with_negatives) != pytest.approx(train(without), abs=1e-6)
+
+    def test_one_pair_carrying_negatives_is_trainable(self) -> None:
+        """
+        A batch of one used to be worthless: nothing to contrast
+        against, so the loss was identically zero. A mined negative
+        gives it something, and the guard was relaxed to match rather
+        than left to reject a valid example.
+        """
+
+        report = ContrastiveTrainer(
+            build_encoder(dropout=0.0),
+            ContrastiveConfig(epochs=2, batch_size=8, learning_rate=3e-3, seed=1),
+        ).train([TextPair("rain storm", "storm rain today", ("bank loan today",))])
+
+        assert report.steps > 0
+
+    def test_one_pair_without_negatives_is_still_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            ContrastiveTrainer(build_encoder()).train([TextPair("a", "b")])

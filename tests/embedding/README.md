@@ -2,13 +2,14 @@
 
 > Tests for [`multilingual_embedding.embedding`](../../src/multilingual_embedding/embedding/README.md) — word vectors, sentence encoders, the contextual encoder, published checkpoints, similarity search.
 
-**177 tests.** Run with `pytest tests/embedding -q`.
+**237 tests.** Run with `pytest tests/embedding -q`.
 
 ## Files
 
 | File | Tests | Covers |
 |---|---:|---|
-| `test_neural.py` | 38 | The transformer encoder: architecture, contract conformance, retrieval quality, persistence, pipeline service, precision |
+| `test_neural.py` | 49 | The transformer encoder: architecture, contract conformance, retrieval quality, persistence, pipeline service, precision, the candidate columns |
+| `test_negatives.py` | 35 | Hard-negative mining against planted geometry: the three guards, the counts, the audit sample, prefixes |
 | `test_lora_gradcache.py` | 24 | LoRA initialisation, freezing, learning and merging, adapter checkpoints, exact gradient caching, chunk sizing |
 | `test_matrix.py` | 20 | Size validation, lookup, normalisation, similarity, `most_similar`, analogies, persistence |
 | `test_sentence.py` | 20 | Mean pooling and SIF encoders, batch shapes, degenerate input |
@@ -16,7 +17,13 @@
 | `test_word2vec.py` | 17 | Training, reproducibility, learned structure, hyperparameter edge cases |
 | `test_encoder_contract.py` | 15 | The `TextEncoder` protocol, its guarantees, dimension discovery, and the decoupling proof |
 | `test_pretrained.py` | 15 | Loading a published checkpoint, pooling strategies, prefixes, offline mode, contract conformance |
+| `test_cli_mine_negatives.py` | 13 | `qfme mine-negatives`: the required flags, and every default that decides what is thrown away |
 | `test_adapter.py` | 9 | Saving and loading an adapter artefact: base name, LoRA config, pooling, prefixes |
+
+`test_negatives.py` needs neither extra. The miner takes the `TextEncoder` protocol and
+nothing more, so it is tested against a lookup encoder that places each text at a chosen
+angle on the unit circle — which also makes every cosine in that file an exact number the
+test author picked, rather than one a model happened to produce.
 
 The four torch-dependent modules — `test_neural.py`, `test_lora_gradcache.py`,
 `test_pretrained.py`, `test_adapter.py` — call `pytest.importorskip` at module level, so a
@@ -149,6 +156,30 @@ so the artefact records them rather than relying on whoever loads it remembering
 that is not one, loading with mismatched LoRA settings, and an incompatible format version.
 The mismatch case is the subtle one: rank and target names must agree or the weights land
 in the wrong places with matching shapes and no error.
+
+## Hard-negative mining
+
+`test_negatives.py` asserts *rejections*, not returns. Anything returns negatives; the
+question is which candidates were thrown away. A mined negative that is really a correct
+answer trains the model to push the right passage away, and it does so with the largest
+gradient in the batch — nothing raises, and the loss curve *improves*, because a model
+taught to reject correct answers is being taught something and learns it.
+
+That is why the geometry is planted rather than learned. Three pairs sit at chosen angles
+so that one fixture reaches every guard by moving one threshold at a time: the pool ranks
+`q1` at 0.985, then the anchor's own positive at 0.500, then `q2` at 0.174. Against a real
+encoder the same assertions would be unfalsifiable — a candidate that "should" be rejected
+as too similar is only rejected if the model happens to score it that way.
+
+`test_the_counts_are_not_published_as_a_false_negative_rate` is the one to keep. It asserts
+that no field in the statistics contains the string `false_negative`, because
+`outranking_the_positive` counts the population those are drawn from and a field named for
+the rate would be read as the rate. The real number needs a person to label the audit
+sample, and no code here may claim to have it.
+
+The chain — documents through pairs through mined negatives into a model that trains — is
+covered by `tests/integration/test_hard_negatives.py`, which is where a torch-backed
+encoder is checked against the contract this file assumes.
 
 ## Speed
 

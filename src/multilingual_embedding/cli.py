@@ -1,12 +1,14 @@
 """
 Command line interface.
 
-Installed as ``qfme``. Nine subcommands cover the lifecycle::
+Installed as ``qfme``. Ten subcommands cover the lifecycle::
 
     qfme stats    --source data/corpus.jsonl
     qfme validate --source data/corpus.jsonl
     qfme extract  --dump hiwiki.xml.bz2 --output hi.jsonl.gz --language hi
     qfme mine-pairs --source hi.jsonl.gz --output pairs/hi.jsonl.gz
+    qfme mine-negatives --pairs pairs/hi.jsonl.gz --adapter models/indic-v1 \
+        --output pairs/hi-hard.jsonl.gz
     qfme train    --config experiments/demo.yaml
     qfme adapt    --config experiments/indic.yaml --profile configs/gpu.yaml
     qfme search   --experiment artifacts/demo --query "machine learning"
@@ -102,6 +104,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_mine_pairs_parser(subparsers)
 
+    _add_mine_negatives_parser(subparsers)
+
     _add_train_parser(subparsers)
 
     _add_adapt_parser(subparsers)
@@ -137,6 +141,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "validate": _run_validate,
         "extract": _run_extract,
         "mine-pairs": _run_mine_pairs,
+        "mine-negatives": _run_mine_negatives,
         "train": _run_train,
         "adapt": _run_adapt,
         "search": _run_search,
@@ -328,6 +333,117 @@ def _add_mine_pairs_parser(subparsers: Any) -> None:
         "--report",
         type=Path,
         help="Write the mining statistics as JSON to this path",
+    )
+
+
+def _add_mine_negatives_parser(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "mine-negatives",
+        help="Attach hard negatives to a pair file, mined against a saved adapter",
+    )
+
+    parser.add_argument(
+        "--pairs",
+        type=Path,
+        required=True,
+        help="Mined pair file to read; gzip handled by extension",
+    )
+
+    parser.add_argument(
+        "--adapter",
+        type=Path,
+        required=True,
+        help=(
+            "Adapter directory whose confusions are mined. Hard negatives are "
+            "relative to a model, so this should be the model about to be retrained"
+        ),
+    )
+
+    parser.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="Destination JSON Lines file; gzipped when it ends .gz",
+    )
+
+    parser.add_argument(
+        "--count",
+        type=int,
+        default=4,
+        help="Negatives per pair (default: 4). Each one widens every training batch",
+    )
+
+    parser.add_argument(
+        "--pool",
+        type=int,
+        default=32,
+        help="Candidates examined per anchor before filtering (default: 32)",
+    )
+
+    parser.add_argument(
+        "--max-similarity",
+        type=float,
+        default=0.95,
+        help=(
+            "Reject a candidate at or above this cosine score as a probable "
+            "paraphrase of the positive rather than a negative (default: 0.95)"
+        ),
+    )
+
+    parser.add_argument(
+        "--min-similarity",
+        type=float,
+        default=0.0,
+        help=(
+            "Reject a candidate at or below this score as no harder than the "
+            "in-batch negatives training already has (default: 0.0)"
+        ),
+    )
+
+    parser.add_argument(
+        "--allow-same-document",
+        action="store_true",
+        help=(
+            "Keep candidates from the anchor's own document. Off by default: two "
+            "passages from one article are usually about one subject, and training "
+            "against that teaches the model to reject a correct answer"
+        ),
+    )
+
+    parser.add_argument(
+        "--limit",
+        type=int,
+        help="Mine only a uniform sample of this many pairs, for a trial run",
+    )
+
+    parser.add_argument(
+        "--audit",
+        type=Path,
+        help=(
+            "Write the most suspicious mined negatives here as JSON Lines, each "
+            "with an unfilled is_actually_correct field. Labelling this sample by "
+            "hand is the only route to a real false-negative rate; every number "
+            "the run prints is a count of what a heuristic rejected"
+        ),
+    )
+
+    parser.add_argument(
+        "--audit-sample",
+        type=int,
+        default=50,
+        help="How many negatives to put in the audit file (default: 50)",
+    )
+
+    parser.add_argument(
+        "--report",
+        type=Path,
+        help="Write the mining statistics as JSON to this path",
+    )
+
+    parser.add_argument(
+        "--local-files-only",
+        action="store_true",
+        help="Refuse the network; require the base checkpoint to be cached already",
     )
 
 
@@ -702,6 +818,132 @@ def _run_mine_pairs(args: argparse.Namespace) -> int:
         note = "  <- solvable by string match" if overlap > 0.75 else ""
 
         print(f"{kind:<18}{count:>9}{overlap:>15.2f}{note}")
+
+    if args.report:
+        from multilingual_embedding.utils.io import write_json
+
+        write_json(args.report, summary)
+
+        print(f"\nStatistics written to {args.report}")
+
+    return EXIT_SUCCESS
+
+
+def _run_mine_negatives(args: argparse.Namespace) -> int:
+    """
+    Mine hard negatives against an adapter, and report what was thrown away.
+
+    Unlike ``mine-pairs`` this cannot stream. The candidate pool is the
+    pair set's own positives, so every pair has to be resident and
+    encoded before the first negative can be found. ``--limit`` takes a
+    uniform sample for a trial run, which is also the sane way to see
+    what the filters are doing before spending an hour on the full set.
+    """
+
+    try:
+        from multilingual_embedding.embedding.negatives import (
+            NegativeConfig,
+            mine_negatives,
+        )
+        from multilingual_embedding.pipelines.search import SemanticSearchPipeline
+    except ImportError as error:  # pragma: no cover - depends on the install
+        print(
+            f"error: mining hard negatives needs a loadable adapter ({error.name} is "
+            "missing). Install it with: uv sync --extra neural --extra pretrained",
+            file=sys.stderr,
+        )
+
+        return EXIT_ERROR
+
+    from multilingual_embedding.corpus.pairs import MinedPair, sample_pairs
+    from multilingual_embedding.utils.io import read_jsonl, write_jsonl
+
+    source = Path(args.pairs).expanduser()
+
+    if args.limit:
+        pairs = sample_pairs(source, args.limit)
+    else:
+        pairs = [MinedPair.from_record(record) for record in read_jsonl(source)]
+
+    print(f"Read {len(pairs):,} pairs from {source}")
+
+    pipeline = SemanticSearchPipeline.from_adapter(
+        args.adapter,
+        local_files_only=args.local_files_only,
+    )
+
+    query_prefix, passage_prefix = pipeline.prefixes
+
+    print(f"Mining against {args.adapter} (prefixes {query_prefix!r} / {passage_prefix!r})")
+
+    mined, statistics = mine_negatives(
+        pairs,
+        pipeline.encoder,
+        NegativeConfig(
+            count=args.count,
+            pool=args.pool,
+            maximum_similarity=args.max_similarity,
+            minimum_similarity=args.min_similarity,
+            allow_same_document=args.allow_same_document,
+            # Read off the adapter rather than accepted as flags. An E5
+            # model mined without its prefixes ranks by the wrong
+            # geometry and still returns a full set of negatives.
+            query_prefix=query_prefix,
+            passage_prefix=passage_prefix,
+            audit_sample=args.audit_sample,
+        ),
+    )
+
+    written = write_jsonl(args.output, (pair.to_record() for pair in mined))
+
+    summary = statistics.to_dict()
+
+    print(f"\nWrote {written:,} pairs to {args.output}")
+
+    print()
+
+    print(f"{'candidates examined':<28}{summary['candidates']:>10,}")
+
+    for reason, label in (
+        ("rejected_as_positive", "  the pair's own positive"),
+        ("rejected_same_document", "  same document"),
+        ("rejected_too_similar", "  above the ceiling"),
+        ("rejected_too_easy", "  below the floor"),
+        ("rejected_unencodable", "  unencodable"),
+    ):
+        print(f"{label:<28}{summary[reason]:>10,}")
+
+    print(f"{'negatives kept':<28}{summary['accepted']:>10,}")
+
+    print(f"{'pairs with none':<28}{summary['pairs_without_negatives']:>10,}")
+
+    # Only when it happens. A row of zeros on every healthy run trains
+    # the reader to skip the block this number lives in, and a corpus
+    # the encoder cannot read is the one case where that costs something.
+    if summary["anchors_unencodable"]:
+        print(f"{'  anchor unencodable':<28}{summary['anchors_unencodable']:>10,}")
+
+    print(f"{'mean similarity':<28}{summary['mean_similarity']:>10.3f}")
+
+    print()
+
+    # Printed as prose rather than as a row, because a reader who takes
+    # this for a measured false-negative rate will train on poison and
+    # watch the loss fall while doing it.
+    print(
+        f"{summary['outranking_the_positive']:,} of the kept negatives "
+        f"({summary['suspicion_rate']:.1%}) score above their own positive."
+    )
+
+    print(
+        "That is the population false negatives are drawn from, not a "
+        "false-negative rate. Label the audit sample to get one."
+    )
+
+    if args.audit:
+        count = write_jsonl(args.audit, (record.to_record() for record in statistics.audit))
+
+        print(f"\n{count} negatives written to {args.audit} for labelling")
 
     if args.report:
         from multilingual_embedding.utils.io import write_json

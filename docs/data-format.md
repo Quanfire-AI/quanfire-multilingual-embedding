@@ -201,6 +201,35 @@ scripts needing it most.
 Each pair records the document it came from. Two pairs from one article are about the same
 subject, so a batch holding both trains the model that a correct match is a negative.
 
+## Adding hard negatives
+
+Once an adapter exists, `qfme mine-negatives` attaches to each pair a handful of passages
+that adapter ranks near the right answer and which are nonetheless wrong:
+
+```bash
+qfme mine-negatives --pairs pairs/hi.jsonl.gz --adapter models/indic-v1 \
+                    --output pairs/hi-hard.jsonl.gz --audit reports/audit.jsonl
+```
+
+The output is the same format with one extra field:
+
+```json
+{"anchor": "जलवायु", "positive": "…", "kind": "title_lead", "document": "42",
+ "language": "hi", "overlap": 0.12, "negatives": ["…", "…"]}
+```
+
+The field is omitted when empty, so a file mined before this existed is unchanged and
+`qfme adapt` reads both without a flag. Negatives are stored **without** prefixes, like
+every other side of a pair — `query: ` and `passage: ` are applied at training time, and
+a negative takes the passage marker.
+
+**Read the audit file before training on the output.** Some fraction of any mined negative
+set is correct answers in disguise, and those are worse than no negatives at all: they
+teach the model to push the right passage away, and the loss curve improves while doing it.
+The command reports how many accepted negatives outranked the pair's own answer and refuses
+to call that a false-negative rate. The audit file is fifty of the hardest, each with an
+`is_actually_correct` field set to `null` for a person to fill in.
+
 **Still missing: cross-lingual pairs.** An article and its counterpart in another language
 are the signal that aligns languages in one space, and they need the `langlinks.sql.gz`
 join described above.

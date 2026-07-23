@@ -118,6 +118,16 @@ class MinedPair:
         Share of the anchor's words that also appear in the positive, in
         ``[0, 1]``. High values mean the pair is solvable by string
         matching.
+
+    negatives:
+        Passages this anchor should *not* match, mined against a model
+        rather than read off document structure. Empty for a freshly
+        mined pair: nothing here can produce them, because finding a
+        passage a model confuses with the positive requires a model, and
+        this layer sits below every encoder. They are filled in by
+        :func:`multilingual_embedding.embedding.negatives.mine_negatives`
+        one layer up and carried here so that a pair set stays one file
+        and one record type.
     """
 
     anchor: str
@@ -132,10 +142,19 @@ class MinedPair:
 
     overlap: float
 
-    def to_record(self) -> dict[str, Any]:
-        """Reduce to a JSON Lines record."""
+    negatives: tuple[str, ...] = ()
 
-        return {
+    def to_record(self) -> dict[str, Any]:
+        """
+        Reduce to a JSON Lines record.
+
+        ``negatives`` is omitted when empty rather than written as
+        ``[]``. A mined pair file for a mid-sized Wikipedia is millions
+        of lines, and a record written before hard-negative mining
+        existed should still round-trip to a byte-identical line.
+        """
+
+        record: dict[str, Any] = {
             "anchor": self.anchor,
             "positive": self.positive,
             "kind": self.kind,
@@ -143,6 +162,11 @@ class MinedPair:
             "language": self.language,
             "overlap": round(self.overlap, 4),
         }
+
+        if self.negatives:
+            record["negatives"] = list(self.negatives)
+
+        return record
 
     @classmethod
     def from_record(cls, record: Mapping[str, Any]) -> MinedPair:
@@ -156,6 +180,11 @@ class MinedPair:
         absent is absent rather than guessed: ``kind`` and ``document``
         become empty strings and ``language`` stays ``None``, so a facet
         filter over them selects nothing rather than selecting wrongly.
+
+        Blank ``negatives`` entries are dropped. An empty string encodes
+        to a zero vector by the encoder contract, so keeping one would
+        add a candidate column of zeros that every anchor scores at
+        exactly 0.0 — a negative that teaches nothing and costs memory.
         """
 
         for name in ("anchor", "positive"):
@@ -169,6 +198,9 @@ class MinedPair:
             document=str(record.get("document") or ""),
             language=record.get("language"),
             overlap=float(record.get("overlap", 0.0)),
+            negatives=tuple(
+                str(text) for text in (record.get("negatives") or ()) if str(text).strip()
+            ),
         )
 
 

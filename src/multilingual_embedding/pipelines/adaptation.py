@@ -86,6 +86,12 @@ def prefixed(pairs: Sequence[MinedPair], query: str, passage: str) -> list[Mined
     ``encode_batch`` and no notion of which side a text is, so this is
     applied to the text before it reaches the encoder rather than by
     complicating the contract for one family's convention.
+
+    Mined negatives take the *passage* prefix. They are passages — the
+    model is being taught not to retrieve them — and prefixing them as
+    queries would put a whole class of candidate columns in the wrong
+    half of the space, where they would look easy for the wrong reason
+    and the loss would fall to prove it.
     """
 
     if not query and not passage:
@@ -99,6 +105,7 @@ def prefixed(pairs: Sequence[MinedPair], query: str, passage: str) -> list[Mined
             document=pair.document,
             language=pair.language,
             overlap=pair.overlap,
+            negatives=tuple(passage + negative for negative in pair.negatives),
         )
         for pair in pairs
     ]
@@ -553,7 +560,7 @@ class AdaptationPipeline:
                 precision=self.compute.precision,
                 gradient_checkpoint_chunk=self.compute.gradient_checkpoint_chunk,
             ),
-        ).train([TextPair(pair.anchor, pair.positive) for pair in train])
+        ).train([TextPair(pair.anchor, pair.positive, pair.negatives) for pair in train])
 
         if training.measurable:
             self.echo(f"    loss {training.initial_loss:.4f} -> {training.final_loss:.4f}")

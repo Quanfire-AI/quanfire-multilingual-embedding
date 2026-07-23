@@ -17,7 +17,16 @@ supervised training is not, and why gradient caching exists.
 **Duplicate texts within a batch are poison.** If the same passage
 appears twice, the loss punishes the model for matching a correct answer,
 because that copy is labelled a negative. The sampler here de-duplicates
-for exactly that reason.
+for exactly that reason, and :func:`_candidates` applies the same rule
+where mined negatives meet the batch's positives.
+
+A pair may also carry **mined hard negatives** — passages some model
+ranks near the right answer and that are nonetheless wrong, produced by
+:func:`multilingual_embedding.embedding.negatives.mine_negatives`. They
+join the candidate columns to the right of the positives, shared across
+every anchor in the batch, and the target labels stay the diagonal. A
+pair set without them trains exactly as it did before: the in-batch
+objective is the case where the extra columns number zero.
 
 The temperature scales the logits before the softmax. Lower values
 sharpen the distribution and push harder on the hardest negatives; 0.05
@@ -97,11 +106,64 @@ class TextPair:
 
     positive:
         The passage side — the answer, the body, the long form.
+
+    negatives:
+        Passages this anchor must *not* match, mined against a model by
+        :func:`multilingual_embedding.embedding.negatives.mine_negatives`.
+        Empty by default, in which case the step is exactly the in-batch
+        objective it always was.
+
+        Each distinct negative in a batch becomes one more candidate
+        column, shared by every anchor in that batch — the negative
+        mined for one query is a perfectly good negative for the other
+        fifteen, and it is already encoded. So ``k`` negatives per pair
+        widen the candidate set by up to ``k x batch_size`` while
+        costing one forward pass over those texts, and the memory a step
+        needs grows with them.
     """
 
     anchor: str
 
     positive: str
+
+    negatives: tuple[str, ...] = ()
+
+
+def _candidates(batch: Sequence[TextPair]) -> list[str]:
+    """
+    The candidate column texts for a batch: positives first, then mined
+    negatives that are not already among them.
+
+    Order is the contract. Positive ``i`` must land at column ``i`` so
+    that the cross-entropy target stays the diagonal; the mined negatives
+    extend the columns to the right, where they are negatives for every
+    anchor at once.
+
+    The de-duplication is the same rule the sampler applies to positives
+    and it is here for the same reason. A mined negative that is
+    textually a positive already in the batch — its own pair's, or
+    another anchor's — would appear as two columns, one labelled correct
+    and one labelled wrong. The loss would then punish the model for
+    matching a correct answer, which is the single mistake hard-negative
+    mining is most likely to introduce. Collapsing it to one column keeps
+    the text in the candidate set exactly once: right for its own anchor,
+    wrong for everyone else, which is what it is.
+    """
+
+    seen = {pair.positive for pair in batch}
+
+    extra: list[str] = []
+
+    for pair in batch:
+        for negative in pair.negatives:
+            if negative in seen:
+                continue
+
+            seen.add(negative)
+
+            extra.append(negative)
+
+    return [pair.positive for pair in batch] + extra
 
 
 @dataclass(slots=True)
@@ -365,15 +427,18 @@ class ContrastiveTrainer:
         ------
         ValidationError
             If there are too few pairs to form a batch with at least one
-            negative in it. A batch of one has nothing to contrast
-            against and the loss is identically zero, which looks like
-            success and teaches nothing.
+            negative in it. A batch of one whose pair carries no mined
+            negatives has nothing to contrast against, so its loss is
+            identically zero — which looks like success and teaches
+            nothing. A single pair *with* mined negatives is a real
+            training example and is allowed.
         """
 
-        if len(pairs) < 2:
+        if len(pairs) < 2 and not any(pair.negatives for pair in pairs):
             raise ValidationError(
-                "contrastive training needs at least two pairs, "
-                "since a batch of one has no negatives",
+                "contrastive training needs at least two pairs, or one pair "
+                "carrying mined negatives, since a batch of one otherwise "
+                "has nothing to contrast against",
                 pairs=len(pairs),
             )
 
@@ -479,7 +544,7 @@ class ContrastiveTrainer:
         """
         One InfoNCE step over a batch.
 
-        Anchors and positives are encoded together in a single forward
+        Anchors and candidates are encoded together in a single forward
         pass rather than two. Beyond halving the launch overhead, it
         guarantees both sides see identical dropout conditions, which they
         would not if encoded separately.
@@ -487,21 +552,25 @@ class ContrastiveTrainer:
 
         anchors = [pair.anchor for pair in batch]
 
-        positives = [pair.positive for pair in batch]
+        candidates = _candidates(batch)
 
         # internal to the encoder; the trainer is its only other caller.
-        ids, mask = self._encoder._prepare([*anchors, *positives])
+        ids, mask = self._encoder._prepare([*anchors, *candidates])
 
         vectors = model(ids, mask)
 
         vectors = F.normalize(vectors, dim=-1)
 
-        anchor_vectors, positive_vectors = vectors.chunk(2, dim=0)
+        anchor_vectors = vectors[: len(batch)]
 
-        logits = anchor_vectors @ positive_vectors.T / self._config.temperature
+        candidate_vectors = vectors[len(batch) :]
 
-        # The correct passage for anchor i is positive i, so the target
-        # labels are simply the diagonal.
+        logits = anchor_vectors @ candidate_vectors.T / self._config.temperature
+
+        # The correct passage for anchor i is candidate i — _candidates
+        # puts the positives first, in batch order, for exactly this — so
+        # the target labels are the diagonal whether or not mined
+        # negatives extended the columns to the right of it.
         targets = torch.arange(len(batch), device=device)
 
         return F.cross_entropy(logits, targets)
@@ -521,9 +590,9 @@ class ContrastiveTrainer:
         rather than returning a tensor to backpropagate — gradient
         caching has to own the backward pass to do its job.
 
-        Anchors and positives are laid out as one list, anchors first, so
-        that chunk boundaries are ordinary slices and the stacked vectors
-        split back into halves by position.
+        Anchors and candidates are laid out as one list, anchors first,
+        so that chunk boundaries are ordinary slices and the stacked
+        vectors split back apart at ``len(batch)``.
 
         Normalisation happens inside the loss rather than inside the
         encode, because gradient caching caches raw model outputs and
@@ -531,7 +600,7 @@ class ContrastiveTrainer:
         would put the operation on the wrong side of the cache.
         """
 
-        texts = [pair.anchor for pair in batch] + [pair.positive for pair in batch]
+        texts = [pair.anchor for pair in batch] + _candidates(batch)
 
         def encode(chunk: Sequence[int]) -> Tensor:
             # internal to the encoder; the trainer is its only other caller.
@@ -546,9 +615,11 @@ class ContrastiveTrainer:
         def loss_fn(vectors: Tensor) -> Tensor:
             normalised = F.normalize(vectors, dim=-1)
 
-            anchor_vectors, positive_vectors = normalised.chunk(2, dim=0)
+            anchor_vectors = normalised[: len(batch)]
 
-            logits = anchor_vectors @ positive_vectors.T / self._config.temperature
+            candidate_vectors = normalised[len(batch) :]
+
+            logits = anchor_vectors @ candidate_vectors.T / self._config.temperature
 
             return F.cross_entropy(logits, torch.arange(len(batch), device=device))
 
@@ -573,8 +644,11 @@ class ContrastiveTrainer:
         correct match. Dropping the duplicate costs one example and avoids
         training against a contradiction.
 
-        A trailing batch of one is dropped: it has no negatives, so its
-        loss is zero and its gradient is nothing.
+        A trailing batch of one is dropped *unless* its pair carries
+        mined negatives: without them it has nothing to contrast
+        against, so its loss is zero and its gradient is nothing; with
+        them it is an ordinary training example that happens to be
+        alone.
         """
 
         order = torch.randperm(len(pairs), generator=generator).tolist()
@@ -600,7 +674,7 @@ class ContrastiveTrainer:
 
                 seen = set()
 
-        if len(batch) > 1:
+        if len(batch) > 1 or any(pair.negatives for pair in batch):
             yield batch
 
     @staticmethod

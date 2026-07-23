@@ -44,6 +44,7 @@ without knowing which one it holds.
 | `matrix.py` | `EmbeddingMatrix`: vectors paired with their vocabulary, plus `similarity`, `most_similar`, `analogy`, `normalized`, and versioned save/load. |
 | `sentence.py` | `SentenceEncoder` ABC, `MeanPoolingEncoder`, `SifEncoder`, and the `SENTENCE_ENCODERS` registry (`"mean"`, `"sif"`). |
 | `index.py` | `SimilarityIndex` and `SearchResult`: exact brute-force cosine search over labelled vectors, with persistence. |
+| `negatives.py` | `mine_negatives`, `NegativeConfig`, `NegativeStatistics`, `AuditRecord` — ranks a pair set's own positives against each anchor with any `TextEncoder` and keeps the hardest survivors. No torch. |
 | `neural/architecture.py` | `EncoderConfig` and `TransformerEncoderModel` — pre-norm blocks, fused attention, GELU, learned positions, masked mean pooling. Tensors only. |
 | `neural/encoder.py` | `NeuralTextEncoder` (tokenise, pad, batch, device, normalise, save/load), plus `resolve_device` and `autocast_for`. |
 | `neural/pretrained.py` | `PretrainedTextEncoder`, `POOLING_STRATEGIES`, `PretrainedEncoderError` — a published checkpoint loaded through its own library, wearing `(ids, mask) → pooled vectors`. |
@@ -136,6 +137,13 @@ its section, a sentence and its translation. Every *other* positive in the batch
 negative for that anchor, so the targets are simply the diagonal of the
 `anchor @ positive.T` similarity matrix.
 
+**Mined hard negatives extend the candidate columns rather than replacing them.** A
+`TextPair` may carry a `negatives` tuple; `_step` encodes the batch's positives *and* those
+negatives, so the similarity matrix becomes `batch × (batch + extras)` and the targets stay
+the diagonal. A pair set with no negatives produces zero extra columns, which is exactly the
+in-batch objective described above — the two are one code path, not two. See *hard
+negatives* below.
+
 **Batch size is a quality parameter, not just a speed one.** A batch of 16 asks the model
 to pick the right passage from 16 candidates; a batch of 1024 makes it pick from 1024,
 which is a far harder and more useful task. This is why contrastive training is
@@ -149,7 +157,14 @@ because the second copy is labelled a negative for the first anchor. Dropping th
 costs one example and avoids training against a contradiction. A trailing batch of one is
 dropped for the related reason that it has no negatives at all: its loss is identically
 zero, which looks like success and teaches nothing. `train` refuses fewer than two pairs
-outright for the same reason.
+outright for the same reason — unless those pairs carry mined negatives, which supply
+candidate columns of their own and make a batch of one a real task again.
+
+The same discipline covers mined negatives, and there it is not a precaution but a
+certainty: the candidate pool a negative is mined from *is* the set of positives, so a
+negative colliding with some other pair's positive in the same batch is routine.
+`_candidates` deduplicates across both, which turns the collision into one shared column
+instead of a column labelled correct for one anchor and wrong for another.
 
 **Anchors and positives are encoded in one forward pass.** `_step` concatenates both sides
 and chunks the result. Beyond halving launch overhead, it guarantees both sides see
@@ -167,6 +182,60 @@ decay.
 **Weight decay applies to weight matrices only.** `_parameter_groups` excludes biases and
 anything with fewer than two dimensions. This matters more than it sounds: decaying a
 LayerNorm gain pulls it toward zero and scales down that layer's entire output.
+
+## Key design decisions — hard negatives
+
+**In-batch negatives go stale.** After the first few hundred steps a randomly-drawn passage
+is one the model already separates, so its gradient is near zero and the batch is mostly
+arithmetic. A *hard* negative is a passage the current model ranks near the right answer and
+which is nonetheless wrong, and it is the only kind that still carries signal.
+
+**The miner lives here, not in `corpus/`.** Finding one requires an encoder, and `corpus`
+sits below `embedding` in the layering. The split follows the existing rule: `corpus.pairs`
+owns the file format and carries a `negatives` field, `embedding.negatives` owns the
+algorithm. `corpus` never learns that models exist.
+
+**It takes a `TextEncoder` and never mentions torch.** That is what keeps it in `embedding/`
+rather than `embedding/neural/`, and it is why its whole unit suite runs on a base install
+against planted geometry — unit vectors at chosen angles, so every cosine in those tests is
+a number the test author picked rather than one a model happened to produce.
+
+**The candidate pool is the pair set's own positives.** No second corpus is fetched. Every
+positive is already a passage a person wrote and a miner kept, and the set is already
+resident, so mining is one encode of the pair set plus a blocked matrix multiply. It also
+means mining cannot stream: `--limit` takes a sample so the filters can be inspected before
+an hour is spent on the full set.
+
+**The false negative is the failure this module is built around.** A mined "hard negative"
+that is really a correct answer teaches the model to push the right passage away, and it
+does so with the largest gradient in the batch. Nothing raises, and the loss *improves* — a
+model taught to reject correct answers is being taught something and learns it. This is one
+of the few operations in this framework that reliably makes a model worse while every number
+on screen looks better. Three guards stand against it: the pair's own positive is rejected
+by identity, any candidate from the same source document is rejected by provenance, and
+anything scoring above `maximum_similarity` (0.95) is rejected as too likely to be a
+paraphrase of the answer.
+
+**Text the encoder cannot read is rejected by norm, not by score.** The contract promises a
+zero vector for unencodable input, which scores exactly 0.0 against everything and so is
+discarded by the default floor of 0.0 as a side effect. That is a coincidence of a default
+rather than a guard: a run against a weak checkpoint lowers the floor precisely because most
+honest candidates score below zero, and it would then start collecting passages the encoder
+never read. `rejected_unencodable` and `anchors_unencodable` count them.
+
+**No false-negative rate is published, and a test enforces that.** `outranking_the_positive`
+counts accepted negatives the model scored *above* the pair's own answer — the population
+false negatives are drawn from, not the false negatives. A field named for the rate would be
+read as the rate and quoted as the rate, and would be wrong by an unknown factor in an
+unknown direction. The only honest route to the real number is `--audit`, which writes the
+hardest sample to JSONL with an `is_actually_correct: null` field for a person to fill in.
+
+**Negatives are stored without prefixes.** The pair file is prefix-free by convention and
+`pipelines.adaptation.prefixed` applies the markers at training time, where a mined negative
+takes the **passage** marker — it is a passage that was retrieved, not a query. Mining
+itself applies the adapter's own prefixes internally, read off the manifest rather than
+accepted as flags, because an E5 model mined without them ranks by the wrong geometry and
+still returns a full set of negatives.
 
 ## Key design decisions — the adapted route
 
@@ -552,7 +621,8 @@ platform alone.
 
 | File | Tests | Covers |
 |---|---|---|
-| `tests/embedding/test_neural.py` | 38 | Architecture, encoder, contrastive training, padding, precision |
+| `tests/embedding/test_neural.py` | 49 | Architecture, encoder, contrastive training, padding, precision, the candidate columns |
+| `tests/embedding/test_negatives.py` | 35 | Mining against planted geometry: the three guards, the counts, the audit sample, prefixes |
 | `tests/embedding/test_lora_gradcache.py` | 24 | Zero-init identity, adapter-only state dicts, gradient equivalence, chunk invariance |
 | `tests/embedding/test_matrix.py` | 20 | Similarity, analogy, normalisation, versioned persistence |
 | `tests/embedding/test_sentence.py` | 20 | Mean pooling, SIF, the registry |
@@ -560,19 +630,24 @@ platform alone.
 | `tests/embedding/test_word2vec.py` | 17 | Sampling tables, subsampling, the update rules |
 | `tests/embedding/test_encoder_contract.py` | 15 | `TextEncoder`: shape, order, zero-not-NaN |
 | `tests/embedding/test_pretrained.py` | 15 | Pooling strategies, the wrapper's forward shape, error paths |
+| `tests/embedding/test_cli_mine_negatives.py` | 13 | `qfme mine-negatives`: required flags, and every default that decides what is thrown away |
 | `tests/embedding/test_adapter.py` | 9 | Save/load round trip, byte-identical vectors, metadata survival |
 
-`pytest tests/embedding -q` reports **177 passed** on a full install. `test_neural.py`,
+`pytest tests/embedding -q` reports **237 passed** on a full install. `test_neural.py`,
 `test_lora_gradcache.py`, `test_pretrained.py` and `test_adapter.py` call
 `pytest.importorskip("torch")`, so a core-only checkout collects fewer and still runs green.
+`test_negatives.py` does not — the miner takes the `TextEncoder` contract and nothing more,
+so it is tested against a lookup encoder on a base install.
 `test_pretrained.py` and `test_adapter.py` build a small BERT locally rather than
 downloading one — nothing here reaches the network. The layering rule described above is
 enforced separately by `tests/test_architecture.py` (17 tests).
 
 ## What is not here
 
-There is no character n-gram model, no approximate nearest-neighbour index, no hard-negative
-mining, no Matryoshka truncation and no checkpoint resumption. There is also no loader for
+There is no character n-gram model, no approximate nearest-neighbour index, no Matryoshka
+truncation and no checkpoint resumption. Hard negatives are mined but their false-negative
+rate is not measured — `negatives.py` writes an audit sample and stops there, because the
+number requires a person to label it. There is also no loader for
 external weights into `TransformerEncoderModel` — the pre-norm arrangement above makes that a
 real piece of work rather than a `load_state_dict` call, and `pretrained.py` sidesteps it by
 using the upstream library instead, which is why external checkpoints *are* supported while

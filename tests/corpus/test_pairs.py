@@ -18,6 +18,7 @@ import pytest
 from multilingual_embedding.core.exceptions import ValidationError
 from multilingual_embedding.corpus.document import Document
 from multilingual_embedding.corpus.pairs import (
+    MinedPair,
     PairConfig,
     PairKind,
     mine_pairs,
@@ -319,3 +320,63 @@ class TestStatisticsAreReportable:
             "language",
             "overlap",
         }
+
+
+class TestNegativesRideAlong:
+    """
+    Hard negatives are stored on the pair record but not produced here.
+
+    Finding a passage a model confuses with the right answer requires a
+    model, and this layer sits below every encoder. What this layer owns
+    is the file format, so the field lives on the record and the mining
+    lives in ``embedding/negatives.py``.
+    """
+
+    def test_a_freshly_mined_pair_has_none(self) -> None:
+        pairs, _ = mine_pairs([article()])
+
+        assert pairs[0].negatives == ()
+
+    def test_an_empty_field_is_left_out_of_the_record(self) -> None:
+        """
+        A pair file is millions of lines. Writing ``"negatives": []`` on
+        every one of them inflates the file for no information, and a
+        record written before this field existed must still round-trip
+        to a byte-identical line.
+        """
+
+        pairs, _ = mine_pairs([article()])
+
+        assert "negatives" not in pairs[0].to_record()
+
+    def test_negatives_survive_the_round_trip(self) -> None:
+        pair = MinedPair(
+            anchor="a",
+            positive="p",
+            kind=PairKind.TITLE_LEAD,
+            document="d",
+            language="en",
+            overlap=0.1,
+            negatives=("n1", "n2"),
+        )
+
+        assert MinedPair.from_record(pair.to_record()).negatives == ("n1", "n2")
+
+    def test_a_record_without_the_field_reads_as_empty(self) -> None:
+        """Files mined before this existed are still readable."""
+
+        record = {"anchor": "a", "positive": "p"}
+
+        assert MinedPair.from_record(record).negatives == ()
+
+    def test_blank_negatives_are_dropped(self) -> None:
+        """
+        An empty string encodes to a zero vector by the encoder
+        contract, so it would become a candidate column that every
+        anchor scores at exactly zero — a negative that teaches nothing
+        and costs memory in every batch it appears in.
+        """
+
+        record = {"anchor": "a", "positive": "p", "negatives": ["", "  ", "real"]}
+
+        assert MinedPair.from_record(record).negatives == ("real",)

@@ -8,6 +8,9 @@
 # run and a GPU run and the two stay comparable.
 #
 # Point `pairs` at a file written by `qfme mine-pairs` before running it.
+# A file from `qfme mine-negatives` works the same way and needs no flag
+# here: the mined negatives become extra candidate columns in the loss,
+# and a file without them trains exactly as it did before.
 
 name: indic-e5-adaptation
 

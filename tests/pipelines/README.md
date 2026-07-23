@@ -2,7 +2,7 @@
 
 > Tests for [`multilingual_embedding.pipelines`](../../src/multilingual_embedding/pipelines/README.md) — the search pipeline's query/passage asymmetry, the adapter it can be built from, and the adaptation run that produces that adapter.
 
-**68 tests.** Run with `pytest tests/pipelines -q`.
+**70 tests.** Run with `pytest tests/pipelines -q`.
 
 ## Files
 
