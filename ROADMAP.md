@@ -127,8 +127,8 @@ experiment file run on both a development machine and a GPU box. Devices validat
 rather than availability, which is what lets a GPU profile be authored and CI-tested
 without a GPU.
 
-**Still to do.** Adapting an external pretrained checkpoint, hard-negative mining,
-Matryoshka truncation, checkpoint resumption.
+**Still to do.** Adapting an external pretrained checkpoint, Matryoshka truncation,
+checkpoint resumption. Hard-negative mining landed as Phase C work; see below.
 
 **Verified on hardware, 20 July 2026.** An RTX 4070 Ti SUPER, batch 256, a 5.3M-parameter
 encoder over 4,000 mined Hindi pairs:
@@ -299,7 +299,8 @@ manufactured from document structure and content:
 | Cross-lingual | translation pairs, where parallel text exists |
 
 - **Deliverables:** miners for each strategy; hard-negative mining against a base
-  encoder; pair quality filtering and deduplication; a `qfme mine` command.
+  encoder (**done**, unproven); pair quality filtering and deduplication; a `qfme mine`
+  command (**done**, as `mine-pairs` and `mine-negatives`).
 - **Exit criterion:** a model trained purely on mined pairs from a domain corpus beats
   the untrained base on that domain.
 
@@ -333,6 +334,40 @@ rather than returning a meaningless 1.0.
 It is a diagnostic, not a score. Every pair mined here has both sides in one language, so
 a separated space is the expected outcome; a value near 1.0 clears the precondition for
 cross-lingual retrieval and demonstrates nothing beyond it.
+
+#### Hard negatives are mined, and the rate they cost is not claimed — 23 July 2026
+
+`qfme mine-negatives` ranks a pair set's own positives against each anchor with any
+`TextEncoder` and keeps the hardest survivors; `TextPair.negatives` carries them into
+training as extra candidate columns, so the similarity matrix becomes
+`batch × (batch + extras)` and the targets stay the diagonal. A pair set without negatives
+produces zero extra columns and trains byte-identically to before — the in-batch objective
+is the zero case of the new one, not a separate path.
+
+No second corpus is fetched. The candidate pool is the pair set's own positives, which are
+already passages somebody wrote and a miner kept, and are already resident.
+
+The reason this took a module rather than a function is the false negative. A mined
+"negative" that is really a correct answer trains the model to push the right passage away,
+with the largest gradient in the batch, and the loss curve *improves* while retrieval
+degrades — a model taught to reject correct answers is being taught something and learns it.
+Three guards stand against it: the pair's own positive by identity, any candidate from the
+same source document by provenance, and anything above 0.95 similarity as a likely
+paraphrase. Unencodable text is rejected by vector norm rather than by score, because the
+similarity floor that happens to catch it is a difficulty setting and a run against a weak
+checkpoint lowers it.
+
+**What is not claimed.** The statistics report `outranking_the_positive` — accepted
+negatives the model scored above the pair's own answer — and deliberately contain no field
+named for a false-negative *rate*. That number requires labelling, so `--audit` writes the
+hardest sample to JSONL with an `is_actually_correct: null` field and stops there. A test
+asserts no key in the statistics contains the string `false_negative`, because a field
+named for the rate would be read as the rate and would be wrong by an unknown factor in an
+unknown direction.
+
+**Open.** Whether any of this improves `models/indic-v1` is unmeasured. The comparison —
+mine against the adapter, retrain, score against the same held-out set — needs the 4070 Ti
+and has not been run. Until it has, this is a capability, not a result.
 
 ### Phase D — Serving
 
@@ -453,6 +488,46 @@ Not done, and the remainder of the phase: model versioning beyond a single serve
 cross-request batching, dimension truncation, ONNX export and quantisation, the container
 image, auth and rate limiting. The endpoint binds `127.0.0.1` by default because of that
 last one.
+
+#### A consumer found a hole in the public surface — 23 July 2026
+
+`quanfire-generative-text` now installs this repo as a pinned dependency rather than
+copying from it, and the first thing that produced was a defect nobody here would have
+found by reading their own code.
+
+`SentencePieceTrainerAdapter` is a published name. The only type its constructor accepted,
+`TokenizerConfig`, lives in `config`, which `CHANGELOG.md` puts explicitly outside the
+guarantee. Both statements were fine on their own. Together they meant the published class
+was reachable only by importing a type this repo may change in a patch release — so a
+change this repo would correctly call internal could break their build, without being
+breaking on this repo's own terms. A promise with a hole in it is worse than no promise,
+because it is planned around.
+
+`corpus.reader_for` had already solved this shape on the corpus side; the fix is
+`tokenizer.trainer_for`, same shape, and the consumer asked for exactly that over the
+alternative of re-exporting `TokenizerConfig` and declaring it public — which would have
+frozen an internal type in place to close a hole in a different one. `vocab_size` and
+`model_type` properties close the read-back path too. A test asserts no annotation in
+`trainer_for`'s signature names `TokenizerConfig` or `config`, because the guarantee is the
+entire point and review does not catch a regression in it.
+
+The general lesson, which applies to every remaining repo split: **a name is public only if
+every type in its signature is.** `tests/test_public_api.py` now names individual functions
+rather than only packages, and the same rule is written into `CHANGELOG.md` beside the
+surface it governs.
+
+The corpus loader had the identical hole in five places — `load_corpus`,
+`stream_documents`, `stream_sentences`, `build_reader` and `build_filter`, all exported,
+all taking only a `CorpusConfig` — which the consumer had already worked around. Closed in
+the same release by `corpus_from`, `documents_from` and `sentences_from`. The config forms
+stay, because inside this repository a `CorpusConfig` already exists (a YAML file produced
+it) and threading ten keyword arguments through `pipelines` to avoid a type it already
+holds would be worse.
+
+Second, cheaper report from the same session: wrapping reader *construction* in
+`try`/`except` translates nothing, because `iter_documents` is a generator whose body does
+not run until iteration, by which time the handler has exited. That is now a note beside
+`CorpusReader` rather than something each consumer rediscovers.
 
 ### Phase E — From-scratch pretraining *(capability, not default)*
 

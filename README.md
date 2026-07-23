@@ -18,7 +18,7 @@ an **adapted** published checkpoint — LoRA over frozen `multilingual-e5-small`
 The last is what produces the models this project ships; the first is the floor the others
 are measured against. The second and third need the optional `neural` extra.
 
-**1405 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
+**1499 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
 
 **Proven on real data:** a published checkpoint adapted on mined Hindi and Tamil Wikipedia
 pairs beats itself by **+28.6% (Hindi)** and **+40.9% (Tamil)** recall@1 on held-out
@@ -51,7 +51,8 @@ retrieval, training **0.50%** of its parameters into a **3.4 MB** artefact.
 - [Limitations](#limitations)
 
 > **Where this is going:** [ROADMAP.md](ROADMAP.md) tracks the remaining work — domain pair
-> miners, hard negatives, dimension truncation, and from-scratch pretraining.
+> miners, dimension truncation, and from-scratch pretraining. Hard-negative mining now
+> ships and is waiting on a GPU run to prove it earns its place.
 > [ECOSYSTEM.md](ECOSYSTEM.md) places this repository within the wider QuanFire AI stack;
 > everything outside embeddings lives there and nowhere in this README.
 
@@ -229,6 +230,7 @@ most solvable by string matching. It is reported, not hidden, and `--max-overlap
 | Train a SentencePiece tokenizer and shared vocabulary | ✅ | `qfme train` |
 | Train a static word2vec model and search it | ✅ | `qfme train`, `qfme search` |
 | Mine contrastive pairs from unlabelled text, leakage measured | ✅ | `qfme mine-pairs` |
+| Mine hard negatives against a trained adapter, with an auditable sample | ✅ | `qfme mine-negatives` |
 | Train a transformer encoder contrastively from scratch | ✅ | Python API |
 | Adapt a published checkpoint with LoRA on mined pairs | ✅ | `qfme adapt` |
 | Fit a large contrastive batch on 16 GB (gradient caching, bf16) | ✅ | `compute` profile |
@@ -236,7 +238,8 @@ most solvable by string matching. It is reported, not hidden, and `--max-overlap
 | Serve an adapted model, prefixes applied correctly | ✅ | `SemanticSearchPipeline.from_adapter` |
 | Score retrieval per language, per pair kind, per overlap band, with Wilson intervals | ✅ | `evaluate_retrieval` |
 | Declare an experiment's design and have the data checked against it | ✅ | `--adaptation` |
-| Hard-negative mining, domain-specific miners, synthetic pairs | ❌ | Phase C |
+| Measure the false-negative rate of mined negatives | ⚠️ | `--audit`, then a person |
+| Domain-specific miners, synthetic pairs, cross-lingual pairs | ❌ | Phase C |
 | HTTP embeddings endpoint, ONNX export, container image | ❌ | Phase D |
 | Neural path in `TrainingPipeline` (a transformer from scratch, from one command) | ❌ | Phase D |
 | From-scratch pretraining (MLM then contrastive) | ❌ | Phase E |
@@ -285,7 +288,7 @@ Stated up front, because a framework that claims everything is useful for nothin
 | 5 | Static embeddings — word2vec, sentence encoders, similarity search | **Implemented** |
 | A | Transformer encoder, contrastive InfoNCE training | **Implemented** |
 | B | LoRA, gradient caching, mixed precision, **external checkpoint adaptation** | **Implemented** — exit criterion met on hardware, 21 July 2026 |
-| C | Pair mining from unlabelled text | **Substantially done** — Wikipedia structure miners and `qfme mine-pairs` ship; hard negatives, domain miners and synthetic pairs outstanding |
+| C | Pair mining from unlabelled text | **Substantially done** — Wikipedia structure miners, `qfme mine-pairs` and `qfme mine-negatives` ship; the negative-mining gain is unproven on a GPU, and domain miners and synthetic pairs are outstanding |
 | D | Serving | **Started** — `from_adapter` serves a saved model locally; endpoint, ONNX, container outstanding |
 | E | From-scratch pretraining | **Planned** — capability, not the default; see [ROADMAP.md](ROADMAP.md) |
 
@@ -581,6 +584,12 @@ qfme validate --source data/corpora/hi.jsonl.gz --output reports/hi-audit.json
 qfme mine-pairs --source data/corpora/hi.jsonl.gz \
                 --output data/pairs/hi.jsonl.gz \
                 --max-overlap 0.9 --report reports/hi-pairs.json
+
+# 5. Optional, and only once an adapter exists: mine hard negatives against it.
+#    Read the audit file before training on the result.
+qfme mine-negatives --pairs data/pairs/hi.jsonl.gz --adapter models/hi-v1 \
+                    --output data/pairs/hi-hard.jsonl.gz \
+                    --audit reports/hi-negatives-audit.jsonl
 ```
 
 Then adapt, on the GPU box:
@@ -667,8 +676,11 @@ Practical consequences for a 22-language programme:
   sides. `--adaptation domain` exists for it and needs a pair file from real QuanFire
   documents to run — that is the experiment that would justify "this will help on our
   contracts".
-- **No hard negatives.** Negatives are in-batch only. Mining hard ones against a base
-  encoder is Phase C's remaining piece and is the most likely next source of gain.
+- **Hard negatives are mined but unproven.** `qfme mine-negatives` produces them and the
+  trainer consumes them; no run has yet shown that a model trained with them retrieves
+  better than one trained without. That comparison needs the 4070 Ti and has not been made.
+  Nor is the false-negative rate known — `--audit` writes the sample, and labelling it is
+  the only honest way to the number.
 - **No cross-lingual pairs.** Nothing mines translation pairs, so cross-lingual retrieval
   works only to the extent the corpus contained comparable content.
 - **`qfme extract` needs the `wikipedia` extra** (`mwparserfromhell`). Without it the
@@ -947,10 +959,40 @@ schema, so a client migrates by changing a base URL:
 uv sync --extra serve --extra pretrained --extra neural
 
 qfme serve --adapter models/indic-v1 --port 8000
+# Serving indic-v1 on http://127.0.0.1:8000
+```
 
-curl localhost:8000/v1/embeddings \
+Startup takes a few seconds: it loads the base checkpoint, applies LoRA, then binds. Add
+`--local-files-only` (and `HF_HUB_OFFLINE=1`) to refuse the network and run entirely
+from the local cache. Ctrl-C stops it.
+
+Three routes, plus FastAPI's own `/docs` and `/openapi.json` — the fastest way to try it
+by hand:
+
+```bash
+curl -s localhost:8000/health
+# {"status":"ok","model":"indic-v1","framework_version":"0.3.2"}
+
+curl -s localhost:8000/v1/models
+# id indic-v1 · dimension 384 · max_length 256 · normalized true
+# query_prefix "query: " · passage_prefix "passage: "
+
+curl -s localhost:8000/v1/embeddings \
   -H 'content-type: application/json' \
   -d '{"input": "संविधान में मौलिक अधिकार", "input_type": "query"}'
+```
+
+A list in `input` batches: one request, N vectors, each carrying its `index`. Every
+response echoes `prefix_applied` and a `usage` token count.
+
+Embedding a query and two passages through the endpoint and taking the cosine, on
+`models/indic-v1`:
+
+```
+query: भारत की राजधानी क्या है?
+
+0.6163  नई दिल्ली भारत की राजधानी है।            ← correct answer
+0.2207  सचिन तेंदुलकर एक क्रिकेट खिलाड़ी हैं।         ← distractor
 ```
 
 `input_type` is the one field that is not in the standard schema, and it is not
@@ -1114,7 +1156,7 @@ quanfire-multilingual-embedding/
 │   │   └── neural/                 transformer, LoRA, gradcache, pretrained, adapter
 │   ├── cli.py                      the `qfme` command
 │   └── py.typed                    marks the package as typed for consumers
-├── tests/                          1405 tests mirroring the source layout
+├── tests/                          1499 tests mirroring the source layout
 ├── scripts/                        adapt_pretrained.py, verify_e2e.py, diagnose_audit.py
 ├── configs/                        compute profiles — cpu.yaml, gpu.yaml
 ├── examples/                       runnable end-to-end example and a walkthrough
@@ -1211,7 +1253,11 @@ Stated plainly, because knowing where a tool stops is part of using it well.
   published encoders are post-norm; the shapes match, so such a load succeeds and is
   numerically wrong. External checkpoints *are* supported — through their own library, in
   `neural/pretrained.py` — which is a different thing from that loader existing.
-- **Negatives are in-batch only.** No hard-negative mining yet.
+- **Hard negatives are mined but unproven, and their false-negative rate is unknown.**
+  `qfme mine-negatives` ranks a pair set's own positives against each anchor and keeps the
+  hardest survivors; three guards reject the obvious false negatives and `--audit` writes
+  the rest for a person to label. Whether training on them helps this corpus is a GPU
+  experiment that has not been run.
 - **CUDA is unverified by any automated test**, though verified by hand on an RTX 4070 Ti
   SUPER: gradient caching cut peak VRAM 12.2×, bf16 a further 1.6×, with final losses
   within 0.51%. Development still happens without an NVIDIA GPU, so device-specific bugs

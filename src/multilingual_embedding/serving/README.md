@@ -93,12 +93,33 @@ terminates TLS and checks credentials.
 uv sync --extra serve --extra pretrained --extra neural
 
 qfme serve --adapter models/indic-v1 --port 8000
+# Serving indic-v1 on http://127.0.0.1:8000
 ```
 
+Add `--local-files-only`, with `HF_HUB_OFFLINE=1` in the environment, to run from the
+local Hugging Face cache and refuse the network. `/docs` and `/openapi.json` come from
+FastAPI and are the quickest way to exercise the routes by hand.
+
 ```bash
-curl localhost:8000/v1/embeddings \
+curl -s localhost:8000/health
+# {"status":"ok","model":"indic-v1","framework_version":"0.3.2"}
+
+curl -s localhost:8000/v1/embeddings \
   -H 'content-type: application/json' \
   -d '{"input": "संविधान में मौलिक अधिकार", "input_type": "query"}'
+```
+
+Omitting `input_type` against an asymmetric model is a `400` naming both valid values, not
+a guess. A list in `input` batches; each returned object carries its `index`.
+
+Checked against the property the endpoint exists for rather than for a 200 — a query and
+two passages embedded through it, cosine between them:
+
+```
+query: भारत की राजधानी क्या है?
+
+0.6163  नई दिल्ली भारत की राजधानी है।            correct answer
+0.2207  सचिन तेंदुलकर एक क्रिकेट खिलाड़ी हैं।         distractor
 ```
 
 ```python

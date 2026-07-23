@@ -1,6 +1,6 @@
 # tests
 
-> The test suite. 1405 tests, 94% statement coverage, mirroring the source layout.
+> The test suite. 1499 tests, 94% statement coverage, mirroring the source layout.
 
 ## Purpose
 
@@ -33,16 +33,16 @@ failure appears:
 | [`core/`](core/README.md) | 29 | Registry, factory, logging, exception context |
 | [`config/`](config/README.md) | 121 | Config validation, merging, precedence, compute profiles, persistence |
 | [`utils/`](utils/README.md) | 61 | Validation, hashing, filesystem, I/O, serialization |
-| [`corpus/`](corpus/README.md) | 493 | Scripts, segmentation, nodes, readers, statistics, auditing, Wikipedia extraction, pair mining, the 22 scheduled languages |
+| [`corpus/`](corpus/README.md) | 506 | Scripts, segmentation, nodes, readers, statistics, auditing, Wikipedia extraction, pair mining, the 22 scheduled languages |
 | [`vocabulary/`](vocabulary/README.md) | 36 | Token/id mapping, special tokens, builder, persistence |
-| [`tokenizer/`](tokenizer/README.md) | 187 | Normalizers, pre-tokenizers, encoding, training, round trips |
-| [`embedding/`](embedding/README.md) | 177 | Matrix, word2vec, sentence encoders, index, contextual encoder, LoRA, gradient caching, pretrained checkpoints, adapter save/load |
+| [`tokenizer/`](tokenizer/README.md) | 196 | Normalizers, pre-tokenizers, encoding, training, round trips |
+| [`embedding/`](embedding/README.md) | 237 | Matrix, word2vec, sentence encoders, index, contextual encoder, LoRA, gradient caching, pretrained checkpoints, adapter save/load, hard-negative mining |
 | [`evaluation/`](evaluation/README.md) | 89 | Metric primitives, evaluators, report rendering |
-| [`pipelines/`](pipelines/README.md) | 68 | Query/passage prefixes, batched indexing, building a pipeline from a saved adapter |
+| [`pipelines/`](pipelines/README.md) | 70 | Query/passage prefixes, batched indexing, building a pipeline from a saved adapter |
 | [`serving/`](serving/README.md) | 46 | The endpoint: prefixes across an HTTP boundary, the refusal to guess a side, request validation, `qfme serve` |
-| [`integration/`](integration/README.md) | 44 | End-to-end training, search and CLI, and verifying a copied adapter |
+| [`integration/`](integration/README.md) | 49 | End-to-end training, search and CLI, verifying a copied adapter, and the documents → pairs → negatives → trained model chain |
 | `test_architecture.py` | 17 | Layering rule, acyclic import graph, `py.typed` marker, encoder contract |
-| `test_public_api.py` | 15 | The surface sibling repositories pin, and that a base install stays torch-free |
+| `test_public_api.py` | 21 | The surface sibling repositories pin, and that a base install stays torch-free |
 
 `conftest.py` holds shared fixtures, including the multilingual sample texts used
 throughout. Those are real sentences in each script rather than placeholder text,
@@ -53,7 +53,7 @@ behave differently on genuine text.
 
 ```bash
 pytest                      # everything
-pytest -m "not slow"        # skip the model-training integration tests (1361 tests)
+pytest -m "not slow"        # skip the model-training integration tests (1427 tests)
 pytest --cov                # with coverage report
 pytest tests/corpus -q      # one package
 pytest -k segmentation      # by name

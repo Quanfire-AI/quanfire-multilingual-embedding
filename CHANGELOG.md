@@ -21,6 +21,17 @@ the promise is checked rather than merely written down.
 | `multilingual_embedding.evaluation` | `TokenizerEvaluator`, `TokenizerMetrics`, `language_fairness`, `evaluate_tokenizer` |
 | `multilingual_embedding.core.exceptions` | `MultilingualEmbeddingError` and its subclasses |
 
+Some names are pinned individually as well as by package, because a consumer depends on
+them specifically: `tokenizer.trainer_for`, `tokenizer.SentencePieceTrainerAdapter`,
+`corpus.reader_for`, `corpus.sentences_from`, `corpus.documents_from` and
+`corpus.corpus_from` — the supported way to reach the things whose other entry points take
+internal config types — plus the evaluation names below.
+
+**A name is public only if every type in its signature is.** That rule is the lesson of
+0.3.2 and applies to anything added here: a published function reachable only by importing
+something from `config` is a promise with a hole in it, because a change this repository
+would correctly call internal breaks a consumer's build.
+
 **Guaranteed at the package boundary, not the module.** `TokenizerEvaluator` and
 `language_fairness` are promised as `from multilingual_embedding.evaluation import ...`
 — never from `...evaluation.tokenizer_eval`. The file may move; the import will not.
@@ -43,6 +54,126 @@ absent.
 
 **Not public.** Everything else, `embedding/` and `pipelines/` included. They may move
 without a minor bump.
+
+## 0.3.2 — 2026-07-23
+
+A hole in the public surface, found by a consumer and closed. Additive: nothing that
+worked on 0.3.1 stops working.
+
+### Added
+
+- **`multilingual_embedding.tokenizer.trainer_for`** — builds a `SentencePieceTrainerAdapter`
+  from plain settings, with no config object:
+
+  ```python
+  from multilingual_embedding.tokenizer import trainer_for
+
+  trainer = trainer_for(vocab_size=8000, model_type="bpe")
+  ```
+
+  The class was already public. The only type its constructor accepted, `TokenizerConfig`,
+  lives in `config` — which the section above puts outside the guarantee. So the published
+  class was reachable only by importing a type this repo may change in a patch release,
+  which means a change this repo would call internal could break a consumer's build
+  without being breaking on this repo's own terms. That is a hole, not a design.
+
+  `trainer_for` is the same shape as `corpus.reader_for`, which solved this on the corpus
+  side. Its signature contains only builtins, `Mapping`s of them, and the already-public
+  `SpecialTokenSet`; `model_type` is a `str` because `TokenizerModel` is a `StrEnum`, so
+  both the string and the member are accepted. Every argument defaults to `None` meaning
+  *keep the framework default*, rather than restating those defaults where they would
+  drift silently.
+
+  A test asserts no annotation in the signature names `TokenizerConfig` or `config`, so
+  the guarantee is checked rather than reviewed.
+
+- **`SentencePieceTrainerAdapter.vocab_size`** and **`.model_type`** — an `int` and a
+  `str`, so reading back what a trainer was built with also needs no private import.
+  `.config` remains and still returns the internal type; its docstring now says so.
+
+- **`multilingual_embedding.corpus.sentences_from`, `.documents_from` and `.corpus_from`**
+  — the same three access patterns as `stream_sentences`, `stream_documents` and
+  `load_corpus`, from a source and plain settings:
+
+  ```python
+  from multilingual_embedding.corpus import sentences_from
+
+  for sentence in sentences_from("data/corpus.jsonl", min_sentence_characters=20):
+      ...
+  ```
+
+  Those five loader functions had the identical hole: all exported, all taking only a
+  `CorpusConfig`. The consumer reported the shape and had already worked around it. The
+  config forms stay — inside this repository a `CorpusConfig` already exists because a
+  YAML file produced it, and threading ten keyword arguments through `pipelines` to avoid
+  a type it already holds would be worse. `build_reader` needs no twin: `reader_for`
+  already is one. `build_filter` returns a `SentenceFilter` whose own constructor takes
+  plain integers.
+
+  Same conventions as `trainer_for`: `None` means keep the framework default, the caller's
+  `patterns` list is copied rather than aliased, and a test asserts no annotation on any of
+  the three names `CorpusConfig` or `config`.
+
+- `trainer_for`, `SentencePieceTrainerAdapter`, `corpus.reader_for` and the three loading
+  twins are named individually in `tests/test_public_api.py`, alongside the evaluation
+  names.
+
+### Documentation
+
+- A note next to `CorpusReader` on what construction does *not* raise. `iter_documents`
+  is a generator: its body does not run until the caller iterates, so a `try` around
+  `reader_for(path)` translates no missing file and no malformed line — the handler has
+  already exited. Wrap the iteration. The one exception is an explicit `format` naming no
+  registered reader, which raises `RegistryError` at construction; under `auto` even that
+  is silent, since an unrecognised extension falls back to `TextFileReader`. Reported by a
+  consumer who hit it.
+
+## 0.3.1 — 2026-07-23
+
+Hard-negative mining. A patch bump rather than a minor: nothing in the public surface
+changed shape, and a pair file written by 0.3.0 round-trips through this version to a
+byte-identical line.
+
+### Added
+
+- **`qfme mine-negatives`** — ranks a pair set's own positives against each anchor using a
+  saved adapter and attaches the hardest survivors to each pair. No second corpus is
+  fetched; the candidate pool is already resident and already human-written.
+
+  The reason this is a module rather than a function is the failure it has to avoid. A
+  mined "hard negative" that is really a correct answer trains the model to push the right
+  passage away, with the largest gradient in the batch, and the loss curve *improves* while
+  retrieval degrades. Three guards reject the obvious cases — the pair's own positive by
+  identity, the anchor's own document by provenance, anything above 0.95 similarity as a
+  likely paraphrase — and unencodable text is rejected by vector norm rather than by score,
+  so the guard does not depend on a default threshold happening to catch it.
+
+  **No false-negative rate is reported.** The statistics count
+  `outranking_the_positive` — the population such errors are drawn from — and contain no
+  field named for the rate, which a test enforces. `--audit` writes the hardest sample as
+  JSONL with an `is_actually_correct: null` field for a person to fill in. That is the only
+  route to the real number, and it needs an afternoon of labelling rather than a flag.
+
+- **`MinedPair.negatives`** and **`TextPair.negatives`.** Mined negatives become extra
+  candidate columns in the contrastive loss, so the similarity matrix is
+  `batch × (batch + extras)` and the targets stay the diagonal. Columns are deduplicated
+  across the batch, which matters here more than for positives: the pool a negative is
+  mined from *is* the set of positives, so a collision is routine rather than unlikely.
+
+  Both fields default to empty and produce zero extra columns, so a pair set without
+  negatives trains exactly as it did on 0.3.0. `MinedPair.to_record()` omits the key when
+  empty rather than writing `"negatives": []` on every line of a million-line file.
+
+- `multilingual_embedding.embedding` exports `mine_negatives`, `NegativeConfig`,
+  `NegativeStatistics` and `AuditRecord`. It takes the `TextEncoder` protocol and never
+  imports torch, so the algorithm — and its whole unit suite — runs on a base install.
+  Only the CLI command needs the `neural` and `pretrained` extras, because loading an
+  adapter does.
+
+### Not done
+
+Whether training on mined negatives improves `models/indic-v1` is unmeasured. That needs a
+GPU run and has not happened, so this ships as a capability rather than a result.
 
 ## 0.3.0 — 2026-07-23
 

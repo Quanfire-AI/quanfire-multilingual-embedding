@@ -77,7 +77,7 @@ Implemented and tested end to end:
 | Vocabulary | Deterministic token/id mapping, fixed special token ids, streaming builder, JSON persistence |
 | Embeddings | Skip-gram word2vec with negative sampling in pure numpy, mean-pooling and SIF sentence encoders, exact cosine similarity index |
 | Evaluation | Tokenizer compression/fertility/unknown-rate metrics with a per-language fairness breakdown, structural embedding metrics (isotropy, effective dimensions), optional similarity and analogy datasets |
-| Interfaces | `qfme` CLI (`stats`, `validate`, `extract`, `mine-pairs`, `train`, `search`, `evaluate`) and a Python API |
+| Interfaces | `qfme` CLI (`extract`, `stats`, `validate`, `mine-pairs`, `mine-negatives`, `train`, `adapt`, `search`, `evaluate`, `serve`) and a Python API |
 
 **Behind optional extras.** Three capabilities are installed separately, so the base
 install stays small for callers that only need text preparation:
