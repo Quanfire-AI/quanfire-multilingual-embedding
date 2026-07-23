@@ -564,6 +564,12 @@ save_adapter(
     encoder,
     "models/indic-v1",
     lora=lora,
+    # Required, no default: where the training data came from is a legal
+    # fact about the model, and an omitted default would let the one
+    # question that must be answered be answered by silence. One of
+    # public / synthetic / licensed; customer data has no value here on
+    # purpose, because it must not reach training.
+    data_provenance="public",
     query_prefix="query: ",
     passage_prefix="passage: ",
 )

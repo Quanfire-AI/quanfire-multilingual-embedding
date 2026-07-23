@@ -86,4 +86,12 @@ adaptation:
   # Without this the run produces a measurement rather than a model.
   save_adapter: artifacts/indic-adapter
 
+  # Where the training data came from, one of public / synthetic /
+  # licensed. Required the moment save_adapter is set: a saved model
+  # carries this as a legal fact about itself, and the config is refused
+  # before the run starts if it is left blank. Public here because this
+  # project trains on openly-licensed judgments; customer data has no
+  # value on purpose, because it must not reach training.
+  data_provenance: public
+
   report: artifacts/indic-adaptation.json

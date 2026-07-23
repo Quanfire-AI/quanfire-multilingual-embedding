@@ -23,7 +23,7 @@ from multilingual_embedding.common.constants import (
     DEFAULT_RANDOM_SEED,
     DEFAULT_VOCAB_SIZE,
 )
-from multilingual_embedding.common.enums import TokenizerModel
+from multilingual_embedding.common.enums import DataProvenance, TokenizerModel
 from multilingual_embedding.core.exceptions import ConfigurationError
 from multilingual_embedding.utils.serialization import from_primitive, to_primitive
 from multilingual_embedding.utils.validation import (
@@ -568,6 +568,14 @@ class AdaptationConfig:
         Directory to write the trained adapter to. Without it the run
         produces a measurement rather than a model.
 
+    data_provenance:
+        Where the training data came from, one of :class:`DataProvenance`
+        (``public``, ``synthetic``, ``licensed``). Empty is allowed only
+        for a measurement-only run; the moment ``save_adapter`` is set,
+        this must be declared, because a shipped model without a recorded
+        basis for its training data is the exact thing this field exists
+        to prevent.
+
     report:
         Where to write the full before/after comparison as JSON.
 
@@ -620,6 +628,8 @@ class AdaptationConfig:
 
     save_adapter: Path | None = None
 
+    data_provenance: str = ""
+
     report: Path | None = None
 
     seed: int | None = None
@@ -666,6 +676,25 @@ class AdaptationConfig:
                 "Unknown adaptation mode",
                 adaptation=self.adaptation,
                 supported=sorted(ADAPTATIONS),
+            )
+
+        if self.data_provenance and self.data_provenance not in set(DataProvenance):
+            raise ConfigurationError(
+                "Unknown data provenance",
+                data_provenance=self.data_provenance,
+                supported=sorted(DataProvenance),
+            )
+
+        # Fail closed: a run that produces a model must say where its
+        # training data came from. A measurement-only run (no save) need
+        # not, because it ships nothing. Checked here rather than at save
+        # time so the run is refused before it spends the training, not
+        # after.
+        if self.save_adapter is not None and not self.data_provenance:
+            raise ConfigurationError(
+                "Saving an adapter requires declaring data_provenance "
+                "(where its training data came from)",
+                supported=sorted(DataProvenance),
             )
 
         if self.pooling not in {"mean", "cls"}:

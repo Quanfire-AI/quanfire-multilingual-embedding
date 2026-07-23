@@ -296,6 +296,8 @@ class AdaptationResult:
 
     seconds: float = 0.0
 
+    data_provenance: str = ""
+
     adapter_directory: Path | None = None
 
     @property
@@ -394,6 +396,7 @@ class AdaptationResult:
             "loss": [self.initial_loss, self.final_loss],
             "moved": self.moved,
             "trainable_share": self.trainable_share,
+            "data_provenance": self.data_provenance,
             "recall_at_1_before": round(self.before.overall.recall_at_1, 4),
             "recall_at_1_after": round(self.after.overall.recall_at_1, 4),
             "delta": round(self.delta, 4),
@@ -598,6 +601,7 @@ class AdaptationPipeline:
             final_loss=training.final_loss,
             moved=moved,
             trainable_share=share,
+            data_provenance=settings.data_provenance,
             seconds=time.time() - started,
         )
 
@@ -609,10 +613,12 @@ class AdaptationPipeline:
                 encoder,
                 settings.save_adapter,
                 lora=lora,
+                data_provenance=settings.data_provenance,
                 query_prefix=settings.query_prefix,
                 passage_prefix=settings.passage_prefix,
                 notes={
                     "experiment": self.config.name,
+                    "data_provenance": settings.data_provenance,
                     "trained_on": str(settings.pairs),
                     "scored_against": str(facts["evaluation_source"]),
                     "train_pairs": len(train),

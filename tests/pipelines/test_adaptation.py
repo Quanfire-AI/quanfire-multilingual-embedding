@@ -574,6 +574,7 @@ class TestEndToEnd:
         config = experiment(
             tmp_path,
             save_adapter=destination,
+            data_provenance="public",
             query_prefix="query: ",
             passage_prefix="passage: ",
         )
@@ -583,6 +584,10 @@ class TestEndToEnd:
         assert outcome.adapter_directory == destination
 
         manifest = json.loads((destination / "adapter.json").read_text(encoding="utf-8"))
+
+        # The provenance is a legal fact about the model, written at the
+        # top level where it gates load compatibility, not buried in notes.
+        assert manifest["data_provenance"] == "public"
 
         # The prefixes are part of the model, not of the command line
         # that produced it. Serving without them returns plausible

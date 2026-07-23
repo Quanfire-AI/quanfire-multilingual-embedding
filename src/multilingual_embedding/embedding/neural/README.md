@@ -208,13 +208,25 @@ The forward pass runs under autocast; the backward pass deliberately does not.
 `save_adapter` writes `adapter.pt` (the low-rank tensors) and `adapter.json`. The JSON
 names the base checkpoint rather than copying it — hundreds of megabytes, already cached,
 and unchanged, because LoRA freezes it — and records **pooling, max length, normalisation,
-the LoRA settings, and the query and passage prefixes**, plus free-form `notes` carrying
-what it trained on and what it scored.
+the LoRA settings, the query and passage prefixes, and `data_provenance`**, plus free-form
+`notes` carrying what it trained on and what it scored.
 
 Those fields are not metadata for humans. Pooling and prefixes belong to the model as
 firmly as its weights do, and `load_adapter` returns `(encoder, metadata)` as a pair
 specifically so the prefixes cannot be forgotten. `SemanticSearchPipeline.from_adapter`
 consumes both.
+
+`data_provenance` is required and has no default: it says where the training data came
+from — one of `public` / `synthetic` / `licensed` — which is a legal fact about the model,
+not a note about it. `notes.trained_on` records a *path*, and a path says nothing about
+provenance: the same `pairs.jsonl.gz` could be public judgments, synthetic text, or
+customer data that must never have been there. A default would let the one question that
+must be answered be answered by omission, so there isn't one — writing an adapter without
+stating this is refused, in the same sense that `AllowAll(acknowledged=True)` has to be
+typed. Customer data has no vocabulary entry on purpose, because it must not reach
+training. Adding the field bumped the manifest to **format 2**; `load_adapter` still reads
+a format-1 adapter and reports its provenance as `undeclared`, so an old model's missing
+declaration is legible rather than defaulted to a value it never recorded.
 
 The reload is verified rather than assumed: the round-trip test asserts byte-identical
 vectors. A saved model that scores differently on reload is worse than no saved model,
@@ -256,7 +268,7 @@ because it is trusted.
 | `PretrainedTextEncoder.load` | checkpoint name/path, pooling, device, max length | an encoder satisfying `TextEncoder` |
 | `apply_lora` | the encoder's `nn.Module`, `LoRAConfig` | same module, ~0.5–0.8% trainable |
 | `ContrastiveTrainer.train` | `list[TextPair]`, `ContrastiveConfig` | `TrainingReport` — per-epoch losses |
-| `save_adapter` | encoder, `LoRAConfig`, prefixes, notes | a directory, ~3.4 MB |
+| `save_adapter` | encoder, `LoRAConfig`, `data_provenance`, prefixes, notes | a directory, ~3.4 MB |
 | `load_adapter` | that directory | `(PretrainedTextEncoder, AdapterMetadata)` |
 
 ---
@@ -297,6 +309,7 @@ save_adapter(
     encoder,
     "models/indic-v1",
     lora=LoRAConfig(rank=32, alpha=64, targets=("query", "value")),
+    data_provenance="public",  # required, no default — public / synthetic / licensed
     query_prefix="query: ",
     passage_prefix="passage: ",
     notes={"pairs": len(pairs), "final_loss": report.losses[-1]},

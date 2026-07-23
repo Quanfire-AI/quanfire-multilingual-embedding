@@ -32,6 +32,7 @@ from typing import Any
 
 import torch
 
+from multilingual_embedding.common.enums import DataProvenance
 from multilingual_embedding.core.logging import get_logger
 from multilingual_embedding.utils.filesystem import atomic_write_path, ensure_directory
 from multilingual_embedding.utils.io import read_json, write_json
@@ -47,7 +48,19 @@ _WEIGHTS_FILENAME = "adapter.pt"
 
 _METADATA_FILENAME = "adapter.json"
 
-_FORMAT_VERSION = 1
+# Bumped to 2 when ``data_provenance`` became a required top-level field.
+# A format-2 adapter guarantees the field is present; a format-1 one
+# predates it, and :func:`load_adapter` still reads those, reporting the
+# provenance as undeclared rather than refusing a model that was valid
+# when it was written.
+_FORMAT_VERSION = 2
+
+_SUPPORTED_LOAD_VERSIONS = frozenset({1, 2})
+
+# What a format-1 adapter's provenance reads as: not one of the declared
+# values, and visibly not, so a caller cannot mistake an old model whose
+# training data was never recorded for one that declared it.
+_UNDECLARED_PROVENANCE = "undeclared"
 
 
 class AdapterMetadata:
@@ -88,12 +101,26 @@ class AdapterMetadata:
 
         return str(self.payload.get("passage_prefix", ""))
 
+    @property
+    def data_provenance(self) -> str:
+        """
+        Where the training data came from, one of :class:`DataProvenance`.
+
+        Returns ``"undeclared"`` for a format-1 adapter written before the
+        field existed, so the absence of a declaration is itself legible
+        rather than defaulting to a value that would claim more than the
+        file records.
+        """
+
+        return str(self.payload.get("data_provenance", _UNDECLARED_PROVENANCE))
+
 
 def save_adapter(
     encoder: PretrainedTextEncoder,
     directory: str | Path,
     *,
     lora: LoRAConfig,
+    data_provenance: str,
     query_prefix: str = "",
     passage_prefix: str = "",
     notes: dict[str, Any] | None = None,
@@ -112,6 +139,16 @@ def save_adapter(
         fit, and inferring rank from a tensor is guesswork that fails
         silently on a mismatch.
 
+    data_provenance:
+        Where the training data came from, one of :class:`DataProvenance`
+        (``public``, ``synthetic``, ``licensed``). Required and with no
+        default, because it is a legal fact about the model rather than a
+        note about it, and a default would let the one question that must
+        be answered be answered by omission. An adapter cannot be written
+        without a caller stating this, in the same sense that
+        ``AllowAll(acknowledged=True)`` has to be typed: legitimate, and
+        the record of a human decision.
+
     query_prefix, passage_prefix:
         Recorded so the adapter cannot be served without them. An E5
         model used without ``query: `` still returns vectors; they are
@@ -127,7 +164,17 @@ def save_adapter(
         If the encoder carries no adapter, which almost always means
         ``apply_lora`` was never called and the caller is about to save
         an empty file believing otherwise.
+    ValueError
+        If ``data_provenance`` is not one of the declared values. Refused
+        rather than written through, because an unrecognised provenance
+        recorded on a model is worse than none: it reads as a declaration
+        while meaning nothing.
     """
+
+    if data_provenance not in set(DataProvenance):
+        raise ValueError(
+            f"data_provenance must be one of {sorted(DataProvenance)}, not {data_provenance!r}"
+        )
 
     target = ensure_directory(directory)
 
@@ -153,6 +200,7 @@ def save_adapter(
             "pooling": encoder._model.pooling,
             "max_length": encoder._max_length,
             "normalize": encoder._normalize,
+            "data_provenance": str(data_provenance),
             "query_prefix": query_prefix,
             "passage_prefix": passage_prefix,
             "lora": {
@@ -229,11 +277,11 @@ def load_adapter(
 
     version = payload.get("format_version")
 
-    if version != _FORMAT_VERSION:
+    if version not in _SUPPORTED_LOAD_VERSIONS:
         raise PretrainedEncoderError(
             "Adapter was written by an incompatible format version",
             found=version,
-            supported=_FORMAT_VERSION,
+            supported=sorted(_SUPPORTED_LOAD_VERSIONS),
         )
 
     encoder = PretrainedTextEncoder.load(

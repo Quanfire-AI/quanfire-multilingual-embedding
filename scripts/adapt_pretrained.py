@@ -71,6 +71,7 @@ import sys
 import time
 from pathlib import Path
 
+from multilingual_embedding.common.enums import DataProvenance
 from multilingual_embedding.config.base import (
     ADAPTATIONS,
     AdaptationConfig,
@@ -203,6 +204,18 @@ def main() -> int:
         ),
     )
 
+    parser.add_argument(
+        "--data-provenance",
+        default="",
+        choices=[str(value) for value in DataProvenance],
+        help=(
+            "Where the training data came from: public, synthetic or "
+            "licensed. Required the moment --save-adapter is set, because a "
+            "saved model carries this as a legal fact about itself and there "
+            "is no default that could answer it by omission"
+        ),
+    )
+
     arguments = parser.parse_args()
 
     config = ExperimentConfig(
@@ -229,6 +242,7 @@ def main() -> int:
             query_prefix=arguments.query_prefix,
             passage_prefix=arguments.passage_prefix,
             save_adapter=arguments.save_adapter,
+            data_provenance=arguments.data_provenance,
             report=arguments.output,
             seed=arguments.seed,
         ),

@@ -99,7 +99,7 @@ class TestTheReloadedModelIsTheSameModel:
 
         before = encoder.encode_batch(PROBE)
 
-        save_adapter(encoder, directory / "saved", lora=config)
+        save_adapter(encoder, directory / "saved", lora=config, data_provenance="public")
 
         reloaded, _ = load_adapter(directory / "saved", device="cpu")
 
@@ -141,6 +141,7 @@ class TestTheArtefactCarriesHowToUseIt:
             encoder,
             directory / "saved",
             lora=config,
+            data_provenance="public",
             query_prefix="query: ",
             passage_prefix="passage: ",
         )
@@ -173,7 +174,7 @@ class TestTheArtefactCarriesHowToUseIt:
 
         apply_lora(encoder._model, config)
 
-        save_adapter(encoder, directory / "saved", lora=config)
+        save_adapter(encoder, directory / "saved", lora=config, data_provenance="public")
 
         reloaded, _ = load_adapter(directory / "saved", device="cpu")
 
@@ -192,6 +193,7 @@ class TestTheArtefactCarriesHowToUseIt:
             encoder,
             directory / "saved",
             lora=config,
+            data_provenance="public",
             notes={"trained_on": "hi-pairs", "recall_at_1_after": 0.65},
         )
 
@@ -209,7 +211,7 @@ class TestTheArtefactCarriesHowToUseIt:
 
         encoder, config = adapted(directory)
 
-        saved = save_adapter(encoder, directory / "saved", lora=config)
+        saved = save_adapter(encoder, directory / "saved", lora=config, data_provenance="public")
 
         written = sum(path.stat().st_size for path in saved.iterdir())
 
@@ -231,7 +233,9 @@ class TestItFailsLoudly:
         plain = PretrainedTextEncoder.load(str(directory / "base"), device="cpu")
 
         with pytest.raises(PretrainedEncoderError, match="no LoRA adapter"):
-            save_adapter(plain, directory / "saved", lora=LoRAConfig(rank=8))
+            save_adapter(
+                plain, directory / "saved", lora=LoRAConfig(rank=8), data_provenance="public"
+            )
 
     def test_loading_a_directory_that_is_not_an_adapter_is_refused(self) -> None:
         directory = base_checkpoint()
@@ -251,7 +255,7 @@ class TestItFailsLoudly:
 
         encoder, config = adapted(directory, rank=8)
 
-        saved = save_adapter(encoder, directory / "saved", lora=config)
+        saved = save_adapter(encoder, directory / "saved", lora=config, data_provenance="public")
 
         metadata = json.loads((saved / "adapter.json").read_text(encoding="utf-8"))
 
@@ -269,7 +273,7 @@ class TestItFailsLoudly:
 
         encoder, config = adapted(directory)
 
-        saved = save_adapter(encoder, directory / "saved", lora=config)
+        saved = save_adapter(encoder, directory / "saved", lora=config, data_provenance="public")
 
         metadata = json.loads((saved / "adapter.json").read_text(encoding="utf-8"))
 
@@ -279,3 +283,83 @@ class TestItFailsLoudly:
 
         with pytest.raises(PretrainedEncoderError, match="incompatible format"):
             load_adapter(saved, device="cpu")
+
+
+class TestProvenanceIsRecordedAndRequired:
+    """
+    Where the training data came from is a legal fact about the model, so
+    it is written into the artefact, required before one can be saved, and
+    an old adapter that predates the field reads as undeclared rather than
+    silently claiming a value it never recorded.
+    """
+
+    def test_the_declared_value_survives_a_round_trip(self) -> None:
+        directory = base_checkpoint()
+
+        encoder, config = adapted(directory)
+
+        save_adapter(encoder, directory / "saved", lora=config, data_provenance="synthetic")
+
+        _, metadata = load_adapter(directory / "saved", device="cpu")
+
+        assert metadata.data_provenance == "synthetic"
+
+    def test_the_manifest_declares_format_two(self) -> None:
+        import json
+
+        directory = base_checkpoint()
+
+        encoder, config = adapted(directory)
+
+        saved = save_adapter(encoder, directory / "saved", lora=config, data_provenance="public")
+
+        manifest = json.loads((saved / "adapter.json").read_text(encoding="utf-8"))
+
+        # The field is top-level, not buried in notes, because it gates
+        # load compatibility: format 2 guarantees its presence.
+        assert manifest["format_version"] == 2
+
+        assert manifest["data_provenance"] == "public"
+
+    def test_an_unrecognised_provenance_is_refused(self) -> None:
+        """
+        A value that is not one of the declared kinds reads as a
+        declaration while meaning nothing, so it is refused rather than
+        written through.
+        """
+
+        directory = base_checkpoint()
+
+        encoder, config = adapted(directory)
+
+        with pytest.raises(ValueError, match="data_provenance"):
+            save_adapter(encoder, directory / "saved", lora=config, data_provenance="customer")
+
+    def test_a_format_one_adapter_reads_as_undeclared(self) -> None:
+        """
+        An adapter written before the field existed is still loadable, and
+        its provenance is legibly absent rather than defaulted to a value
+        that would claim more than the file records.
+        """
+
+        import json
+
+        directory = base_checkpoint()
+
+        encoder, config = adapted(directory)
+
+        saved = save_adapter(encoder, directory / "saved", lora=config, data_provenance="public")
+
+        manifest = json.loads((saved / "adapter.json").read_text(encoding="utf-8"))
+
+        # Roll the manifest back to what format 1 wrote: no provenance key,
+        # older version number.
+        manifest["format_version"] = 1
+
+        del manifest["data_provenance"]
+
+        (saved / "adapter.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+        _, metadata = load_adapter(saved, device="cpu")
+
+        assert metadata.data_provenance == "undeclared"

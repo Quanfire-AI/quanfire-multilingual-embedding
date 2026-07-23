@@ -1,11 +1,13 @@
 """
 Command line interface.
 
-Installed as ``qfme``. Ten subcommands cover the lifecycle::
+Installed as ``qfme``. Twelve subcommands cover the lifecycle::
 
     qfme stats    --source data/corpus.jsonl
     qfme validate --source data/corpus.jsonl
     qfme extract  --dump hiwiki.xml.bz2 --output hi.jsonl.gz --language hi
+    qfme extract-judgments --source data/corpora/judgments --output judgments.jsonl.gz
+    qfme prepare-eval --source data/corpora/milpac --output eval/milpac.jsonl.gz
     qfme mine-pairs --source hi.jsonl.gz --output pairs/hi.jsonl.gz
     qfme mine-negatives --pairs pairs/hi.jsonl.gz --adapter models/indic-v1 \
         --output pairs/hi-hard.jsonl.gz
@@ -49,6 +51,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from multilingual_embedding.common.enums import DataProvenance
 from multilingual_embedding.common.version import __version__
 from multilingual_embedding.config.base import ADAPTATIONS, CorpusConfig, ExperimentConfig
 from multilingual_embedding.config.loader import load_config, parse_override
@@ -102,6 +105,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_extract_parser(subparsers)
 
+    _add_extract_judgments_parser(subparsers)
+
+    _add_prepare_eval_parser(subparsers)
+
     _add_mine_pairs_parser(subparsers)
 
     _add_mine_negatives_parser(subparsers)
@@ -140,6 +147,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "stats": _run_stats,
         "validate": _run_validate,
         "extract": _run_extract,
+        "extract-judgments": _run_extract_judgments,
+        "prepare-eval": _run_prepare_eval,
         "mine-pairs": _run_mine_pairs,
         "mine-negatives": _run_mine_negatives,
         "train": _run_train,
@@ -292,6 +301,109 @@ def _add_extract_parser(subparsers: Any) -> None:
         "--keep-duplicates",
         action="store_true",
         help="Keep articles whose text repeats an earlier one",
+    )
+
+
+def _add_extract_judgments_parser(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "extract-judgments",
+        help="Extract public court-judgment PDFs into the training corpus",
+        description=(
+            "Read a directory of court-judgment PDFs into the corpus format "
+            "for training. The judgments this reads are licensed CC BY, whose "
+            "attribution-only terms permit training a shipped adapter on them "
+            "— the opposite end of the wall from MILPaC, which may only be "
+            "scored against. This does not OCR: a scanned judgment with no "
+            "text layer is dropped and counted, not read, and whether a "
+            "collection extracts cleanly is only known once it is run through "
+            "`qfme validate`. Requires the `judgments` extra: "
+            "uv sync --extra judgments."
+        ),
+    )
+
+    parser.add_argument(
+        "--source",
+        type=Path,
+        required=True,
+        help="A judgment .pdf, or a directory of them",
+    )
+
+    parser.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="Destination JSON Lines file; gzipped when it ends .gz",
+    )
+
+    parser.add_argument(
+        "--language",
+        default="en",
+        help=(
+            "ISO code recorded on every judgment (default: en). The PDF does "
+            "not state one, so it is asserted here rather than inferred"
+        ),
+    )
+
+    parser.add_argument(
+        "--minimum-characters",
+        type=int,
+        default=500,
+        help=(
+            "Drop documents shorter than this (default: 500). The floor "
+            "catches failed extractions — a scanned page yields almost "
+            "nothing — not genuinely short orders"
+        ),
+    )
+
+    parser.add_argument(
+        "--limit",
+        type=int,
+        help="Stop after this many judgments, for trying a collection",
+    )
+
+
+def _add_prepare_eval_parser(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "prepare-eval",
+        help="Turn the MILPaC benchmark into a held-out evaluation pair file",
+        description=(
+            "Read the MILPaC .xlsx workbooks into a pair file for "
+            "`qfme adapt --eval-pairs-file`. MILPaC is the evaluation set, "
+            "held out by origin from the training corpus, and it is licensed "
+            "CC BY-NC-SA — score against it, never train a shipped adapter on "
+            "it. Requires the `milpac` extra: uv sync --extra milpac."
+        ),
+    )
+
+    parser.add_argument(
+        "--source",
+        type=Path,
+        required=True,
+        help="A MILPaC .xlsx workbook, or a directory of them",
+    )
+
+    parser.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="Destination JSON Lines pair file; gzipped when it ends .gz",
+    )
+
+    parser.add_argument(
+        "--languages",
+        default="hi,ta",
+        help=(
+            "Comma-separated Indic target languages to keep (default: hi,ta). "
+            "Widening this scores languages the model may not be adapted for"
+        ),
+    )
+
+    parser.add_argument(
+        "--datasets",
+        help=(
+            "Comma-separated MILPaC datasets to keep, e.g. Acts,IP,CCI-FAQ. "
+            "Omit to keep all three"
+        ),
     )
 
 
@@ -556,6 +668,17 @@ def _add_adapt_parser(subparsers: Any) -> None:
         ),
     )
 
+    parser.add_argument(
+        "--data-provenance",
+        choices=[str(value) for value in DataProvenance],
+        help=(
+            "Where the training data came from: public, synthetic or "
+            "licensed. Required to save an adapter — a saved model carries "
+            "this as a legal fact about itself, and it has no default so it "
+            "cannot be answered by omission"
+        ),
+    )
+
     parser.add_argument("--output", type=Path, help="Write the full comparison as JSON")
 
 
@@ -762,6 +885,59 @@ def _run_extract(args: argparse.Namespace) -> int:
     # here is the difference between a corpus that was checked and one
     # that merely exists.
     print(f"Next: qfme validate --source {args.output}")
+
+    return EXIT_SUCCESS
+
+
+def _run_extract_judgments(args: argparse.Namespace) -> int:
+    """Extract judgment PDFs into the training corpus, then say what to do next."""
+
+    from multilingual_embedding.corpus.judgments import extract_judgments
+
+    count = extract_judgments(
+        args.source,
+        args.output,
+        language=args.language,
+        minimum_characters=args.minimum_characters,
+        limit=args.limit,
+    )
+
+    print(f"Wrote {count} judgments to {args.output}")
+
+    # PDF extraction is exactly the step whose fidelity cannot be trusted
+    # until it is checked, so the corpus is not done until the audit has
+    # seen it — the same next step as a Wikipedia extraction.
+    print(f"Next: qfme validate --source {args.output}")
+
+    return EXIT_SUCCESS
+
+
+def _run_prepare_eval(args: argparse.Namespace) -> int:
+    """Build the MILPaC held-out evaluation set, then say what to do with it."""
+
+    from multilingual_embedding.corpus.milpac import extract_milpac
+
+    languages = tuple(code.strip() for code in args.languages.split(",") if code.strip())
+
+    datasets = (
+        tuple(name.strip() for name in args.datasets.split(",") if name.strip())
+        if args.datasets
+        else None
+    )
+
+    count = extract_milpac(
+        args.source,
+        args.output,
+        languages=languages,
+        datasets=datasets,
+    )
+
+    print(f"Wrote {count} evaluation pairs to {args.output}")
+
+    # Named --eval-pairs-file, never --pairs. The origin wall and the
+    # non-commercial licence both depend on this file staying on the
+    # scoring side of the run.
+    print(f"Next: qfme adapt --config <experiment> --eval-pairs-file {args.output}")
 
     return EXIT_SUCCESS
 
@@ -997,6 +1173,7 @@ _ADAPT_OVERRIDES = {
     "query_prefix": "query_prefix",
     "passage_prefix": "passage_prefix",
     "save_adapter": "save_adapter",
+    "data_provenance": "data_provenance",
     "output": "report",
 }
 

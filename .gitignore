@@ -84,9 +84,15 @@ verify-*.txt
 reports/*
 !reports/.gitkeep
 
-# Working corpora are large and often licensed, so they stay local. The
-# committed exceptions are the small sample corpus the examples and docs
-# depend on, and the directory's own documentation.
+# Working corpora are large and often licensed, so they stay local. This
+# includes the real training and evaluation corpora — data/corpora/ holds
+# the downloaded judgment PDFs and MILPaC workbooks, and data/dumps/ the
+# Wikipedia dumps — none of which belong in git history for reasons of
+# size and licence both. It is also the boundary that keeps anything that
+# is not openly licensed out of the repository by default; a corpus lands
+# here, is declared, and is never committed. The committed exceptions are
+# the small sample corpus the examples and docs depend on, and the
+# directory's own documentation.
 data/*
 !data/sample/
 !data/README.md

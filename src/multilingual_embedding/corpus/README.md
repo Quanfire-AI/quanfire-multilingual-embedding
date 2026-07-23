@@ -5,7 +5,9 @@
 ## Purpose
 Everything above this layer consumes sentences: the tokenizer trains on them, the embedding model treats them as context windows, the evaluators score them. This package is what turns arbitrary files into those sentences without losing the ability to say where any unit came from. It is a layer of its own because segmentation, script detection and cleaning are all script-dependent decisions that must be made in exactly one place — a period-and-space sentence rule silently destroys Hindi and Chinese, and a naive word regex silently destroys every Indic and Arabic word, so these rules cannot be allowed to be reinvented per call site.
 
-Two modules extend that remit at the ends. `wikipedia.py` is the **front door**: it turns a MediaWiki dump into the corpus format, which for most scheduled Indian languages is the only route to a substantial amount of real text. `pairs.py` is the **exit** toward contrastive training: it manufactures anchor/positive pairs out of the structure Wikipedia already carries, because labelled retrieval pairs do not exist for these languages and never will. Together they are the `dump → corpus → pairs → adapter` path that produced `models/indic-v1`.
+Four modules extend that remit at the ends. `wikipedia.py` is the general-domain **front door**: it turns a MediaWiki dump into the corpus format, which for most scheduled Indian languages is the only route to a substantial amount of real text. `pairs.py` is the **exit** toward contrastive training: it manufactures anchor/positive pairs out of the structure Wikipedia already carries, because labelled retrieval pairs do not exist for these languages and never will. Together they are the `dump → corpus → pairs → adapter` path that produced `models/indic-v1`.
+
+Two more front doors serve the legal domain, deliberately kept on opposite sides of a wall. `judgments.py` reads public court-judgment PDFs (CC BY, commercial use permitted) into the corpus format — the **training** door. `milpac.py` reads the MILPaC parallel corpus (CC BY-NC-SA, non-commercial) into held-out evaluation pairs — the **evaluation** door, which by licence and by design may only be scored against, never trained on. See [the legal domain](#the-legal-domain-two-front-doors-and-a-wall) below.
 
 ## Modules
 | Module | Responsibility |
@@ -27,6 +29,8 @@ Two modules extend that remit at the ends. `wikipedia.py` is the **front door**:
 | `validators.py` | `SentenceFilter`, `DocumentDeduplicator`, `FilterReport`, `validate_document`. |
 | `audit.py` | `audit_corpus` and its `CorpusAudit`, `Finding` and `Severity`; judges a corpus rather than describing it. |
 | `wikipedia.py` | `WikipediaArticle`, `iter_articles`, `extract_dump`, `WikipediaExtractionError`; MediaWiki dump → corpus JSON Lines, sections preserved. |
+| `judgments.py` | `JudgmentDocument`, `iter_judgments`, `extract_judgments`, `JudgmentExtractionError`, `PdfReader`; court-judgment PDFs → corpus JSON Lines (CC BY). The legal training front door; PDF reading is an injectable seam and it does not OCR. |
+| `milpac.py` | `MilpacUnit`, `iter_units`, `extract_milpac`, `MilpacExtractionError`; MILPaC `.xlsx` → held-out evaluation pairs (CC BY-NC-SA). The legal evaluation front door; produces `--eval-pairs-file` input only, never `--pairs`. |
 | `pairs.py` | `MinedPair`, `PairKind`, `PairConfig`, `PairStatistics`, `iter_pairs`, `mine_pairs`, `token_overlap`; corpus → contrastive training pairs, with leakage measured. Carries a `negatives` field this layer never fills in. |
 | `exceptions.py` | `CorpusError` and its subclasses `CorpusFormatError`, `SegmentationError`, `EmptyCorpusError`. |
 | `base/` | Structural base classes for nodes — see `base/README.md`. |
@@ -227,6 +231,26 @@ Contrastive training needs an anchor and a positive — a query and the passage 
 Rejections are counted **against their reason**, not into a single number. `_candidates` yields before any filtering so that `PairStatistics` can report `short_anchor`, `short_positive`, `overlap` and `duplicate` separately — an unexpectedly small pair set is then traceable to the rule responsible rather than guessed at. Duplicates are exact-match on a hash of `anchor\x00positive`, so the same lead paragraph reached from two directions counts once.
 
 `iter_pairs` streams and `mine_pairs` collects. Both are offered because the choice is real: a pair set from a mid-sized Wikipedia is millions of pairs holding two strings each, which is gigabytes. `mine_pairs` bounds memory by the pair set, which is the thing being built and has to fit; `iter_pairs` bounds it by one document and is what `qfme mine-pairs` uses to write straight to disk. Pass a `PairStatistics` to `iter_pairs` to have it filled in as pairs are produced — it is only complete once the iterator is exhausted.
+
+### the legal domain: two front doors and a wall
+
+Wikipedia is a general corpus. The domain this framework was built to adapt to is Indic legal text, and that domain has two openly-licensed sources — but they are licensed differently, and the difference decides which one may train a model and which may only score one. `judgments.py` and `milpac.py` exist to keep those two roles apart, on opposite sides of a wall that is drawn by **origin**, not by a flag a later run could forget to set.
+
+| | `judgments.py` | `milpac.py` |
+|---|---|---|
+| Source | public court-judgment PDFs | the MILPaC parallel corpus (`.xlsx`) |
+| Licence | CC BY 4.0 — commercial use permitted | CC BY-NC-SA — **non-commercial** |
+| Role | **training** — reads into the corpus format | **evaluation** — reads into held-out pairs |
+| Reaches the pair miner? | yes, like any corpus | **never** |
+| CLI output | `--source` for `mine-pairs` | `--eval-pairs-file` for `adapt` |
+
+**The wall is the licence.** A model trained on CC BY-NC-SA text inherits the non-commercial restriction, which would poison a model this project needs to be able to sell. So MILPaC is held out *by origin*: `milpac.py` produces evaluation pairs directly and there is no code path that feeds its text to `pairs.py`. It cannot leak into training by a mistaken flag, because the flag was never the thing keeping it out — the absence of a route is. This mirrors the customer-data rule the rest of the framework enforces: the safe default is a missing door, not a guarded one.
+
+**Judgments are the training door precisely because their licence permits it.** CC BY carries an attribution obligation and nothing more, so a judgment corpus can adapt a model that is later sold. `judgments.py` reads a directory of PDFs into exactly the `{id, language, title, text, source, license}` record every other reader produces, so from `pairs.py` onward a judgment is indistinguishable from a Wikipedia article — the front door's whole job is to make the legal corpus ordinary by the time the miner sees it.
+
+**PDF text extraction is an injectable seam, and it does not OCR.** The one step that depends on a real PDF — pulling text out of it — is the `reader` parameter, defaulting to a `pypdf`-backed reader behind the optional `judgments` extra. Everything around it is tested exhaustively with a fake reader; the extraction fidelity itself is deliberately *not* asserted, because it cannot be known until a real collection is downloaded and audited. A scanned judgment whose text layer is an image extracts to almost nothing, and that is treated as a **failed extraction and dropped**, not emitted as an empty record that would read downstream as a real judgment — the `minimum_characters` floor is what draws that line. There is no OCR: a corpus that is mostly scans needs one bolted on before this reader is the right tool, and that is stated rather than silently producing empty records.
+
+The title is taken from PDF metadata when present and falls back to the file stem — never guessed from the first line of prose, whose layout no parser can trust — and the identifier is always the stem, so every record traces back to the exact file it came from.
 
 ## Usage
 

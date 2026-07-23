@@ -67,6 +67,27 @@ wikipedia = [
     "mwparserfromhell>=0.6,<1.0",
 ]
 
+# MILPaC evaluation set. Optional because it exists only to read the one
+# `.xlsx` benchmark this project holds out for scoring; openpyxl is not
+# used anywhere else, and a core install neither trains against MILPaC nor
+# needs to parse a spreadsheet to consume a corpus.
+#
+#     uv sync --extra milpac
+milpac = [
+    "openpyxl>=3.1,<4.0",
+]
+
+# Public court judgments, the training front door for the legal domain.
+# Optional because it exists only to pull text out of the PDF collection
+# this project trains on; pypdf is pure-Python (no system libraries, so it
+# installs on the laptop) and is used nowhere else, and a core install
+# neither trains on judgments nor needs a PDF parser to consume a corpus.
+#
+#     uv sync --extra judgments
+judgments = [
+    "pypdf>=4.0,<6.0",
+]
+
 [project.scripts]
 qfme = "multilingual_embedding.cli:main"
 
@@ -170,6 +191,7 @@ warn_unreachable = true
 show_error_codes = true
 
 [[tool.mypy.overrides]]
-# SentencePiece ships no type stubs.
-module = ["sentencepiece.*"]
+# SentencePiece and openpyxl ship no type stubs; openpyxl is the optional
+# `milpac` extra, read only inside corpus/milpac.py.
+module = ["sentencepiece.*", "openpyxl", "openpyxl.*", "pypdf", "pypdf.*"]
 ignore_missing_imports = true

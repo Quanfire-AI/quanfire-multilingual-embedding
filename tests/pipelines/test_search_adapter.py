@@ -87,6 +87,7 @@ def saved_adapter(root: Path, *, query_prefix: str, passage_prefix: str) -> Path
         encoder,
         root / "saved",
         lora=config,
+        data_provenance="public",
         query_prefix=query_prefix,
         passage_prefix=passage_prefix,
     )

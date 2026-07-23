@@ -88,6 +88,7 @@ def _saved_adapter(root: Path, *, query_prefix: str, passage_prefix: str) -> Pat
         encoder,
         root / "asymmetric" if query_prefix else root / "symmetric",
         lora=lora,
+        data_provenance="public",
         query_prefix=query_prefix,
         passage_prefix=passage_prefix,
     )

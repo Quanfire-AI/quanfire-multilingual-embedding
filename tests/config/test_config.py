@@ -515,11 +515,52 @@ class TestAdaptationConfig:
         assert AdaptationConfig(train_kinds=",,").train_kinds == ()
 
     def test_string_paths_become_paths(self) -> None:
-        config = AdaptationConfig(pairs="pairs.jsonl.gz", save_adapter="out/adapter")
+        config = AdaptationConfig(
+            pairs="pairs.jsonl.gz", save_adapter="out/adapter", data_provenance="public"
+        )
 
         assert config.pairs == Path("pairs.jsonl.gz")
 
         assert config.save_adapter == Path("out/adapter")
+
+    def test_saving_an_adapter_requires_declaring_provenance(self) -> None:
+        """
+        The moment a run produces a model rather than a measurement, where
+        its training data came from becomes a fact the model has to carry.
+        A blank provenance with ``save_adapter`` set is refused at config
+        time, before the run starts, rather than at the save call hours
+        later.
+        """
+
+        with pytest.raises(ConfigurationError) as caught:
+            AdaptationConfig(pairs="pairs.jsonl.gz", save_adapter="out/adapter")
+
+        assert caught.value.context["supported"] == ["licensed", "public", "synthetic"]
+
+    def test_a_measurement_only_run_needs_no_provenance(self) -> None:
+        """Without ``save_adapter`` nothing is written, so there is no
+        model to carry a provenance and none is demanded."""
+
+        config = AdaptationConfig(pairs="pairs.jsonl.gz")
+
+        assert config.data_provenance == ""
+
+    def test_an_unknown_provenance_is_refused(self) -> None:
+        with pytest.raises(ConfigurationError):
+            AdaptationConfig(
+                pairs="pairs.jsonl.gz",
+                save_adapter="out/adapter",
+                data_provenance="customer",
+            )
+
+    def test_a_declared_provenance_is_accepted(self) -> None:
+        config = AdaptationConfig(
+            pairs="pairs.jsonl.gz",
+            save_adapter="out/adapter",
+            data_provenance="public",
+        )
+
+        assert config.data_provenance == "public"
 
     def test_the_sample_defaults_to_covering_both_sets(self) -> None:
         assert AdaptationConfig(train_pairs=100, eval_pairs=20).sampled == 120

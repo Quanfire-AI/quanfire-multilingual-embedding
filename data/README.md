@@ -13,6 +13,7 @@ produced started as a file under here.
 - [The sample corpus](#the-sample-corpus)
 - [The three file formats](#the-three-file-formats)
 - [The Wikipedia path, end to end](#the-wikipedia-path-end-to-end)
+- [The legal-domain path: two front doors and a wall](#the-legal-domain-path-two-front-doors-and-a-wall)
 - [When can multilingual Wikipedia training start?](#when-can-multilingual-wikipedia-training-start)
 - [Bringing your own corpus](#bringing-your-own-corpus)
 - [Audit before you train](#audit-before-you-train)
@@ -52,7 +53,10 @@ stream; none loads a file into memory.
 | `sample/domain-corpus.jsonl` | **yes** | 10 structured non-Wikipedia documents; the pair-mining contract a domain export must satisfy | committed by hand |
 | `dumps/` | no | `*wiki-latest-pages-articles.xml.bz2` as downloaded | `curl` from dumps.wikimedia.org |
 | `corpora/` | no | extracted corpus JSON Lines, one file per language | `qfme extract` |
+| `corpora/judgments/` | no | public court-judgment PDFs, the legal **training** front door | downloaded, then `qfme extract-judgments` |
+| `corpora/milpac/` | no | MILPaC `.xlsx` workbooks, the legal **evaluation** front door | downloaded, then `qfme prepare-eval` |
 | `pairs/` | no | mined contrastive pairs, one file per language | `qfme mine-pairs` |
+| `eval/` | no | held-out evaluation pair files | `qfme prepare-eval` |
 | anything else | no | yours to use freely | — |
 
 `corpora/` and `pairs/` are conventions used throughout the documentation, not directories
@@ -104,7 +108,14 @@ Two things it cannot check, and that therefore stay a matter of judgement:
   a name.
 - **The weights.** A model adapted on customer text carries that text, and an adapter is
   opaque to every check above. `models/indic-v1/adapter.json` records `trained_on` as a
-  *path*, which says nothing about provenance — see [done and pending](#done-and-pending).
+  *path*, which says nothing about provenance — so a second field now does. Every saved
+  adapter carries a required `data_provenance` of `public`, `synthetic` or `licensed`, with
+  no default and no entry for customer data: an adapter cannot be written without a human
+  stating where its training text came from, and there is deliberately no value that says
+  "customer", because that text must not reach training in the first place. It does not
+  prove the weights are clean — nothing can read that off an adapter — but it turns the one
+  question that matters from something a path leaves blank into something the save refuses
+  to skip.
 
 If a domain-adapted model is ever wanted for real QuanFire documents, that is the decision
 to take first and explicitly: public domain-specific text, synthetic text written to the
@@ -286,8 +297,85 @@ python scripts/adapt_pretrained.py \
     --query-prefix "query: " --passage-prefix "passage: " \
     --rank 32 --epochs 2 --batch-size 64 \
     --sample-pairs 120000 --train-pairs 20000 --eval-pairs 2000 \
-    --output reports/hi-v1.json --save-adapter models/hi-v1
+    --output reports/hi-v1.json --save-adapter models/hi-v1 \
+    --data-provenance public
 ```
+
+`--data-provenance` is required the moment `--save-adapter` is set: the saved adapter
+records where its training text came from as a fact about the model, and the run is refused
+before it starts if the declaration is missing. `public` here because this is Wikipedia.
+
+## The legal-domain path: two front doors and a wall
+
+Wikipedia is a general-domain source. The domain this project actually targets is Indic
+legal text, and it enters through **two** front doors that are deliberately kept apart —
+one for training, one for evaluation — with a wall between them that is structural, not a
+matter of discipline.
+
+| | Training front door | Evaluation front door |
+|---|---|---|
+| Module | [`corpus/judgments.py`](../src/multilingual_embedding/corpus/judgments.py) | [`corpus/milpac.py`](../src/multilingual_embedding/corpus/milpac.py) |
+| Source | public court judgments | MILPaC parallel legal corpus |
+| Shape | PDF, full text, one file per case | `.xlsx`, English aligned to nine Indic languages |
+| Licence | **CC BY 4.0** — attribution only | **CC BY-NC-SA 4.0** — non-commercial |
+| Command | `qfme extract-judgments` | `qfme prepare-eval` |
+| Extra | `judgments` (`pypdf`) | `milpac` (`openpyxl`) |
+| Feeds | `qfme mine-pairs`, then `--pairs` | `qfme adapt --eval-pairs-file`, never `--pairs` |
+
+**Why two doors and not one split.** A model scored on text from the same source it trained
+on is scored on its own memorisation. Holding the evaluation set out *by origin* — a
+different corpus, a different register, a different licence — is stronger than a random
+split of one corpus, because a random split still shares vocabulary and formatting across
+the boundary. So judgments train and MILPaC scores, and the two never mix.
+
+**Why the wall is also a licence.** MILPaC is non-commercial. Scoring a shipped adapter
+against it is fair use of a benchmark; *training* that adapter on it is not, because the
+adapter is a commercial artefact and the NC term travels into it. `corpus/milpac.py`
+therefore produces an evaluation file and nothing else, stamps `license` on every record so
+the restriction is legible in the raw file, and does **not** route through the pair miner —
+there is no code path by which MILPaC can reach the training side. Judgments, CC BY, carry
+no such restriction, which is exactly why they are the training source.
+
+```bash
+# TRAINING side — public judgments, CC BY, commercial use permitted.
+# 1. Download a judgment collection into data/corpora/judgments/ (PDFs).
+# 2. Extract to corpus JSON Lines. Scanned PDFs with no text layer are
+#    dropped and counted — this does not OCR.
+qfme extract-judgments --source data/corpora/judgments/ \
+                       --output data/corpora/judgments.jsonl.gz --language en
+
+# 3. Gate on quality, exactly as for Wikipedia. PDF extraction is the step
+#    whose fidelity cannot be trusted until it is checked.
+qfme validate --source data/corpora/judgments.jsonl.gz --output reports/judgments-audit.json
+
+# 4. Mine pairs to train on.
+qfme mine-pairs --source data/corpora/judgments.jsonl.gz \
+                --output data/pairs/judgments.jsonl.gz --report reports/judgments-pairs.json
+
+# EVALUATION side — MILPaC, CC BY-NC-SA, scoring only.
+# 5. Download the MILPaC workbooks into data/corpora/milpac/ (.xlsx), then
+#    build the held-out pair file. hi and ta only, the pair this project adapted for.
+qfme prepare-eval --source data/corpora/milpac/ --output data/eval/milpac-hi-ta.jsonl.gz
+
+# 6. Adapt on judgments, score on MILPaC. The eval file goes to
+#    --eval-pairs-file, never --pairs; the origin wall depends on it.
+python scripts/adapt_pretrained.py \
+    --checkpoint intfloat/multilingual-e5-small \
+    --pairs data/pairs/judgments.jsonl.gz \
+    --eval-pairs-file data/eval/milpac-hi-ta.jsonl.gz \
+    --query-prefix "query: " --passage-prefix "passage: " \
+    --save-adapter models/legal-v1 --data-provenance public
+```
+
+**Status: done in code, unrun on real data.** Both readers are built and tested against
+fixtures — a MILPaC workbook and a fake PDF reader — with no network and no downloaded
+corpus. What a fixture cannot tell you is whether a *real* judgment collection extracts to
+clean prose or to image-only PDFs that yield nothing, and whether MILPaC's columns match
+what its distribution actually ships. Those are properties of the downloaded data, checkable
+only once it is in `data/corpora/` and run through `qfme validate` — the same honesty the
+Wikipedia path holds itself to, said out loud rather than assumed. The judgment reader in
+particular does **not** OCR: a scanned collection is dropped and counted, not silently
+turned into empty records.
 
 ## When can multilingual Wikipedia training start?
 
@@ -523,10 +611,12 @@ judgement.
 | Joint multilingual pair files by concatenation | ✅ done, and validated by experiment |
 | Domain (non-Wikipedia) pair mining | ⬜ pending — needs a real document set |
 | Hard-negative mining | ⬜ pending — Phase C's remaining piece |
-| Cross-lingual / translation pairs | ⬜ pending |
+| Cross-lingual / translation pairs | ✅ done — MILPaC parallel units, held out for evaluation |
+| Legal-domain training front door: judgment PDFs → corpus (`qfme extract-judgments`) | ✅ done in code — unrun until a real collection is downloaded |
+| Legal-domain evaluation front door: MILPaC → held-out pairs (`qfme prepare-eval`) | ✅ done in code |
 | Dataset versioning, checksums, dump-date provenance | ⬜ pending |
 | No-customer-text policy, asserted on every tracked corpus file | ✅ done — `tests/test_data_policy.py` |
-| Training-data provenance recorded in a saved adapter | ⬜ pending — `adapter.json` records a path, not an origin |
+| Training-data provenance recorded in a saved adapter | ✅ done — `data_provenance` is a required field on every saved adapter |
 | `qfme fetch` for dumps | ❌ not planned — `curl` does this better |
 
 Related reading: [`../src/multilingual_embedding/corpus/README.md`](../src/multilingual_embedding/corpus/README.md)
