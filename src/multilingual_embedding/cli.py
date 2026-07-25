@@ -12,16 +12,25 @@ Installed as ``qfme``. Twelve subcommands cover the lifecycle::
     qfme mine-negatives --pairs pairs/hi.jsonl.gz --adapter models/indic-v1 \
         --output pairs/hi-hard.jsonl.gz
     qfme train    --config experiments/demo.yaml
+    qfme pretrain --config experiments/demo.yaml --profile configs/gpu.yaml
     qfme adapt    --config experiments/indic.yaml --profile configs/gpu.yaml
     qfme search   --experiment artifacts/demo --query "machine learning"
     qfme evaluate --experiment artifacts/demo --source data/corpus.jsonl
     qfme serve    --adapter models/indic-v1 --port 8000
 
-Two of them exit non-zero on a result rather than on an error, so a data
-pipeline can gate on them. ``validate`` audits a corpus before anything
-is trained on it and fails when the corpus is unusable. ``adapt`` fails
-when the adapted model did not beat the checkpoint it started from —
-that is a legitimate outcome and one nothing should deploy.
+``train`` builds the static path — tokenizer, word vectors, a matrix.
+``pretrain`` builds the from-scratch neural path instead: it pretrains a
+fresh contextual encoder with a masked-language objective, and is
+interruptible, so a long run on a shared GPU box can be checkpointed each
+epoch and resumed bit for bit.
+
+Three of them exit non-zero on a result rather than on an error, so a
+data pipeline can gate on them. ``validate`` audits a corpus before
+anything is trained on it and fails when the corpus is unusable.
+``adapt`` fails when the adapted model did not beat the checkpoint it
+started from. ``pretrain`` fails when a multi-epoch run's loss did not
+fall — the objective learned nothing, and nothing should be fine-tuned
+on it. Each is a legitimate outcome and one nothing should deploy.
 
 Every config-driven subcommand accepts ``--set key.path=value`` for ad
 hoc overrides, and ``--profile`` for the settings a machine dictates, so
@@ -115,6 +124,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_train_parser(subparsers)
 
+    _add_pretrain_parser(subparsers)
+
     _add_adapt_parser(subparsers)
 
     _add_search_parser(subparsers)
@@ -152,6 +163,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "mine-pairs": _run_mine_pairs,
         "mine-negatives": _run_mine_negatives,
         "train": _run_train,
+        "pretrain": _run_pretrain,
         "adapt": _run_adapt,
         "search": _run_search,
         "evaluate": _run_evaluate,
@@ -575,6 +587,53 @@ def _add_train_parser(subparsers: Any) -> None:
         "--no-evaluate",
         action="store_true",
         help="Skip evaluation and produce only the trained artefacts",
+    )
+
+
+def _add_pretrain_parser(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "pretrain",
+        help="Pretrain a from-scratch contextual encoder with a masked-language objective",
+        description=(
+            "Stage one of the from-scratch neural path: train a tokenizer and "
+            "pretrain a fresh transformer over it by predicting masked tokens. "
+            "The `pretraining` and `compute` config sections govern the run; the "
+            "static `embedding` (Word2Vec) section is ignored. The run is "
+            "interruptible — pass --checkpoint-dir to write a rolling checkpoint "
+            "each epoch and --resume-from to pick one back up, reproducing an "
+            "uninterrupted run bit for bit. This is the run built for the GPU box."
+        ),
+    )
+
+    _add_common_config_arguments(parser)
+
+    parser.add_argument("--source", type=Path, help="Corpus file or directory")
+
+    parser.add_argument("--name", help="Experiment name")
+
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=Path,
+        help="Write checkpoint.pt here after each epoch (omit to run without checkpointing)",
+    )
+
+    parser.add_argument(
+        "--resume-from",
+        type=Path,
+        help=(
+            "A checkpoint file, or a directory holding one, to restore before "
+            "training. The corpus and schedule must match the run that wrote it"
+        ),
+    )
+
+    parser.add_argument(
+        "--stop-after-epoch",
+        type=int,
+        help=(
+            "Stop after finishing this 0-based epoch index. Models an "
+            "interruption; the schedule still spans the full configured epoch "
+            "count, so a later --resume-from continues it unbroken"
+        ),
     )
 
 
@@ -1144,6 +1203,36 @@ def _run_train(args: argparse.Namespace) -> int:
     result = TrainingPipeline(config).run(evaluate=not args.no_evaluate)
 
     print(json.dumps(result.summary(), indent=2, ensure_ascii=False))
+
+    return EXIT_SUCCESS
+
+
+def _run_pretrain(args: argparse.Namespace) -> int:
+    """Pretrain a from-scratch contextual encoder with a masked-language head."""
+
+    from multilingual_embedding.pipelines.pretraining import PretrainingPipeline
+
+    config = _resolve_config(args)
+
+    if args.name:
+        config = config.merged({"name": args.name})
+
+    result = PretrainingPipeline(config).run(
+        checkpoint_dir=args.checkpoint_dir,
+        resume_from=args.resume_from,
+        stop_after_epoch=args.stop_after_epoch,
+    )
+
+    print(json.dumps(result.summary(), indent=2, ensure_ascii=False))
+
+    # Non-zero only when a run that *could* be judged failed the judgement:
+    # a multi-epoch run whose loss did not fall learned nothing, and a
+    # chained pipeline should stop rather than fine-tune on it. A single
+    # epoch — including a deliberate --stop-after-epoch 0 in the
+    # interruptible workflow — is not measurable against itself, and a
+    # partial run that will be resumed is not a failure, so it exits zero.
+    if result.report.measurable and not result.report.improved:
+        return EXIT_ERROR
 
     return EXIT_SUCCESS
 

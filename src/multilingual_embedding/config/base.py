@@ -335,6 +335,146 @@ class EmbeddingConfig:
 
 
 @dataclass(slots=True)
+class PretrainingConfig:
+    """
+    From-scratch masked-language pretraining settings.
+
+    Read only by ``qfme pretrain``; the static Word2Vec training pipeline
+    ignores it, and a config that omits the section gets defaults rather
+    than an error, so one experiment file can carry both paths. This is the
+    other, contextual answer to the same question :class:`EmbeddingConfig`
+    asks — vectors from a transformer taught by masking, rather than from a
+    co-occurrence table.
+
+    The knobs split in two. The first group sizes the encoder that is built
+    from scratch; the second governs the masked-language objective that
+    teaches it what its tokens mean. Machine-shaped settings — device,
+    precision, batch size — live in :class:`ComputeConfig`, not here, so one
+    experiment pretrains unchanged on a laptop and a GPU box.
+
+    Attributes
+    ----------
+    dimension, layers, heads, feedforward_dimension, max_length, dropout:
+        The encoder's shape. ``feedforward_dimension`` of ``None`` lets the
+        model default it to four times ``dimension``, the usual transformer
+        ratio. ``dimension`` must divide evenly by ``heads``.
+
+    epochs, learning_rate, warmup_ratio, weight_decay, max_gradient_norm:
+        The optimisation schedule. ``learning_rate`` is the peak reached at
+        the end of warmup and decayed after it; it is higher than the
+        contrastive default because a from-scratch table has further to
+        travel.
+
+    mask_probability:
+        Share of eligible tokens hidden per sequence. 0.15 is standard —
+        low enough to leave usable context, high enough to supervise
+        densely.
+
+    tie_weights:
+        Share the output projection with the embedding table.
+
+    seed:
+        ``None`` inherits the experiment seed, exactly as
+        :attr:`EmbeddingConfig.seed` does; an int overrides it. A standalone
+        config left at ``None`` falls back to the framework default via
+        :attr:`resolved_seed`, so pretraining is never accidentally
+        unseeded.
+    """
+
+    dimension: int = 256
+
+    layers: int = 4
+
+    heads: int = 4
+
+    feedforward_dimension: int | None = None
+
+    max_length: int = 256
+
+    dropout: float = 0.1
+
+    epochs: int = 3
+
+    learning_rate: float = 1e-4
+
+    warmup_ratio: float = 0.1
+
+    weight_decay: float = 0.01
+
+    max_gradient_norm: float = 1.0
+
+    mask_probability: float = 0.15
+
+    tie_weights: bool = True
+
+    seed: int | None = None
+
+    def __post_init__(self) -> None:
+        require_positive(self.dimension, name="dimension")
+
+        require_positive(self.layers, name="layers")
+
+        require_positive(self.heads, name="heads")
+
+        if self.feedforward_dimension is not None:
+            require_positive(self.feedforward_dimension, name="feedforward_dimension")
+
+        require_positive(self.max_length, name="max_length")
+
+        require_positive(self.epochs, name="epochs")
+
+        require_positive(self.learning_rate, name="learning_rate")
+
+        require_non_negative(self.weight_decay, name="weight_decay")
+
+        require_positive(self.max_gradient_norm, name="max_gradient_norm")
+
+        require_non_negative(self.dropout, name="dropout")
+
+        # The attention heads split the width between them; a remainder
+        # would leave a head with a fractional slice, which the encoder
+        # cannot build. Caught here so the failure names the config rather
+        # than surfacing as a reshape error an hour into a GPU run.
+        if self.dimension % self.heads != 0:
+            raise ConfigurationError(
+                "dimension must be divisible by heads",
+                dimension=self.dimension,
+                heads=self.heads,
+            )
+
+        if self.dropout >= 1.0:
+            raise ConfigurationError("dropout must lie in [0, 1)", dropout=self.dropout)
+
+        if not 0.0 <= self.warmup_ratio < 1.0:
+            raise ConfigurationError(
+                "warmup_ratio must lie in [0, 1)",
+                warmup_ratio=self.warmup_ratio,
+            )
+
+        if not 0.0 < self.mask_probability < 1.0:
+            raise ConfigurationError(
+                "mask_probability must lie in (0, 1)",
+                mask_probability=self.mask_probability,
+            )
+
+        if self.seed is not None:
+            require_non_negative(self.seed, name="seed")
+
+    @property
+    def resolved_seed(self) -> int:
+        """
+        The seed to actually pretrain with.
+
+        Falls back to the framework default when :attr:`seed` is still
+        ``None``, which happens only for a config used outside an
+        :class:`ExperimentConfig`. Consumers read this rather than
+        :attr:`seed` so no code path can silently train unseeded.
+        """
+
+        return self.seed if self.seed is not None else DEFAULT_RANDOM_SEED
+
+
+@dataclass(slots=True)
 class EvaluationConfig:
     """
     Which metrics to compute and how.
@@ -768,6 +908,12 @@ class ExperimentConfig:
         that omits the section gets defaults rather than an error, so
         one experiment file can carry both paths.
 
+    pretraining:
+        From-scratch masked-language pretraining. Read only by
+        ``qfme pretrain``; the static training pipeline ignores it, and
+        an omitted section gets defaults, so one file can carry the
+        static and contextual paths side by side.
+
     compute:
         Machine-shaped settings. The section a profile swaps, and
         the only one expected to differ between a laptop and a
@@ -789,6 +935,8 @@ class ExperimentConfig:
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
 
     adaptation: AdaptationConfig = field(default_factory=AdaptationConfig)
+
+    pretraining: PretrainingConfig = field(default_factory=PretrainingConfig)
 
     compute: ComputeConfig = field(default_factory=ComputeConfig)
 
@@ -813,6 +961,8 @@ class ExperimentConfig:
 
         self.adaptation = _coerced_section(self.adaptation, AdaptationConfig, name="adaptation")
 
+        self.pretraining = _coerced_section(self.pretraining, PretrainingConfig, name="pretraining")
+
         self.compute = _coerced_section(self.compute, ComputeConfig, name="compute")
 
         require_non_negative(self.seed, name="seed")
@@ -829,6 +979,9 @@ class ExperimentConfig:
 
         if self.adaptation.seed is None:
             self.adaptation.seed = self.seed
+
+        if self.pretraining.seed is None:
+            self.pretraining.seed = self.seed
 
     @property
     def experiment_directory(self) -> Path:
@@ -847,6 +1000,12 @@ class ExperimentConfig:
         """Directory holding trained embedding artefacts."""
 
         return self.experiment_directory / "embedding"
+
+    @property
+    def encoder_directory(self) -> Path:
+        """Directory holding the pretrained contextual encoder."""
+
+        return self.experiment_directory / "encoder"
 
     def to_dict(self) -> dict[str, Any]:
         """Reduce to primitives for persistence alongside the artefacts."""
