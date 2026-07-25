@@ -491,7 +491,7 @@ last one.
 
 #### A consumer found a hole in the public surface — 23 July 2026
 
-`quanfire-generative-text` now installs this repo as a pinned dependency rather than
+`quanfire-llm` now installs this repo as a pinned dependency rather than
 copying from it, and the first thing that produced was a defect nobody here would have
 found by reading their own code.
 

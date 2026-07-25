@@ -163,7 +163,7 @@ All backend, all Python, all under `python-projects/`. No frontend at this stage
 | `quanfire-ml-core` | Config, logging, registry, artefact versioning, training loop, serving base, text preparation | nothing ML | proposed |
 | `quanfire-datasets` | Corpus acquisition, licensing, cleaning, versioned dataset publication | core | proposed |
 | **`quanfire-multilingual-embedding`** | **Text → vectors: tokenizer, vocabulary, encoders, training, evaluation, serving** | core, torch | **exists** |
-| `quanfire-llm` | Text → text: fine-tuning, inference, serving | core, torch | proposed |
+| **`quanfire-llm`** | Text → text: fine-tuning, inference, serving | core, torch | **exists** — already consumes this repo as a pinned dependency |
 | `quanfire-vision` | Image ↔ text, image generation | core, torch | proposed |
 | `quanfire-speech` | Text ↔ speech | core, torch | proposed |
 
@@ -282,7 +282,8 @@ today:
 |---|---|---|
 | `quanfire-ml-core` | `common`, `core`, `utils`, `config`, plus `corpus`, `tokenizer`, `vocabulary` | When a second consumer needs it |
 | this repository | `embedding`, `evaluation`, `pipelines` | Already exists |
-| `quanfire-llm`, `quanfire-vision`, `quanfire-speech` | — | When that work actually starts |
+| `quanfire-llm` | — | Exists already; consumes this repo as a pinned dependency |
+| `quanfire-vision`, `quanfire-speech` | — | When that work actually starts |
 
 Text preparation sits in core rather than in this repository, because the LLM and speech
 work both need correct segmentation and script handling and should not depend on a
