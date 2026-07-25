@@ -1,7 +1,7 @@
 """
 Command line interface.
 
-Installed as ``qfme``. Twelve subcommands cover the lifecycle::
+Installed as ``qfme``. Thirteen subcommands cover the lifecycle::
 
     qfme stats    --source data/corpus.jsonl
     qfme validate --source data/corpus.jsonl
@@ -13,6 +13,7 @@ Installed as ``qfme``. Twelve subcommands cover the lifecycle::
         --output pairs/hi-hard.jsonl.gz
     qfme train    --config experiments/demo.yaml
     qfme pretrain --config experiments/demo.yaml --profile configs/gpu.yaml
+    qfme finetune --config experiments/demo.yaml --profile configs/gpu.yaml
     qfme adapt    --config experiments/indic.yaml --profile configs/gpu.yaml
     qfme search   --experiment artifacts/demo --query "machine learning"
     qfme evaluate --experiment artifacts/demo --source data/corpus.jsonl
@@ -22,15 +23,19 @@ Installed as ``qfme``. Twelve subcommands cover the lifecycle::
 ``pretrain`` builds the from-scratch neural path instead: it pretrains a
 fresh contextual encoder with a masked-language objective, and is
 interruptible, so a long run on a shared GPU box can be checkpointed each
-epoch and resumed bit for bit.
+epoch and resumed bit for bit. ``finetune`` is stage two of that path: it
+contrastively fine-tunes a pretrained encoder into a usable sentence
+embedder and writes a servable model.
 
-Three of them exit non-zero on a result rather than on an error, so a
+Four of them exit non-zero on a result rather than on an error, so a
 data pipeline can gate on them. ``validate`` audits a corpus before
 anything is trained on it and fails when the corpus is unusable.
 ``adapt`` fails when the adapted model did not beat the checkpoint it
-started from. ``pretrain`` fails when a multi-epoch run's loss did not
-fall — the objective learned nothing, and nothing should be fine-tuned
-on it. Each is a legitimate outcome and one nothing should deploy.
+started from, and ``finetune`` fails when the fine-tune did not beat the
+pretrained encoder it started from. ``pretrain`` fails when a multi-epoch
+run's loss did not fall — the objective learned nothing, and nothing
+should be fine-tuned on it. Each is a legitimate outcome and one nothing
+should deploy.
 
 Every config-driven subcommand accepts ``--set key.path=value`` for ad
 hoc overrides, and ``--profile`` for the settings a machine dictates, so
@@ -126,6 +131,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_pretrain_parser(subparsers)
 
+    _add_finetune_parser(subparsers)
+
     _add_adapt_parser(subparsers)
 
     _add_search_parser(subparsers)
@@ -164,6 +171,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "mine-negatives": _run_mine_negatives,
         "train": _run_train,
         "pretrain": _run_pretrain,
+        "finetune": _run_finetune,
         "adapt": _run_adapt,
         "search": _run_search,
         "evaluate": _run_evaluate,
@@ -635,6 +643,98 @@ def _add_pretrain_parser(subparsers: Any) -> None:
             "count, so a later --resume-from continues it unbroken"
         ),
     )
+
+
+def _add_finetune_parser(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "finetune",
+        help="Contrastively fine-tune a from-scratch encoder, and score whether it helped",
+        description=(
+            "Stage two of the from-scratch neural path: take an encoder from "
+            "`qfme pretrain` — which has only ever seen a masked-language "
+            "objective and is a weak sentence embedder — and fine-tune the whole "
+            "of it on mined pairs with an in-batch contrastive loss. It scores "
+            "the encoder on held-out pairs before and after, so the report says "
+            "whether the fine-tune helped rather than merely that it ran, and it "
+            "writes a complete, servable experiment directory that `qfme search` "
+            "and `qfme serve` load directly. Every flag below overrides the "
+            "`finetune` section of the configuration."
+        ),
+    )
+
+    _add_common_config_arguments(parser)
+
+    parser.add_argument("--name", help="Experiment name for the fine-tuned model")
+
+    parser.add_argument(
+        "--source",
+        type=Path,
+        help="A `qfme pretrain` experiment directory, holding tokenizer/ and encoder/",
+    )
+
+    parser.add_argument("--pairs", type=Path, help="Mined pair file to train on")
+
+    parser.add_argument(
+        "--eval-pairs-file",
+        type=Path,
+        help=(
+            "Score against this file instead of --pairs. Hold it fixed to "
+            "compare fine-tunes: without it, a run that changes what it trains "
+            "on also changes what it is judged by"
+        ),
+    )
+
+    parser.add_argument("--train-pairs", type=int, help="Pairs to train on")
+
+    parser.add_argument("--eval-pairs", type=int, help="Pairs to score against")
+
+    parser.add_argument(
+        "--sample-pairs",
+        type=int,
+        help=(
+            "Pairs to draw from the file before filtering by kind. Defaults to "
+            "--train-pairs plus --eval-pairs, which is wrong when a kind filter "
+            "is set: a kind holding a sixth of the file yields a sixth of the "
+            "sample, and --train-pairs stops binding"
+        ),
+    )
+
+    parser.add_argument("--train-kinds", help="Comma-separated pair kinds to train on")
+
+    parser.add_argument("--eval-kinds", help="Comma-separated pair kinds to score on")
+
+    parser.add_argument("--train-languages", help="Comma-separated languages to train on")
+
+    parser.add_argument("--eval-languages", help="Comma-separated languages to score on")
+
+    parser.add_argument("--epochs", type=int)
+
+    parser.add_argument("--learning-rate", type=float)
+
+    parser.add_argument("--temperature", type=float, help="Contrastive softmax temperature")
+
+    parser.add_argument(
+        "--data-provenance",
+        choices=[str(value) for value in DataProvenance],
+        help=(
+            "Where the training data came from: public, synthetic or licensed. "
+            "Required unless --no-save — a saved model carries this as a legal "
+            "fact about itself, and it has no default so it cannot be answered "
+            "by omission"
+        ),
+    )
+
+    parser.add_argument(
+        "--no-save",
+        action="store_true",
+        help=(
+            "Measure only: score before and after without writing the "
+            "fine-tuned encoder. A run that answers 'would this help?' and "
+            "ships nothing, so it needs no data-provenance declaration"
+        ),
+    )
+
+    parser.add_argument("--output", type=Path, help="Write the full comparison as JSON")
 
 
 def _add_adapt_parser(subparsers: Any) -> None:
@@ -1235,6 +1335,77 @@ def _run_pretrain(args: argparse.Namespace) -> int:
         return EXIT_ERROR
 
     return EXIT_SUCCESS
+
+
+# Flags that override the `finetune` config section, mapped to the field
+# they set. Same data-driven wiring as _ADAPT_OVERRIDES below. --no-save
+# is handled apart from this map, because it is a boolean whose absence
+# and whose false value are the same thing to argparse.
+_FINETUNE_OVERRIDES = {
+    "source": "source",
+    "pairs": "pairs",
+    "eval_pairs_file": "eval_pairs_file",
+    "train_pairs": "train_pairs",
+    "eval_pairs": "eval_pairs",
+    "sample_pairs": "sample_pairs",
+    "train_kinds": "train_kinds",
+    "eval_kinds": "eval_kinds",
+    "train_languages": "train_languages",
+    "eval_languages": "eval_languages",
+    "epochs": "epochs",
+    "learning_rate": "learning_rate",
+    "temperature": "temperature",
+    "data_provenance": "data_provenance",
+    "output": "report",
+}
+
+
+def _run_finetune(args: argparse.Namespace) -> int:
+    """Contrastively fine-tune a from-scratch encoder and report whether it helped."""
+
+    from multilingual_embedding.pipelines.finetune import FinetunePipeline
+
+    overrides: dict[str, Any] = {}
+
+    for assignment in args.overrides:
+        _merge(overrides, parse_override(assignment))
+
+    section: dict[str, Any] = {}
+
+    for flag, field_name in _FINETUNE_OVERRIDES.items():
+        value = getattr(args, flag, None)
+
+        if value is not None:
+            section[field_name] = str(value) if isinstance(value, Path) else value
+
+    # Only set `save` when --no-save is given: its default lives in the
+    # config, and writing save=True here on every run would silently
+    # override a `save: false` set in the config file.
+    if args.no_save:
+        section["save"] = False
+
+    if section:
+        _merge(overrides, {"finetune": section})
+
+    if args.name:
+        _merge(overrides, {"name": args.name})
+
+    config = load_config(args.config, profile=args.profile, overrides=overrides)
+
+    result = FinetunePipeline(config).run()
+
+    print("\n" + "=" * 68)
+
+    print("DID FINE-TUNING HELP?")
+
+    print("=" * 68)
+
+    print(result.summary())
+
+    # Non-zero when the fine-tune did not beat the pretrained encoder it
+    # started from, so a pipeline that chains pretrain -> finetune ->
+    # deploy stops rather than shipping a model that made retrieval worse.
+    return EXIT_SUCCESS if result.helped else EXIT_ERROR
 
 
 # Flags that override the `adaptation` config section, mapped to the

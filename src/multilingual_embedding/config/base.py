@@ -882,6 +882,189 @@ def _as_names(value: object) -> tuple[str, ...]:
 
 
 @dataclass(slots=True)
+class FinetuneConfig:
+    """
+    Stage two of the from-scratch neural path: contrastive fine-tuning.
+
+    ``qfme pretrain`` produces an encoder that has only ever seen a
+    masked-language objective. It is a poor sentence embedder — it was
+    never taught that two paraphrases should land near each other — and
+    this is the section that fixes that, by fine-tuning the whole encoder
+    on mined pairs with an in-batch contrastive loss. Where
+    :class:`AdaptationConfig` freezes a published checkpoint and trains a
+    LoRA adapter over it, this owns the weights and moves all of them:
+    there is no base model to preserve, so there is no adapter.
+
+    Like an adaptation run it scores the encoder on held-out pairs either
+    side of training, so the report says whether the fine-tune helped
+    rather than merely that it happened. Unlike one it declares no
+    ablation mode — this is not an experiment in what transfers, it is the
+    step that turns a pretrained artefact into a usable model — so it
+    carries none of :class:`AdaptationConfig`'s vary/hold machinery.
+
+    The machine half lives in :class:`ComputeConfig` exactly as it does
+    for adaptation, so one file describes the fine-tune on a laptop and on
+    a GPU box.
+
+    Attributes
+    ----------
+    source:
+        The ``qfme pretrain`` experiment directory to fine-tune, holding
+        ``tokenizer/`` and ``encoder/``. Required.
+
+    pairs:
+        Mined pair file to train on, as written by ``qfme mine-pairs``.
+
+    eval_pairs_file:
+        Score against this file instead of :attr:`pairs`. Holding it
+        fixed is what lets two fine-tunes that train on different data be
+        compared on the same measuring stick.
+
+    train_pairs, eval_pairs, sample_pairs:
+        How many pairs to train on, to score against, and to draw from
+        the file before filtering — the same three knobs, and the same
+        defaulting, as :class:`AdaptationConfig`.
+
+    train_kinds, eval_kinds, train_languages, eval_languages:
+        Facet filters. Empty means everything. Present so a fine-tune can
+        be confined to one language or pair kind; a run that names a facet
+        holding nothing is refused rather than trained on zero pairs.
+
+    epochs, learning_rate, temperature, warmup_ratio, weight_decay:
+        The contrastive schedule. The learning rate defaults higher than
+        adaptation's because full fine-tuning a small from-scratch encoder
+        is not the same regime as nudging a well-pretrained checkpoint
+        through a low-rank adapter.
+
+    save:
+        Whether to write the fine-tuned encoder back out as a servable
+        experiment directory. ``True`` — the point of stage two is a
+        usable model. Set it ``False`` for a measurement-only run that
+        answers "would this fine-tune help?" without shipping anything.
+
+    data_provenance:
+        Where the training data came from, one of :class:`DataProvenance`.
+        Required the moment :attr:`save` is set: a shipped model must
+        carry a recorded basis for its training data, and this fails
+        closed so the run is refused before it spends the training rather
+        than after.
+
+    report:
+        Where to write the full before/after comparison as JSON.
+
+    seed:
+        Seeds pair sampling and training. ``None`` inherits
+        :attr:`ExperimentConfig.seed`.
+    """
+
+    source: Path | None = None
+
+    pairs: Path | None = None
+
+    eval_pairs_file: Path | None = None
+
+    train_pairs: int = 20_000
+
+    eval_pairs: int = 2_000
+
+    sample_pairs: int | None = None
+
+    train_kinds: tuple[str, ...] = ()
+
+    eval_kinds: tuple[str, ...] = ()
+
+    train_languages: tuple[str, ...] = ()
+
+    eval_languages: tuple[str, ...] = ()
+
+    epochs: int = 3
+
+    learning_rate: float = 2e-5
+
+    temperature: float = 0.05
+
+    warmup_ratio: float = 0.1
+
+    weight_decay: float = 0.01
+
+    save: bool = True
+
+    data_provenance: str = ""
+
+    report: Path | None = None
+
+    seed: int | None = None
+
+    def __post_init__(self) -> None:
+        # See CorpusConfig.__post_init__: YAML supplies paths as strings.
+        for name in ("source", "pairs", "eval_pairs_file", "report"):
+            value = getattr(self, name)
+
+            if value is not None:
+                setattr(self, name, Path(value))
+
+        for name in ("train_kinds", "eval_kinds", "train_languages", "eval_languages"):
+            setattr(self, name, _as_names(getattr(self, name)))
+
+        require_positive(self.train_pairs, name="train_pairs")
+
+        require_positive(self.eval_pairs, name="eval_pairs")
+
+        require_positive(self.epochs, name="epochs")
+
+        require_positive(self.learning_rate, name="learning_rate")
+
+        require_positive(self.temperature, name="temperature")
+
+        # [0, 1), matching ContrastiveConfig: a warmup that never ends is a
+        # schedule with no training phase. Refused here so the run is
+        # stopped when the config is built, not after the encoder is loaded.
+        if not 0.0 <= self.warmup_ratio < 1.0:
+            raise ConfigurationError(
+                "warmup_ratio must lie in [0, 1)",
+                warmup_ratio=self.warmup_ratio,
+            )
+
+        require_non_negative(self.weight_decay, name="weight_decay")
+
+        if self.sample_pairs is not None:
+            require_positive(self.sample_pairs, name="sample_pairs")
+
+        if self.seed is not None:
+            require_non_negative(self.seed, name="seed")
+
+        if self.data_provenance and self.data_provenance not in set(DataProvenance):
+            raise ConfigurationError(
+                "Unknown data provenance",
+                data_provenance=self.data_provenance,
+                supported=sorted(DataProvenance),
+            )
+
+        # Fail closed, in the spirit of AdaptationConfig: a run that writes
+        # a model must say where its training data came from. The check is
+        # gated on the section being *engaged* — a source or a pair file
+        # named — so an ExperimentConfig that carries no finetune section
+        # at all keeps a valid default rather than failing to construct,
+        # while a real fine-tune that would save without a provenance is
+        # still refused before it spends the training.
+        engaged = self.source is not None or self.pairs is not None
+
+        if engaged and self.save and not self.data_provenance:
+            raise ConfigurationError(
+                "Saving a fine-tuned encoder requires declaring data_provenance "
+                "(where its training data came from). Pass save=false for a "
+                "measurement-only run that ships nothing",
+                supported=sorted(DataProvenance),
+            )
+
+    @property
+    def sampled(self) -> int:
+        """Pairs to draw before filtering, with the default resolved."""
+
+        return self.sample_pairs or (self.train_pairs + self.eval_pairs)
+
+
+@dataclass(slots=True)
 class ExperimentConfig:
     """
     Root configuration binding every stage of one experiment.
@@ -938,6 +1121,8 @@ class ExperimentConfig:
 
     pretraining: PretrainingConfig = field(default_factory=PretrainingConfig)
 
+    finetune: FinetuneConfig = field(default_factory=FinetuneConfig)
+
     compute: ComputeConfig = field(default_factory=ComputeConfig)
 
     def __post_init__(self) -> None:
@@ -963,6 +1148,8 @@ class ExperimentConfig:
 
         self.pretraining = _coerced_section(self.pretraining, PretrainingConfig, name="pretraining")
 
+        self.finetune = _coerced_section(self.finetune, FinetuneConfig, name="finetune")
+
         self.compute = _coerced_section(self.compute, ComputeConfig, name="compute")
 
         require_non_negative(self.seed, name="seed")
@@ -982,6 +1169,9 @@ class ExperimentConfig:
 
         if self.pretraining.seed is None:
             self.pretraining.seed = self.seed
+
+        if self.finetune.seed is None:
+            self.finetune.seed = self.seed
 
     @property
     def experiment_directory(self) -> Path:
