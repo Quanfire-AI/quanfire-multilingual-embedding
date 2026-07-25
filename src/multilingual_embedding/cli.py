@@ -871,17 +871,48 @@ def _add_search_parser(subparsers: Any) -> None:
 def _add_evaluate_parser(subparsers: Any) -> None:
     parser = subparsers.add_parser(
         "evaluate",
-        help="Evaluate a trained experiment against a corpus",
+        help="Evaluate a trained experiment",
+        description=(
+            "Score a trained experiment, choosing the instrument by what the "
+            "experiment is. A static model (`qfme train`) is scored intrinsically "
+            "against a corpus: tokenizer coverage and the neighbourhoods of its "
+            "word vectors, so it wants --source. A contextual encoder (`qfme "
+            "pretrain` / `qfme finetune`) has no per-token matrix to probe — its "
+            "quality is whether it retrieves the right passage — so it is scored "
+            "by retrieval over a mined pair file, and wants --pairs. The right "
+            "path is picked automatically from the experiment directory."
+        ),
     )
 
     parser.add_argument(
         "--experiment",
         type=Path,
         required=True,
-        help="Experiment directory produced by `qfme train`",
+        help="Experiment directory produced by `qfme train`, `pretrain` or `finetune`",
     )
 
-    parser.add_argument("--source", type=Path, required=True, help="Corpus to evaluate on")
+    parser.add_argument(
+        "--source",
+        type=Path,
+        help="Corpus to evaluate a static model against (intrinsic metrics)",
+    )
+
+    parser.add_argument(
+        "--pairs",
+        type=Path,
+        help=(
+            "Mined pair file to score a contextual encoder against by retrieval. "
+            "Required for a `pretrain`/`finetune` experiment, which has no matrix "
+            "to probe intrinsically"
+        ),
+    )
+
+    parser.add_argument(
+        "--eval-pairs",
+        type=int,
+        default=2_000,
+        help="Pairs to draw from --pairs for the retrieval score (default: 2000)",
+    )
 
     parser.add_argument("--format", default="auto", choices=["auto", "text", "lines", "jsonl"])
 
@@ -1521,7 +1552,26 @@ def _run_search(args: argparse.Namespace) -> int:
 
 
 def _run_evaluate(args: argparse.Namespace) -> int:
-    """Evaluate a trained experiment against a corpus."""
+    """
+    Evaluate a trained experiment, routing by what the experiment is.
+
+    A contextual encoder has no per-token matrix, so the intrinsic
+    neighbour-probe evaluation cannot describe it; its quality is
+    retrieval, and it takes a different path. Which one is decided by the
+    directory shape rather than by a flag, so the caller does not have to
+    know which kind of model a directory holds.
+    """
+
+    experiment = Path(args.experiment)
+
+    if (experiment / "encoder").is_dir():
+        return _evaluate_contextual(args, experiment)
+
+    return _evaluate_static(args, experiment)
+
+
+def _evaluate_static(args: argparse.Namespace, experiment: Path) -> int:
+    """Score a static model intrinsically against a corpus."""
 
     from multilingual_embedding.corpus.loader import stream_sentences
     from multilingual_embedding.embedding.matrix import EmbeddingMatrix
@@ -1533,7 +1583,13 @@ def _run_evaluate(args: argparse.Namespace) -> int:
     from multilingual_embedding.evaluation.tokenizer_eval import TokenizerEvaluator
     from multilingual_embedding.tokenizer.tokenizer import SentencePieceTokenizer
 
-    experiment = Path(args.experiment)
+    if not args.source:
+        print(
+            "error: a static model is scored against a corpus; pass --source",
+            file=sys.stderr,
+        )
+
+        return EXIT_ERROR
 
     tokenizer = SentencePieceTokenizer.load(experiment / "tokenizer")
 
@@ -1564,6 +1620,64 @@ def _run_evaluate(args: argparse.Namespace) -> int:
         print(f"Wrote report to {args.output}")
     else:
         print(report.to_markdown())
+
+    return EXIT_SUCCESS
+
+
+def _evaluate_contextual(args: argparse.Namespace, experiment: Path) -> int:
+    """
+    Score a contextual encoder by retrieval over a mined pair file.
+
+    A from-scratch or fine-tuned encoder has no per-token matrix to probe,
+    so the honest question is whether it retrieves the right passage for a
+    query. That is exactly what an adaptation or fine-tuning run measures
+    on its held-out set, and this reuses the same evaluator so a model's
+    score off ``qfme evaluate`` matches the ``after`` score its own
+    fine-tune reported.
+    """
+
+    from multilingual_embedding.corpus.pairs import sample_pairs
+    from multilingual_embedding.evaluation.retrieval import evaluate_retrieval
+    from multilingual_embedding.tokenizer.tokenizer import SentencePieceTokenizer
+
+    if not args.pairs:
+        print(
+            "error: a contextual encoder is scored by retrieval, not intrinsically; "
+            "pass --pairs (a mined pair file)",
+            file=sys.stderr,
+        )
+
+        return EXIT_ERROR
+
+    # Imported lazily for the same reason as the training paths: torch is
+    # an optional extra, and evaluate must stay runnable for a static
+    # model on a machine that never installed it.
+    from multilingual_embedding.embedding.neural import NeuralTextEncoder
+
+    tokenizer = SentencePieceTokenizer.load(experiment / "tokenizer")
+
+    encoder = NeuralTextEncoder.load(experiment / "encoder", tokenizer)
+
+    pairs = sample_pairs(args.pairs, args.eval_pairs)
+
+    report = evaluate_retrieval(encoder, pairs, limit=None)
+
+    payload = {
+        "name": experiment.name,
+        "eval_pairs": len(pairs),
+        "retrieval": report.to_dict(),
+    }
+
+    if args.output:
+        from multilingual_embedding.utils.io import write_json
+
+        write_json(args.output, payload)
+
+        print(f"Wrote report to {args.output}")
+    else:
+        print(f"retrieval over {len(pairs):,} pairs from {args.pairs}\n")
+
+        print(report.summary())
 
     return EXIT_SUCCESS
 

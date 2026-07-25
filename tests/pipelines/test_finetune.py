@@ -446,3 +446,70 @@ class TestCommandLine:
         assert code in (EXIT_SUCCESS, EXIT_ERROR)
 
         assert (output / "cli-finetune" / "encoder" / "encoder.json").is_file()
+
+
+class TestEvaluateRouting:
+    """
+    ``qfme evaluate`` picks its instrument from the experiment's shape,
+    and says so when the instrument it picked has nothing to measure.
+    Neither of these reaches a model, so neither needs torch.
+    """
+
+    def test_a_contextual_experiment_without_pairs_is_refused(self, tmp_path: Path) -> None:
+        from multilingual_embedding.cli import EXIT_ERROR, main
+
+        # The presence of encoder/ routes to the contextual path, whose
+        # missing-pairs check fires before any model is loaded.
+        (tmp_path / "encoder").mkdir()
+
+        (tmp_path / "tokenizer").mkdir()
+
+        assert main(["evaluate", "--experiment", str(tmp_path)]) == EXIT_ERROR
+
+    def test_a_static_experiment_without_a_source_is_refused(self, tmp_path: Path) -> None:
+        from multilingual_embedding.cli import EXIT_ERROR, main
+
+        # No encoder/, so it routes static, whose missing-source check
+        # fires before the matrix is loaded.
+        assert main(["evaluate", "--experiment", str(tmp_path)]) == EXIT_ERROR
+
+
+@needs_neural
+class TestEvaluateContextual:
+    def test_it_scores_a_contextual_encoder_by_retrieval(
+        self, source_directory: Path, pairs_path: Path, tmp_path: Path
+    ) -> None:
+        """
+        A ``qfme pretrain`` experiment is auto-detected as contextual and
+        scored by retrieval over a pair file, the same evaluator a
+        fine-tune uses on its held-out set — so the number here is the
+        number a fine-tune's ``after`` reports.
+        """
+
+        from multilingual_embedding.cli import EXIT_SUCCESS, main
+
+        output = tmp_path / "report.json"
+
+        code = main(
+            [
+                "evaluate",
+                "--experiment",
+                str(source_directory),
+                "--pairs",
+                str(pairs_path),
+                "--eval-pairs",
+                "9",
+                "--output",
+                str(output),
+            ]
+        )
+
+        assert code == EXIT_SUCCESS
+
+        payload = json.loads(output.read_text(encoding="utf-8"))
+
+        overall = payload["retrieval"]["overall"]
+
+        assert overall["queries"] > 0
+
+        assert 0.0 <= overall["recall_at_1"] <= 1.0
