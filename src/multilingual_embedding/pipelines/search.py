@@ -198,31 +198,53 @@ class SemanticSearchPipeline:
         """
         Load a pipeline from an experiment directory.
 
-        Expects the layout :class:`TrainingPipeline` writes:
-        ``tokenizer/`` and ``embedding/`` subdirectories.
+        Serves whichever model the run wrote. ``qfme train`` writes an
+        ``embedding/`` matrix; ``qfme pretrain`` and its contrastive
+        fine-tune write an ``encoder/``. When both are present the
+        contextual encoder wins, because it is the more capable model and
+        a directory that holds both was used to build both.
+
+        The ``encoder`` override applies to the static path alone — it
+        customises how sentences pool over the matrix, which a contextual
+        model computes for itself. Passing it while serving an encoder is
+        a caller mistake; prefer :meth:`from_encoder`, which is device
+        aware, when the model is known to be contextual.
 
         Raises
         ------
         ResourceNotFoundError
-            If either subdirectory is missing, naming which one.
+            If ``tokenizer/`` is missing, or neither ``encoder/`` nor
+            ``embedding/`` is present, naming what was expected.
         """
 
         root = Path(experiment_directory).expanduser()
 
         tokenizer_directory = root / "tokenizer"
 
+        if not tokenizer_directory.is_dir():
+            raise ResourceNotFoundError(
+                "Experiment directory is missing a required component",
+                component="tokenizer",
+                expected=str(tokenizer_directory),
+            )
+
+        encoder_directory = root / "encoder"
+
         embedding_directory = root / "embedding"
 
-        for directory, label in (
-            (tokenizer_directory, "tokenizer"),
-            (embedding_directory, "embedding"),
-        ):
-            if not directory.is_dir():
-                raise ResourceNotFoundError(
-                    "Experiment directory is missing a required component",
-                    component=label,
-                    expected=str(directory),
-                )
+        # The contextual encoder wins when a run wrote one, so a service
+        # pointed at an experiment directory serves the from-scratch model
+        # without the caller having to know which kind it is.
+        if encoder_directory.is_dir():
+            return cls.from_encoder(experiment_directory)
+
+        if not embedding_directory.is_dir():
+            raise ResourceNotFoundError(
+                "Experiment directory holds neither a trained encoder nor an "
+                "embedding matrix",
+                component="encoder-or-embedding",
+                expected=str(embedding_directory),
+            )
 
         tokenizer = SentencePieceTokenizer.load(tokenizer_directory)
 
@@ -234,6 +256,91 @@ class SemanticSearchPipeline:
         )
 
         return cls.from_static(tokenizer, matrix, encoder)
+
+    @classmethod
+    def from_encoder(
+        cls,
+        experiment_directory: str | Path,
+        *,
+        device: str | None = None,
+        batch_size: int = 32,
+    ) -> SemanticSearchPipeline:
+        """
+        Build a pipeline over a from-scratch contextual encoder.
+
+        This is what turns a ``qfme pretrain`` run — or its contrastive
+        fine-tune — into something that answers queries. It loads the
+        encoder the run saved and the tokenizer trained alongside it, from
+        the ``encoder/`` and ``tokenizer/`` subdirectories that pipeline
+        writes.
+
+        A from-scratch encoder is symmetric: it was never trained with the
+        ``query:``/``passage:`` asymmetry an E5-family checkpoint carries,
+        so no prefixes are applied. And it has no per-token matrix, so
+        :meth:`similar_tokens` returns nothing — the same as for an
+        adapter, and for the same reason.
+
+        Parameters
+        ----------
+        experiment_directory:
+            The directory ``qfme pretrain`` wrote, holding ``tokenizer/``
+            and ``encoder/``.
+
+        device:
+            Where to run, e.g. ``"cuda"`` or ``"cpu"``. ``None`` picks the
+            best available.
+
+        batch_size:
+            Sentences per forward pass when indexing.
+
+        Raises
+        ------
+        ResourceNotFoundError
+            If ``tokenizer/`` or ``encoder/`` is missing, naming which.
+
+        ImportError
+            If the neural extra is not installed. A contextual encoder
+            needs torch; the static paths do not, which is why the import
+            is here rather than at module scope.
+        """
+
+        root = Path(experiment_directory).expanduser()
+
+        tokenizer_directory = root / "tokenizer"
+
+        encoder_directory = root / "encoder"
+
+        for directory, label in (
+            (tokenizer_directory, "tokenizer"),
+            (encoder_directory, "encoder"),
+        ):
+            if not directory.is_dir():
+                raise ResourceNotFoundError(
+                    "Experiment directory is missing a required component",
+                    component=label,
+                    expected=str(directory),
+                )
+
+        # Imported lazily for the same reason as :meth:`from_adapter`:
+        # torch is an optional extra, and importing it at module scope
+        # would make the static search path uninstallable without it.
+        from multilingual_embedding.embedding.neural import NeuralTextEncoder
+
+        tokenizer = SentencePieceTokenizer.load(tokenizer_directory)
+
+        encoder = NeuralTextEncoder.load(
+            encoder_directory,
+            tokenizer,
+            device=device,
+            batch_size=batch_size,
+        )
+
+        _logger.info(
+            "Loaded contextual search pipeline",
+            extra={"directory": str(root), "dimension": encoder.dimension},
+        )
+
+        return cls(encoder)
 
     @classmethod
     def from_config(cls, config: ExperimentConfig) -> SemanticSearchPipeline:

@@ -193,6 +193,45 @@ class TestEndToEnd:
     def test_the_summary_is_serialisable(self, result: PretrainingResult) -> None:
         json.dumps(result.summary())
 
+    def test_the_pretrained_encoder_answers_queries(
+        self, result: PretrainingResult
+    ) -> None:
+        """
+        The loop closed: a run's saved encoder is served straight from its
+        experiment directory. ``from_directory`` must auto-detect the
+        contextual encoder — no matrix, no separable tokenizer — and index
+        and rank real sentences over it. This is what makes a pretrained
+        encoder a usable model rather than a file on disk.
+        """
+
+        from multilingual_embedding.pipelines.search import SemanticSearchPipeline
+
+        pipeline = SemanticSearchPipeline.from_directory(result.experiment_directory)
+
+        # Auto-detected as contextual: a from-scratch encoder holds no
+        # per-token matrix and its tokenizer is internal to it.
+        assert pipeline.matrix is None
+
+        corpus = [
+            "The researcher studies machine learning.",
+            "A student explains natural language.",
+            "शोधकर्ता मशीन लर्निंग पढ़ता है।",
+        ]
+
+        indexed = pipeline.index(corpus)
+
+        assert indexed == len(corpus)
+
+        hits = pipeline.search("The engineer teaches the new model.", top_k=3)
+
+        # A ranked, in-range result set. Retrieval quality is not asserted:
+        # an MLM-pretrained encoder without contrastive fine-tuning is a
+        # weak sentence embedder, and this test proves the serving path,
+        # not the model.
+        assert [hit.rank for hit in hits] == [1, 2, 3]
+
+        assert all(-1.0 <= hit.score <= 1.0 for hit in hits)
+
 
 @needs_neural
 class TestInterruptible:

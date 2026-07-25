@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import zlib
 from collections.abc import Sequence
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -250,3 +251,72 @@ class TestIndexingEncodesAsABatch:
         assert pipeline.index([]) == 0
 
         assert pipeline.search("alpha") == []
+
+
+class TestFromDirectoryChoosesTheModel:
+    """
+    Which model an experiment directory serves, and how a broken one fails.
+
+    These assert on the directory-shape logic alone — which subdirectory
+    is looked for and in what order — so they need no trained model and no
+    torch. The end-to-end proof that a real pretrained encoder is loaded
+    and answers queries lives beside the pretraining pipeline.
+    """
+
+    def test_a_missing_tokenizer_is_named(self, tmp_path: Path) -> None:
+        from multilingual_embedding.core.exceptions import ResourceNotFoundError
+
+        # Neither subdirectory exists; the tokenizer is required for both
+        # paths, so it is the one reported.
+        with pytest.raises(ResourceNotFoundError) as caught:
+            SemanticSearchPipeline.from_directory(tmp_path)
+
+        assert caught.value.context["component"] == "tokenizer"
+
+    def test_a_directory_with_neither_model_is_named(self, tmp_path: Path) -> None:
+        from multilingual_embedding.core.exceptions import ResourceNotFoundError
+
+        # A tokenizer but no model at all — neither the static matrix nor a
+        # contextual encoder — is a distinct, more specific failure than a
+        # missing tokenizer, and the error says so rather than pointing at
+        # `embedding/` alone as though the encoder path did not exist.
+        (tmp_path / "tokenizer").mkdir()
+
+        with pytest.raises(ResourceNotFoundError) as caught:
+            SemanticSearchPipeline.from_directory(tmp_path)
+
+        assert caught.value.context["component"] == "encoder-or-embedding"
+
+    def test_an_encoder_directory_takes_the_contextual_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        When ``encoder/`` is present, ``from_directory`` must delegate to
+        the contextual factory rather than trying to load a matrix — even
+        if an ``embedding/`` also happens to be there. Proven without torch
+        by intercepting the delegation, so the branch is covered on a
+        machine with no training stack.
+        """
+
+        (tmp_path / "tokenizer").mkdir()
+
+        (tmp_path / "encoder").mkdir()
+
+        (tmp_path / "embedding").mkdir()
+
+        seen: dict[str, object] = {}
+
+        def _fake_from_encoder(cls: object, directory: object) -> str:
+            seen["directory"] = directory
+
+            return "contextual"
+
+        monkeypatch.setattr(
+            SemanticSearchPipeline, "from_encoder", classmethod(_fake_from_encoder)
+        )
+
+        result = SemanticSearchPipeline.from_directory(tmp_path)
+
+        assert result == "contextual"
+
+        assert seen["directory"] == tmp_path
