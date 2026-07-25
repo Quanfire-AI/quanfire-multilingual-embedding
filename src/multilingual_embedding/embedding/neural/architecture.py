@@ -311,9 +311,13 @@ class TransformerEncoderModel(nn.Module):
 
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def forward(self, token_ids: Tensor, attention_mask: Tensor) -> Tensor:
+    def hidden_states(self, token_ids: Tensor, attention_mask: Tensor) -> Tensor:
         """
-        Encode a padded batch into one vector per sequence.
+        Per-token contextual states, before pooling.
+
+        This is the representation the pooled vector is made from, and the
+        input a masked-language head predicts over: :meth:`forward` averages
+        it into one vector, while pretraining reads it token by token.
 
         Parameters
         ----------
@@ -325,7 +329,7 @@ class TransformerEncoderModel(nn.Module):
 
         Returns
         -------
-        ``(batch, dimension)`` — mean-pooled over real tokens only.
+        ``(batch, length, dimension)`` — one contextual vector per token.
 
         Raises
         ------
@@ -366,7 +370,34 @@ class TransformerEncoderModel(nn.Module):
         for block in self.blocks:
             hidden = block(hidden, attending)
 
-        hidden = self.final_norm(hidden)
+        # nn.LayerNorm.__call__ is untyped, so the result widens to Any.
+        normalised: Tensor = self.final_norm(hidden)
+
+        return normalised
+
+    def forward(self, token_ids: Tensor, attention_mask: Tensor) -> Tensor:
+        """
+        Encode a padded batch into one vector per sequence.
+
+        Parameters
+        ----------
+        token_ids:
+            ``(batch, length)`` integer ids.
+
+        attention_mask:
+            ``(batch, length)``, 1 for real tokens and 0 for padding.
+
+        Returns
+        -------
+        ``(batch, dimension)`` — mean-pooled over real tokens only.
+
+        Raises
+        ------
+        ValidationError
+            If the sequence exceeds the position table.
+        """
+
+        hidden = self.hidden_states(token_ids, attention_mask)
 
         return self._mean_pool(hidden, attention_mask)
 

@@ -59,9 +59,43 @@ __all__ = [
     "TextPair",
     "Trainable",
     "TrainingReport",
+    "decay_parameter_groups",
 ]
 
 _logger = get_logger(__name__)
+
+
+def decay_parameter_groups(
+    model: nn.Module,
+    *,
+    weight_decay: float,
+) -> list[dict[str, object]]:
+    """
+    Split parameters into decayed and undecayed groups.
+
+    Biases and normalisation parameters are excluded from weight decay.
+    Decaying a LayerNorm gain drives it toward zero, which scales down the
+    layer's entire output. This is shared by every trainer in the package,
+    because the rule is a property of the architecture, not of an objective.
+    """
+
+    decayed: list[nn.Parameter] = []
+
+    undecayed: list[nn.Parameter] = []
+
+    for name, parameter in model.named_parameters():
+        if not parameter.requires_grad:
+            continue
+
+        if parameter.ndim < 2 or name.endswith(".bias"):
+            undecayed.append(parameter)
+        else:
+            decayed.append(parameter)
+
+    return [
+        {"params": decayed, "weight_decay": weight_decay},
+        {"params": undecayed, "weight_decay": 0.0},
+    ]
 
 
 class Trainable(Protocol):
@@ -679,31 +713,9 @@ class ContrastiveTrainer:
 
     @staticmethod
     def _parameter_groups(model: nn.Module) -> list[dict[str, object]]:
-        """
-        Split parameters into decayed and undecayed groups.
+        """Decayed and undecayed groups; see :func:`decay_parameter_groups`."""
 
-        Biases and normalisation parameters are excluded from weight
-        decay. Decaying a LayerNorm gain drives it toward zero, which
-        scales down the layer's entire output.
-        """
-
-        decayed: list[nn.Parameter] = []
-
-        undecayed: list[nn.Parameter] = []
-
-        for name, parameter in model.named_parameters():
-            if not parameter.requires_grad:
-                continue
-
-            if parameter.ndim < 2 or name.endswith(".bias"):
-                undecayed.append(parameter)
-            else:
-                decayed.append(parameter)
-
-        return [
-            {"params": decayed, "weight_decay": 0.01},
-            {"params": undecayed, "weight_decay": 0.0},
-        ]
+        return decay_parameter_groups(model, weight_decay=0.01)
 
     def _learning_rate(self, step: int, warmup_steps: int, total_steps: int) -> float:
         """Linear warmup followed by linear decay."""

@@ -27,6 +27,10 @@ other:
     Contrastive fitting on text pairs, with InfoNCE over in-batch
     negatives.
 
+``pretraining``
+    Masked-language pretraining — stage one of the from-scratch path,
+    where a random embedding table first learns what its tokens mean.
+
 ``lora``
     Low-rank adapters, so a large model trains on a small card.
 
@@ -64,6 +68,14 @@ from .pretrained import (
     PretrainedEncoderError,
     PretrainedTextEncoder,
 )
+from .pretraining import (
+    MaskedLanguageConfig,
+    MaskedLanguageModel,
+    MaskedLanguageModelHead,
+    MaskedLanguageModelTrainer,
+    PretrainingReport,
+    mask_tokens,
+)
 from .training import (
     ContrastiveConfig,
     ContrastiveTrainer,
@@ -79,9 +91,14 @@ __all__ = [
     "EncoderConfig",
     "LoRAConfig",
     "LoRALinear",
+    "MaskedLanguageConfig",
+    "MaskedLanguageModel",
+    "MaskedLanguageModelHead",
+    "MaskedLanguageModelTrainer",
     "NeuralTextEncoder",
     "PretrainedEncoderError",
     "PretrainedTextEncoder",
+    "PretrainingReport",
     "TextPair",
     "Tokenizes",
     "TrainingReport",
@@ -91,6 +108,7 @@ __all__ = [
     "load_adapter",
     "load_lora_state_dict",
     "lora_state_dict",
+    "mask_tokens",
     "merge_lora",
     "parameter_summary",
     "resolve_device",
