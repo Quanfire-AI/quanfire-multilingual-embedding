@@ -464,6 +464,103 @@ class TestItActuallyLearns:
         assert report.steps > 0
 
 
+class TestCheckpointResume:
+    """
+    A run interrupted and resumed must equal one that never stopped.
+
+    This is the property that makes a long from-scratch run survivable on a
+    shared GPU box: stop after any epoch, come back to a *fresh* process,
+    and the remaining epochs proceed exactly as they would have — same
+    weights, same optimizer moments, same masks, same dropout. Anything
+    less and a resumed run is a different, unproven run.
+    """
+
+    @staticmethod
+    def _config() -> MaskedLanguageConfig:
+        return MaskedLanguageConfig(epochs=4, batch_size=16, learning_rate=3e-3, seed=1)
+
+    def _train(
+        self,
+        corpus: list[str],
+        **kwargs: object,
+    ) -> tuple[list[float], list[float]]:
+        trainer = MaskedLanguageModelTrainer(
+            build_encoder(),
+            mask_token_id=MASK_ID,
+            config=self._config(),
+        )
+
+        report = trainer.train(corpus, **kwargs)  # type: ignore[arg-type]
+
+        return report.losses, report.accuracies
+
+    def test_resumed_run_matches_uninterrupted_run(self, tmp_path: object) -> None:
+        corpus = build_corpus()
+
+        # The run that never stops — the reference every resumed run must
+        # reproduce.
+        reference_losses, reference_accuracies = self._train(corpus)
+
+        # The same run, cut short after epoch 1 and checkpointed...
+        partial_losses, _ = self._train(
+            corpus, checkpoint_dir=tmp_path, stop_after_epoch=1
+        )
+
+        assert len(partial_losses) == 2
+
+        # ...then picked up by a brand-new trainer over a fresh encoder.
+        resumed_losses, resumed_accuracies = self._train(corpus, resume_from=tmp_path)
+
+        assert resumed_losses == reference_losses
+
+        assert resumed_accuracies == reference_accuracies
+
+    def test_a_checkpoint_is_written_each_epoch(self, tmp_path: object) -> None:
+        from pathlib import Path
+
+        directory = Path(str(tmp_path))
+
+        self._train(build_corpus(), checkpoint_dir=directory, stop_after_epoch=1)
+
+        checkpoint = directory / "checkpoint.pt"
+
+        assert checkpoint.exists()
+
+        # The saved epoch is the next one to run, so a resume knows where to
+        # start — two epochs done (0 and 1), so epoch 2 is next.
+        payload = torch.load(checkpoint, weights_only=False)
+
+        assert payload["epoch"] == 2
+
+    def test_an_unreadable_format_version_is_refused(self, tmp_path: object) -> None:
+        from pathlib import Path
+
+        directory = Path(str(tmp_path))
+
+        self._train(build_corpus(), checkpoint_dir=directory, stop_after_epoch=0)
+
+        checkpoint = directory / "checkpoint.pt"
+
+        payload = torch.load(checkpoint, weights_only=False)
+
+        payload["format_version"] = 999
+
+        torch.save(payload, checkpoint)
+
+        with pytest.raises(ValidationError, match="format"):
+            self._train(build_corpus(), resume_from=directory)
+
+    def test_a_mismatched_schedule_is_refused(self, tmp_path: object) -> None:
+        # Checkpoint a four-epoch run, then try to resume it under a
+        # trainer configured for a shorter corpus. The saved step no longer
+        # lines up with the schedule, so the resume is refused rather than
+        # silently continued onto the wrong learning-rate curve.
+        self._train(build_corpus(), checkpoint_dir=tmp_path, stop_after_epoch=1)
+
+        with pytest.raises(ValidationError, match="schedule"):
+            self._train(build_corpus()[:-2], resume_from=tmp_path)
+
+
 class TestConfigAndReport:
     def test_no_documents_is_rejected(self) -> None:
         with pytest.raises(ValidationError, match="at least one document"):
