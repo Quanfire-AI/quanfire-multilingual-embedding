@@ -1,0 +1,63 @@
+# From-scratch neural encoder — the two-stage recipe, end to end.
+#
+#   qfme pretrain  →  a contextual encoder that has only seen masked-LM
+#   qfme finetune  →  contrastively shaped into a usable sentence embedder
+#   qfme evaluate  →  retrieval scores that say whether it worked
+#
+# This file carries the *experiment* (what determines the result). The
+# *machine* half — device, precision, batch size, gradient-caching chunk —
+# lives in configs/gpu.yaml and is overlaid with `--profile`, so the same
+# file describes the run on the laptop and on the 4070 Ti box.
+#
+# See RUN.md in this directory for the exact command sequence on the box,
+# including the smaller Manipuri (mni) variant to prove the whole chain
+# fast before committing hours to Hindi.
+
+name: hi-scratch                    # `qfme pretrain` writes artifacts/hi-scratch
+seed: 42
+output_directory: artifacts
+
+corpus:
+  # Produced on the box by `qfme extract` from a Wikipedia dump — public
+  # data, which is why finetune.data_provenance below is `public`.
+  source: data/wikipedia/hi.jsonl.gz
+
+tokenizer:
+  # A real multilingual vocabulary. Drop to ~8000 for a small language
+  # like Manipuri, whose corpus cannot support 32k pieces.
+  vocab_size: 32000
+  character_coverage: 0.9995
+
+pretraining:
+  # ~25M parameters at these settings — comfortable on 16 GB with the
+  # gradient caching configs/gpu.yaml turns on. Heads must divide the
+  # dimension: 384 / 6 = 64.
+  dimension: 384
+  layers: 6
+  heads: 6
+  max_length: 256
+  dropout: 0.1
+  # A from-scratch table has far to travel, so the rate is higher than the
+  # contrastive stage and warmup matters. Three passes is a real run; the
+  # loop checkpoints each epoch, so it need not finish in one sitting.
+  epochs: 3
+  learning_rate: 1.0e-4
+  warmup_ratio: 0.1
+  mask_probability: 0.15
+
+finetune:
+  # Stage two reads the encoder stage one wrote. `qfme finetune --name
+  # hi-finetuned` writes the result to a *different* directory
+  # (artifacts/hi-finetuned), so the pretrained source is never clobbered.
+  source: artifacts/hi-scratch
+  pairs: data/pairs/hi.jsonl.gz
+  # A ceiling, not a demand: finetune samples min(available, requested)
+  # and says so. Held-out eval is drawn separately and kept disjoint.
+  train_pairs: 100000
+  eval_pairs: 2000
+  epochs: 3
+  learning_rate: 2.0e-5
+  temperature: 0.05
+  # A legal fact about the model, required before it is saved. Wikipedia
+  # is public. Customer data must never reach this file.
+  data_provenance: public
