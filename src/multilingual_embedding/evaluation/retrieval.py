@@ -438,7 +438,16 @@ def _score_block(
     # would cost N log N per query for a number one comparison gives.
     own = similarity[rows, correct]
 
-    ranks = (similarity > own[:, None]).sum(axis=1)
+    # Ties are counted *against* the correct answer — the pessimistic rank
+    # (candidates scoring >= own, less the correct answer itself). The
+    # optimistic `> own` would hand a rank of 0 to a degenerate encoder
+    # that has collapsed the space: when every passage encodes to nearly
+    # the same vector, every similarity ties, so `> own` is all-False and
+    # the model that learned nothing scores a perfect recall@1. Counting
+    # ties as misses turns that collapse into the worst rank, not the best,
+    # so a fine-tune that destroyed the geometry reports as harmful — which
+    # it is — rather than as flawless.
+    ranks = (similarity >= own[:, None]).sum(axis=1) - 1
 
     # Masked rather than filtered afterwards: dropping the correct index
     # from a top-k list per row would leave rows of different lengths,

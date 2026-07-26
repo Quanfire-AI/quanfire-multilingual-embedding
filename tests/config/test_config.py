@@ -14,6 +14,7 @@ from multilingual_embedding.config.base import (
     EmbeddingConfig,
     EvaluationConfig,
     ExperimentConfig,
+    PretrainingConfig,
     TokenizerConfig,
 )
 from multilingual_embedding.config.loader import (
@@ -196,6 +197,33 @@ class TestSeedPropagation:
         merged = ExperimentConfig().merged({"seed": 11, "embedding": {"dimension": 16}})
 
         assert merged.embedding.seed == 11
+
+    def test_a_merged_seed_reaches_every_stage_not_only_the_static_ones(self) -> None:
+        """
+        A seed override must re-derive *every* stage's inherited seed, not
+        only embedding and adaptation. The neural stages carry a seed too;
+        if the override skipped them, a run whose global seed changed would
+        keep pretraining and fine-tuning on the old seed — reproducibility
+        that silently lies. All four sections must follow the global seed.
+        """
+
+        merged = ExperimentConfig().merged({"seed": 11})
+
+        assert merged.embedding.seed == 11
+
+        assert merged.adaptation.seed == 11
+
+        assert merged.pretraining.seed == 11
+
+        assert merged.finetune.seed == 11
+
+    def test_a_merged_seed_does_not_disturb_an_explicit_neural_seed(self) -> None:
+        """The override re-derives inherited seeds; it must not overwrite one
+        a stage set for itself."""
+
+        base = ExperimentConfig(pretraining=PretrainingConfig(seed=99))
+
+        assert base.merged({"seed": 11}).pretraining.seed == 99
 
     def test_an_explicit_embedding_seed_survives_a_global_seed_merge(self) -> None:
         base = ExperimentConfig(seed=7, embedding=EmbeddingConfig(seed=99))

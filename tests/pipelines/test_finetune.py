@@ -155,7 +155,14 @@ def _pretraining_experiment(corpus: Path, output: Path) -> ExperimentConfig:
         corpus=CorpusConfig(source=corpus, format="jsonl"),
         tokenizer=TokenizerConfig(vocab_size=110, character_coverage=0.9995),
         pretraining=PretrainingConfig(
-            dimension=32, layers=2, heads=4, max_length=32, epochs=2, learning_rate=1e-3, seed=0
+            dimension=32,
+            layers=2,
+            heads=4,
+            max_length=32,
+            epochs=2,
+            learning_rate=1e-3,
+            seed=0,
+            data_provenance="synthetic",
         ),
         compute=ComputeConfig(device="cpu", precision="fp32", batch_size=8),
     )
@@ -258,6 +265,27 @@ class TestGuards:
 
         with pytest.raises(ConfigurationError, match="data_provenance"):
             FinetuneConfig(source=Path("model"), pairs=Path("pairs.jsonl"))
+
+    def test_a_no_save_checkpoint_still_requires_provenance(self, tmp_path: Path) -> None:
+        """
+        The gap ``--no-save`` opens: it skips the config-build provenance
+        check, but writing a checkpoint persists the trained encoder just
+        as saving does — a checkpoint is a full, extractable model. So a
+        checkpointed run must declare its data's origin even when it will
+        not save a final artefact. The refusal lands before any epoch.
+        """
+
+        config = ExperimentConfig(
+            finetune=FinetuneConfig(
+                source=Path("model"),
+                pairs=Path("pairs.jsonl"),
+                save=False,
+                data_provenance="",
+            )
+        )
+
+        with pytest.raises(ConfigurationError, match=r"data_provenance|checkpoint"):
+            FinetunePipeline(config, echo=lambda _: None).run(checkpoint_dir=tmp_path)
 
     def test_an_unconfigured_section_is_valid(self) -> None:
         """

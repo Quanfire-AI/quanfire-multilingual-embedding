@@ -52,6 +52,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from multilingual_embedding.common.enums import DataProvenance
 from multilingual_embedding.config.base import ComputeConfig, ExperimentConfig, FinetuneConfig
 from multilingual_embedding.config.loader import save_config
 from multilingual_embedding.core.exceptions import ConfigurationError, ResourceNotFoundError
@@ -293,7 +294,9 @@ class FinetunePipeline:
         ----------
         checkpoint_dir:
             Where the contrastive trainer writes ``checkpoint.pt`` after
-            each epoch. ``None`` fine-tunes without checkpointing.
+            each epoch. ``None`` fine-tunes without checkpointing. A
+            checkpoint persists the trained encoder, so it requires
+            ``data_provenance`` to be declared even on a ``save=False`` run.
 
         resume_from:
             A checkpoint file, or a directory holding one, to restore
@@ -328,6 +331,23 @@ class FinetunePipeline:
         if settings.pairs is None:
             raise ConfigurationError(
                 "finetune.pairs is required — point it at a file written by qfme mine-pairs"
+            )
+
+        # A checkpoint is a persisted, resumable, extractable copy of the
+        # trained encoder — the same model the provenance wall guards at
+        # save time. `--no-save` skips that wall (a measurement-only run
+        # ships nothing), so a checkpoint written on a no-save run would
+        # carry a trained model past the wall with no declaration of where
+        # its data came from. Require the declaration whenever weights will
+        # be written to disk, saved or checkpointed. Checked here so it
+        # costs seconds, not an epoch on the GPU.
+        if checkpoint_dir is not None and not settings.data_provenance:
+            raise ConfigurationError(
+                "Writing a checkpoint persists the trained encoder, so it "
+                "requires declaring data_provenance (where its training data "
+                "came from) — even on a --no-save run. Drop --checkpoint-dir "
+                "for a measurement-only run that writes no model.",
+                supported=sorted(DataProvenance),
             )
 
         tokenizer_directory = settings.source / "tokenizer"

@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from multilingual_embedding.common.enums import DataProvenance
 from multilingual_embedding.config.base import ExperimentConfig
 from multilingual_embedding.config.loader import save_config
 from multilingual_embedding.core.exceptions import ConfigurationError
@@ -191,6 +192,23 @@ class PretrainingPipeline:
         """
 
         config = self._config
+
+        # A pretrained encoder is a model trained on the corpus, so it
+        # carries the same provenance obligation a fine-tuned one does.
+        # Unlike finetune there is no measurement-only mode here — pretrain
+        # always writes an encoder — so the declaration is unconditional.
+        # Checked before anything lands on disk, so a missing label costs a
+        # second rather than an epoch on the GPU. Customer data must never
+        # reach a saved model.
+        if not config.pretraining.data_provenance:
+            raise ConfigurationError(
+                "Pretraining saves an encoder trained on the corpus, so it "
+                "requires declaring pretraining.data_provenance (where the "
+                "corpus came from). Pass --data-provenance, or set it in the "
+                "config. Customer data must never reach a saved model.",
+                supported=sorted(DataProvenance),
+                experiment=config.name,
+            )
 
         experiment_directory = ensure_directory(config.experiment_directory)
 

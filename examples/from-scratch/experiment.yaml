@@ -44,6 +44,10 @@ pretraining:
   learning_rate: 1.0e-4
   warmup_ratio: 0.1
   mask_probability: 0.15
+  # A pretrained encoder is a model trained on the corpus above, so it
+  # carries a provenance fact just as the fine-tune does. Wikipedia is
+  # public. Customer data must never reach this file.
+  data_provenance: public
 
 finetune:
   # Stage two reads the encoder stage one wrote. `qfme finetune --name

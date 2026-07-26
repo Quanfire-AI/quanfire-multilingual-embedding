@@ -86,6 +86,21 @@ class Chance:
         return np.stack(rows)
 
 
+class Collapsed:
+    """
+    Maps every text to the same vector — a mode-collapsed encoder.
+
+    This is the failure a bad temperature or learning rate produces: the
+    space folds so distinct passages encode near-identically. The texts are
+    still distinct (so the duplicate-positive guard, which works on text,
+    does not fire), but every similarity ties. An honest evaluator must
+    call this the worst encoder, not the best.
+    """
+
+    def encode_batch(self, texts):  # type: ignore[no-untyped-def]
+        return np.ones((len(texts), 8), dtype=np.float32)
+
+
 class TestTheInstrumentDiscriminates:
     def test_a_perfect_encoder_scores_one(self) -> None:
         report = evaluate_retrieval(Perfect(), pairs())
@@ -108,6 +123,22 @@ class TestTheInstrumentDiscriminates:
             "a random encoder is scoring far above chance; the harness is "
             "measuring something other than retrieval"
         )
+
+    def test_a_collapsed_encoder_scores_zero_not_one(self) -> None:
+        """
+        The trust-critical case. When every vector is identical, every
+        candidate ties the correct answer. Resolving ties in the correct
+        answer's favour would hand a mode-collapsed encoder a perfect
+        recall@1 — the single most dangerous false positive this harness
+        can produce, because collapse is exactly what a bad run yields.
+        Ties must count against, so collapse reads as the worst rank.
+        """
+
+        report = evaluate_retrieval(Collapsed(), pairs())
+
+        assert report.overall.recall_at_1 == pytest.approx(0.0)
+
+        assert report.overall.mrr < 0.05
 
     def test_chance_level_is_reported_not_assumed(self) -> None:
         report = evaluate_retrieval(Perfect(), pairs(count=200))

@@ -624,6 +624,17 @@ def _add_pretrain_parser(subparsers: Any) -> None:
     parser.add_argument("--name", help="Experiment name")
 
     parser.add_argument(
+        "--data-provenance",
+        choices=[str(value) for value in DataProvenance],
+        help=(
+            "Where the pretraining corpus came from: public, synthetic or "
+            "licensed. Required — a pretrained encoder is a model trained on "
+            "that text, so it carries this as a legal fact about itself. May "
+            "also be set as pretraining.data_provenance in the config"
+        ),
+    )
+
+    parser.add_argument(
         "--checkpoint-dir",
         type=Path,
         help="Write checkpoint.pt here after each epoch (omit to run without checkpointing)",
@@ -936,7 +947,9 @@ def _add_evaluate_parser(subparsers: Any) -> None:
         help=(
             "Mined pair file to score a contextual encoder against by retrieval. "
             "Required for a `pretrain`/`finetune` experiment, which has no matrix "
-            "to probe intrinsically"
+            "to probe intrinsically. Must be HELD OUT from training — evaluate "
+            "scores exactly these pairs and cannot tell which the model has seen, "
+            "so pointing it at the training file inflates the score silently"
         ),
     )
 
@@ -1398,6 +1411,10 @@ def _run_pretrain(args: argparse.Namespace) -> int:
     if args.name:
         config = config.merged({"name": args.name})
 
+    # A flag beats the config, but either satisfies the pipeline's wall.
+    if args.data_provenance:
+        config = config.merged({"pretraining": {"data_provenance": args.data_provenance}})
+
     result = PretrainingPipeline(config).run(
         checkpoint_dir=args.checkpoint_dir,
         resume_from=args.resume_from,
@@ -1697,10 +1714,17 @@ def _evaluate_contextual(args: argparse.Namespace, experiment: Path) -> int:
 
     A from-scratch or fine-tuned encoder has no per-token matrix to probe,
     so the honest question is whether it retrieves the right passage for a
-    query. That is exactly what an adaptation or fine-tuning run measures
-    on its held-out set, and this reuses the same evaluator so a model's
-    score off ``qfme evaluate`` matches the ``after`` score its own
-    fine-tune reported.
+    query. This reuses the same retrieval evaluator a fine-tune runs on its
+    held-out set.
+
+    One caution the tool cannot enforce: ``evaluate`` scores *exactly* the
+    pairs it is given and has no knowledge of what the encoder trained on,
+    so it cannot carve out a held-out split the way ``finetune`` does. Point
+    it at the training pairs and the score is measured on data the model has
+    seen — inflated, silently. Pass a file disjoint from training. Because
+    ``finetune`` samples its held-out set with a different seed and its own
+    facet filters, this number is comparable to, but will not exactly equal,
+    the ``after`` a fine-tune reported unless it is handed that same set.
     """
 
     from multilingual_embedding.corpus.pairs import sample_pairs
@@ -1742,7 +1766,9 @@ def _evaluate_contextual(args: argparse.Namespace, experiment: Path) -> int:
 
         print(f"Wrote report to {args.output}")
     else:
-        print(f"retrieval over {len(pairs):,} pairs from {args.pairs}\n")
+        print(f"retrieval over {len(pairs):,} pairs from {args.pairs}")
+
+        print("(assumes these pairs are held out from training)\n")
 
         print(report.summary())
 

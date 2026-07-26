@@ -379,6 +379,15 @@ class PretrainingConfig:
         config left at ``None`` falls back to the framework default via
         :attr:`resolved_seed`, so pretraining is never accidentally
         unseeded.
+
+    data_provenance:
+        Where the pretraining corpus came from — ``public``, ``synthetic``
+        or ``licensed``. A pretrained encoder is a model trained on that
+        text, so ``qfme pretrain`` refuses to save one without this
+        declaration, exactly as fine-tuning does. Empty by default so an
+        experiment that never pretrains still constructs; the requirement
+        is enforced by :class:`~multilingual_embedding.pipelines.pretraining.PretrainingPipeline`
+        when a pretrain actually runs. Customer data must never reach it.
     """
 
     dimension: int = 256
@@ -408,6 +417,8 @@ class PretrainingConfig:
     tie_weights: bool = True
 
     seed: int | None = None
+
+    data_provenance: str = ""
 
     def __post_init__(self) -> None:
         require_positive(self.dimension, name="dimension")
@@ -459,6 +470,16 @@ class PretrainingConfig:
 
         if self.seed is not None:
             require_non_negative(self.seed, name="seed")
+
+        # Validated here if declared; *required* only when a pretrain runs
+        # (see PretrainingPipeline), because an ExperimentConfig that never
+        # pretrains still builds a default PretrainingConfig and must not
+        # be forced to answer a question its run never asks.
+        if self.data_provenance and self.data_provenance not in set(DataProvenance):
+            raise ConfigurationError(
+                f"unknown data_provenance {self.data_provenance!r}",
+                supported=sorted(DataProvenance),
+            )
 
     @property
     def resolved_seed(self) -> int:
@@ -1235,7 +1256,7 @@ class ExperimentConfig:
         # caller asked for. Reset it to the inherit marker so
         # __post_init__ re-derives it from the incoming seed.
         if "seed" in overrides:
-            for section in ("embedding", "adaptation"):
+            for section in ("embedding", "adaptation", "pretraining", "finetune"):
                 if base[section].get("seed") == base["seed"]:
                     base[section]["seed"] = None
 

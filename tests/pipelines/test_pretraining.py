@@ -114,6 +114,7 @@ def _experiment(corpus: Path, output: Path, **pretraining: object) -> Experiment
         "learning_rate": 1e-3,
         "mask_probability": 0.15,
         "seed": 0,
+        "data_provenance": "synthetic",
     }
 
     settings.update(pretraining)
@@ -135,6 +136,24 @@ class TestGuards:
     def test_a_missing_corpus_source_is_refused(self) -> None:
         with pytest.raises(ConfigurationError, match="corpus source"):
             PretrainingPipeline(ExperimentConfig(name="x"))
+
+    def test_pretraining_without_provenance_is_refused_before_any_work(
+        self, corpus_path: Path, tmp_path: Path
+    ) -> None:
+        """
+        A pretrained encoder is a model trained on the corpus, so it must
+        declare where that corpus came from before it is written. The
+        refusal lands at the top of ``run`` — before the tokenizer is
+        trained or an epoch is spent — so a forgotten label costs a second,
+        not an hour. It needs no training stack to fire.
+        """
+
+        pipeline = PretrainingPipeline(
+            _experiment(corpus_path, tmp_path / "run", data_provenance="")
+        )
+
+        with pytest.raises(ConfigurationError, match="data_provenance"):
+            pipeline.run()
 
 
 @needs_neural
@@ -281,6 +300,8 @@ class TestCommandLine:
                 str(corpus_path),
                 "--name",
                 "cli-pretrain",
+                "--data-provenance",
+                "synthetic",
                 "--set",
                 "corpus.format=jsonl",
                 "--set",
