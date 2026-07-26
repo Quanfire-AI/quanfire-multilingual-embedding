@@ -473,7 +473,7 @@ def _add_mine_pairs_parser(subparsers: Any) -> None:
 def _add_mine_negatives_parser(subparsers: Any) -> None:
     parser = subparsers.add_parser(
         "mine-negatives",
-        help="Attach hard negatives to a pair file, mined against a saved adapter",
+        help="Attach hard negatives to a pair file, mined against a saved model",
     )
 
     parser.add_argument(
@@ -488,8 +488,10 @@ def _add_mine_negatives_parser(subparsers: Any) -> None:
         type=Path,
         required=True,
         help=(
-            "Adapter directory whose confusions are mined. Hard negatives are "
-            "relative to a model, so this should be the model about to be retrained"
+            "Model whose confusions are mined: a LoRA adapter directory, or a "
+            "from-scratch experiment directory (with encoder/ + tokenizer/). "
+            "Hard negatives are relative to a model, so this should be the model "
+            "about to be retrained"
         ),
     )
 
@@ -1228,7 +1230,11 @@ def _run_mine_pairs(args: argparse.Namespace) -> int:
 
 def _run_mine_negatives(args: argparse.Namespace) -> int:
     """
-    Mine hard negatives against an adapter, and report what was thrown away.
+    Mine hard negatives against a model, and report what was thrown away.
+
+    The model can be a LoRA adapter or a from-scratch experiment directory;
+    ``--adapter`` routes on shape the same way ``evaluate`` does, so the
+    same command mines against either kind.
 
     Unlike ``mine-pairs`` this cannot stream. The candidate pool is the
     pair set's own positives, so every pair has to be resident and
@@ -1245,8 +1251,9 @@ def _run_mine_negatives(args: argparse.Namespace) -> int:
         from multilingual_embedding.pipelines.search import SemanticSearchPipeline
     except ImportError as error:  # pragma: no cover - depends on the install
         print(
-            f"error: mining hard negatives needs a loadable adapter ({error.name} is "
-            "missing). Install it with: uv sync --extra neural --extra pretrained",
+            f"error: mining hard negatives needs a loadable model ({error.name} is "
+            "missing). Install it with: uv sync --extra neural (add --extra "
+            "pretrained to mine against a LoRA adapter)",
             file=sys.stderr,
         )
 
@@ -1264,10 +1271,22 @@ def _run_mine_negatives(args: argparse.Namespace) -> int:
 
     print(f"Read {len(pairs):,} pairs from {source}")
 
-    pipeline = SemanticSearchPipeline.from_adapter(
-        args.adapter,
-        local_files_only=args.local_files_only,
-    )
+    target = Path(args.adapter).expanduser()
+
+    # Hard negatives are relative to a model, and that model can be either
+    # a fine-tuned adapter or a from-scratch experiment directory. Route on
+    # shape, exactly like `evaluate`: an experiment writes `encoder/` +
+    # `tokenizer/`, so if both are present serve the contextual encoder;
+    # otherwise treat the path as a LoRA adapter. `from_directory` exposes
+    # the same `.encoder` and `.prefixes` (symmetric `("", "")`) the miner
+    # reads, so nothing downstream has to know which kind it got.
+    if (target / "encoder").is_dir() and (target / "tokenizer").is_dir():
+        pipeline = SemanticSearchPipeline.from_directory(target)
+    else:
+        pipeline = SemanticSearchPipeline.from_adapter(
+            args.adapter,
+            local_files_only=args.local_files_only,
+        )
 
     query_prefix, passage_prefix = pipeline.prefixes
 

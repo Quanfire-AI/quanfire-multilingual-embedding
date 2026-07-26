@@ -130,7 +130,32 @@ raise `--set compute.gradient_checkpoint_chunk` via the profile.
 
 A resumed run reproduces the uninterrupted one bit for bit.
 
-### A4. Fine-tune (stage two) — checkpointed each epoch
+### A4. Mine hard negatives against the pretrained encoder (optional)
+
+In-batch negatives alone are enough for the first proof, so you can skip
+straight to A5 the first time. To sharpen the fine-tune, mine *hard*
+negatives — passages the pretrained encoder confuses for the answer — and
+attach them to the pair file:
+
+```bash
+.venv/bin/qfme mine-negatives \
+  --pairs data/pairs/mni.jsonl.gz \
+  --adapter artifacts/mni-scratch \
+  --output data/pairs/mni-hard.jsonl.gz \
+  --report reports/mni-negatives.json
+```
+
+`--adapter` takes the from-scratch experiment directory here, not a LoRA
+adapter: `mine-negatives` routes on directory shape (it sees `encoder/` +
+`tokenizer/` and serves the contextual encoder) exactly as `evaluate` and
+`finetune` do. Negatives are relative to a model, so mine against the
+encoder you are about to retrain — `artifacts/mni-scratch`. The report
+counts what each filter threw away and how many kept negatives outrank
+their own positive (the false-negative population, not a rate).
+
+Then point A5's `--pairs` at `data/pairs/mni-hard.jsonl.gz` instead.
+
+### A5. Fine-tune (stage two) — checkpointed each epoch
 
 ```bash
 .venv/bin/qfme finetune \
@@ -143,6 +168,8 @@ A resumed run reproduces the uninterrupted one bit for bit.
   --checkpoint-dir ckpts/mni-finetune
 ```
 
+If you mined hard negatives in A4, use `--pairs data/pairs/mni-hard.jsonl.gz`.
+
 `--name mni-finetuned` writes to `artifacts/mni-finetuned`, leaving the
 pretrained `artifacts/mni-scratch` untouched. The command prints
 **DID FINE-TUNING HELP?** with recall@1 before vs after. Exit code is
@@ -151,7 +178,7 @@ outcome, not an error.
 
 **Resume:** add `--resume-from ckpts/mni-finetune`.
 
-### A5. Evaluate the fine-tuned encoder by retrieval
+### A6. Evaluate the fine-tuned encoder by retrieval
 
 ```bash
 .venv/bin/qfme evaluate \
@@ -222,7 +249,26 @@ If an epoch gets cut short, resume with the identical command plus
 because a partial run is not a failure, and the next `--resume-from`
 continues the schedule unbroken.
 
-### B4. Fine-tune
+### B4. Mine hard negatives (optional, recommended at scale)
+
+At Hindi scale the hard negatives are worth the pass. Mine them against
+the pretrained encoder and attach them to the pair file:
+
+```bash
+.venv/bin/qfme mine-negatives \
+  --pairs data/pairs/hi.jsonl.gz \
+  --adapter artifacts/hi-scratch \
+  --output data/pairs/hi-hard.jsonl.gz \
+  --report reports/hi-negatives.json \
+  2>&1 | tee reports/hi-negatives.log
+```
+
+Mining cannot stream — every pair is resident and encoded before the
+first negative is found — so try `--limit 20000` once to see what the
+filters do before committing to the full set. If you mine, add
+`--set finetune.pairs=data/pairs/hi-hard.jsonl.gz` to B5.
+
+### B5. Fine-tune
 
 ```bash
 .venv/bin/qfme finetune \
@@ -235,9 +281,10 @@ continues the schedule unbroken.
 
 (`--source`, `--pairs`, `--data-provenance` all come from experiment.yaml
 here, so they need not be repeated. Add `--resume-from ckpts/hi-finetune`
-to continue.)
+to continue. If you mined negatives in B4, add
+`--set finetune.pairs=data/pairs/hi-hard.jsonl.gz`.)
 
-### B5. Evaluate
+### B6. Evaluate
 
 ```bash
 .venv/bin/qfme evaluate --experiment artifacts/hi-finetuned \
@@ -264,9 +311,15 @@ The fine-tuned encoder itself lives under `artifacts/<name>/` on the box
 `qfme search --experiment artifacts/hi-finetuned --query "..."` — no
 `--source`, no matrix; `from_directory` detects the contextual encoder.
 
-## Optional — hard negatives
+## Why the hard-negatives step is optional
 
-`finetune` already contrasts each query against every other passage in the
-batch (in-batch negatives), which is enough for a first result. To add
-*mined* hard negatives, run `qfme mine-negatives` against a saved model to
-attach them to the pair file before B4. Skip it for the proof run.
+`finetune` already contrasts each query against every other passage in its
+batch (in-batch negatives), which is enough for a first result — so A4 and
+B4 are marked optional and the proof run (A) can skip them. *Mined* hard
+negatives add the passages a random batch rarely supplies: ones the
+encoder actively confuses for the answer. They cost an extra encode-and-
+rank pass over the whole pair set (which cannot stream), and buy the most
+at scale, which is why B recommends them and A treats them as a sharpening
+step rather than a requirement. Either way, mine against the encoder you
+are about to retrain — `artifacts/<name>-scratch` — because a hard
+negative is only hard relative to a specific model.

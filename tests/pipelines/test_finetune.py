@@ -530,6 +530,49 @@ class TestInterruptibleFinetune:
         assert code == EXIT_SUCCESS
 
 
+@needs_neural
+class TestMineNegativesRouting:
+    """
+    ``qfme mine-negatives`` mines against a model, and a from-scratch
+    experiment directory is a model. It reaches the encoder by directory
+    shape — ``encoder/`` + ``tokenizer/`` — the same way ``evaluate`` and
+    ``finetune`` do, rather than only through the LoRA-adapter loader it
+    started with, so a neural-only install can mine hard negatives for the
+    encoder it is about to fine-tune.
+    """
+
+    def test_it_mines_against_a_from_scratch_encoder_directory(
+        self, source_directory: Path, pairs_path: Path, tmp_path: Path
+    ) -> None:
+        from multilingual_embedding.cli import EXIT_SUCCESS, main
+
+        output = tmp_path / "with-negatives.jsonl"
+
+        code = main(
+            [
+                "mine-negatives",
+                "--pairs",
+                str(pairs_path),
+                # The pretrained experiment directory, not a LoRA adapter:
+                # from_adapter would fail to load this; from_directory serves
+                # its contextual encoder with symmetric ("", "") prefixes.
+                "--adapter",
+                str(source_directory),
+                "--output",
+                str(output),
+                # A permissive floor so a toy untrained encoder still keeps
+                # something; the test proves the encoder was reached, not
+                # that the negatives are good.
+                "--min-similarity",
+                "-1.0",
+            ]
+        )
+
+        assert code == EXIT_SUCCESS
+
+        assert output.is_file()
+
+
 class TestEvaluateRouting:
     """
     ``qfme evaluate`` picks its instrument from the experiment's shape,
