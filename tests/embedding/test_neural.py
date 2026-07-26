@@ -332,6 +332,91 @@ class TestItActuallyLearns:
         json.dumps(report.to_dict())
 
 
+class TestCheckpointResume:
+    """
+    A contrastive run interrupted and resumed must equal one that never
+    stopped — the property that lets stage two survive a shared GPU box.
+
+    Stop after any epoch, come back to a *fresh* process over a *fresh*
+    encoder, and the remaining epochs proceed exactly as they would have:
+    same weights, same optimizer moments, same shuffle order, same dropout.
+    Anything less and a resumed run is a different, unproven run.
+    """
+
+    @staticmethod
+    def _config() -> ContrastiveConfig:
+        return ContrastiveConfig(epochs=4, batch_size=8, learning_rate=3e-3, seed=1)
+
+    def _train(self, pairs: list[TextPair], **kwargs: object) -> list[float]:
+        trainer = ContrastiveTrainer(build_encoder(), self._config())
+
+        return trainer.train(pairs, **kwargs).losses  # type: ignore[arg-type]
+
+    def test_resumed_run_matches_uninterrupted_run(self, tmp_path: Path) -> None:
+        pairs = TestItActuallyLearns._topic_pairs()
+
+        # The run that never stops — the reference the resumed run must
+        # reproduce to the last digit.
+        reference = self._train(pairs)
+
+        # The same run, cut short after epoch 1 and checkpointed...
+        partial = self._train(pairs, checkpoint_dir=tmp_path, stop_after_epoch=1)
+
+        assert len(partial) == 2
+
+        # ...then picked up by a brand-new trainer over a fresh encoder.
+        resumed = self._train(pairs, resume_from=tmp_path)
+
+        assert resumed == reference
+
+    def test_a_checkpoint_is_written_each_epoch(self, tmp_path: Path) -> None:
+        self._train(
+            TestItActuallyLearns._topic_pairs(),
+            checkpoint_dir=tmp_path,
+            stop_after_epoch=1,
+        )
+
+        checkpoint = tmp_path / "checkpoint.pt"
+
+        assert checkpoint.exists()
+
+        # The saved epoch is the next one to run: two done (0 and 1), so a
+        # resume starts at epoch 2.
+        payload = torch.load(checkpoint, weights_only=False)
+
+        assert payload["epoch"] == 2
+
+    def test_an_unreadable_format_version_is_refused(self, tmp_path: Path) -> None:
+        self._train(
+            TestItActuallyLearns._topic_pairs(),
+            checkpoint_dir=tmp_path,
+            stop_after_epoch=0,
+        )
+
+        checkpoint = tmp_path / "checkpoint.pt"
+
+        payload = torch.load(checkpoint, weights_only=False)
+
+        payload["format_version"] = 999
+
+        torch.save(payload, checkpoint)
+
+        with pytest.raises(ValidationError, match="format"):
+            self._train(TestItActuallyLearns._topic_pairs(), resume_from=tmp_path)
+
+    def test_a_mismatched_schedule_is_refused(self, tmp_path: Path) -> None:
+        # Checkpoint a run over the full pair set, then try to resume it
+        # against a shorter one. The saved step no longer lines up with the
+        # schedule, so the resume is refused rather than silently continued
+        # onto the wrong learning-rate curve.
+        pairs = TestItActuallyLearns._topic_pairs()
+
+        self._train(pairs, checkpoint_dir=tmp_path, stop_after_epoch=1)
+
+        with pytest.raises(ValidationError, match="schedule"):
+            self._train(pairs[:-4], resume_from=tmp_path)
+
+
 class TestPersistence:
     def test_round_trip_preserves_vectors(self, tmp_path: Path) -> None:
         encoder = build_encoder()

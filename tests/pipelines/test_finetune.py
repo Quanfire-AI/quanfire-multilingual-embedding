@@ -448,6 +448,88 @@ class TestCommandLine:
         assert (output / "cli-finetune" / "encoder" / "encoder.json").is_file()
 
 
+@needs_neural
+class TestInterruptibleFinetune:
+    """
+    Stage two survives a shared GPU box: checkpoint each epoch, resume in a
+    fresh process, finish the run. These prove the wiring from the CLI flag
+    through the pipeline to the trainer; the bit-exactness of the resume
+    itself is proven at the trainer level in test_neural.py.
+    """
+
+    def test_a_partial_run_writes_a_checkpoint_and_resumes_to_completion(
+        self, source_directory: Path, pairs_path: Path, tmp_path: Path
+    ) -> None:
+        from multilingual_embedding.pipelines.finetune import FinetunePipeline
+
+        checkpoints = tmp_path / "ckpts"
+
+        config = _finetune_experiment(source_directory, pairs_path, tmp_path / "run")
+
+        # Cut the two-epoch run short after epoch 0. A checkpoint lands...
+        FinetunePipeline(config, echo=lambda _: None).run(
+            checkpoint_dir=checkpoints,
+            stop_after_epoch=0,
+        )
+
+        assert (checkpoints / "checkpoint.pt").is_file()
+
+        # ...and a fresh pipeline picks it up and runs the run to its end,
+        # writing a servable encoder where serving looks for one.
+        result = FinetunePipeline(config, echo=lambda _: None).run(
+            resume_from=checkpoints,
+        )
+
+        assert result.encoder_directory is not None
+
+        assert (result.encoder_directory / "encoder.json").is_file()
+
+    def test_an_interrupted_cli_run_exits_success(
+        self, source_directory: Path, pairs_path: Path, tmp_path: Path
+    ) -> None:
+        """A run deliberately cut short is not a failure — it exits zero."""
+
+        from multilingual_embedding.cli import EXIT_SUCCESS, main
+
+        output = tmp_path / "artifacts"
+
+        code = main(
+            [
+                "finetune",
+                "--source",
+                str(source_directory),
+                "--pairs",
+                str(pairs_path),
+                "--name",
+                "interrupted",
+                "--data-provenance",
+                "synthetic",
+                "--train-pairs",
+                "18",
+                "--eval-pairs",
+                "9",
+                "--sample-pairs",
+                "27",
+                "--epochs",
+                "2",
+                "--learning-rate",
+                "5e-3",
+                "--checkpoint-dir",
+                str(tmp_path / "ckpts"),
+                "--stop-after-epoch",
+                "0",
+                "--set",
+                "compute.device=cpu",
+                "--set",
+                "compute.batch_size=8",
+                "--set",
+                f"output_directory={output}",
+            ]
+        )
+
+        assert code == EXIT_SUCCESS
+
+
 class TestEvaluateRouting:
     """
     ``qfme evaluate`` picks its instrument from the experiment's shape,

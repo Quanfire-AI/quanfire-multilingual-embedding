@@ -39,6 +39,7 @@ import math
 from collections.abc import Iterator, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
 
 import torch
@@ -48,6 +49,7 @@ from torch.nn import functional as F
 from multilingual_embedding.config.base import ComputeConfig
 from multilingual_embedding.core.exceptions import ValidationError
 from multilingual_embedding.core.logging import get_logger
+from multilingual_embedding.utils.filesystem import atomic_write_path, ensure_directory
 from multilingual_embedding.utils.validation import require_non_negative, require_positive
 
 from .encoder import autocast_for
@@ -63,6 +65,15 @@ __all__ = [
 ]
 
 _logger = get_logger(__name__)
+
+_CHECKPOINT_FILENAME = "checkpoint.pt"
+
+# Bumped when the checkpoint layout changes in a way that makes an older
+# file unreadable. A run resumed from an incompatible checkpoint would
+# restore the wrong state silently, so the version is checked, not trusted.
+# Kept independent of pretraining's version: the two stages checkpoint
+# different state and one's format moving should not invalidate the other's.
+_CHECKPOINT_VERSION = 1
 
 
 def decay_parameter_groups(
@@ -453,9 +464,46 @@ class ContrastiveTrainer:
 
         return self._config
 
-    def train(self, pairs: Sequence[TextPair]) -> TrainingReport:
+    def train(
+        self,
+        pairs: Sequence[TextPair],
+        *,
+        checkpoint_dir: str | Path | None = None,
+        resume_from: str | Path | None = None,
+        stop_after_epoch: int | None = None,
+    ) -> TrainingReport:
         """
         Fit the encoder and report what happened.
+
+        Stage two of the from-scratch path is long and a shared GPU box is
+        not always yours for its whole length, so the loop is built to be
+        interruptible, exactly as masked-language pretraining is. Pass
+        ``checkpoint_dir`` to write a rolling checkpoint at every epoch
+        boundary; pass ``resume_from`` to pick a run back up from one. A run
+        resumed from its own checkpoints produces bit-for-bit the losses an
+        uninterrupted run would have — the model, the optimizer, the dropout
+        stream, and the shuffle stream are all restored, and the
+        learning-rate schedule continues from the saved step.
+
+        Parameters
+        ----------
+        pairs:
+            The training pairs. When resuming, must be the same length as
+            the run that wrote the checkpoint — the schedule is computed
+            from it, so a different count would misalign the saved step.
+
+        checkpoint_dir:
+            Where to write ``checkpoint.pt`` after each epoch. ``None``
+            trains without checkpointing.
+
+        resume_from:
+            A checkpoint file, or a directory holding ``checkpoint.pt``, to
+            restore before training. ``None`` starts fresh.
+
+        stop_after_epoch:
+            Stop after finishing this epoch index (0-based), modelling an
+            interruption. The learning-rate schedule still spans the full
+            ``config.epochs``, so a later resume continues it unbroken.
 
         Raises
         ------
@@ -465,7 +513,9 @@ class ContrastiveTrainer:
             negatives has nothing to contrast against, so its loss is
             identically zero — which looks like success and teaches
             nothing. A single pair *with* mined negatives is a real
-            training example and is allowed.
+            training example and is allowed. Also raised if a resumed
+            checkpoint was written for a different schedule or an
+            incompatible format.
         """
 
         if len(pairs) < 2 and not any(pair.negatives for pair in pairs):
@@ -477,10 +527,6 @@ class ContrastiveTrainer:
             )
 
         config = self._config
-
-        generator = torch.Generator().manual_seed(config.seed)
-
-        torch.manual_seed(config.seed)
 
         model = self._encoder.train_mode()
 
@@ -497,15 +543,35 @@ class ContrastiveTrainer:
 
         warmup_steps = int(total_steps * config.warmup_ratio)
 
-        report = TrainingReport(epochs=config.epochs, pairs=len(pairs))
-
-        step = 0
-
         # Resolved once rather than per step. It also emits a warning when
         # the request cannot be honoured, which should be said once.
         precision = autocast_for(device, config.precision)
 
-        for epoch in range(config.epochs):
+        if resume_from is not None:
+            report, start_epoch, step, generator = self._load_checkpoint(
+                resume_from,
+                model=model,
+                optimizer=optimizer,
+                pairs=len(pairs),
+                device=device,
+            )
+        else:
+            # A fresh run seeds both streams from the one configured seed:
+            # the global RNG dropout draws from, and a dedicated generator
+            # the per-epoch shuffle draws from. Keeping the shuffle on its
+            # own generator is what lets a resumed run restore the ordering
+            # to exactly where it left off without disturbing dropout.
+            torch.manual_seed(config.seed)
+
+            generator = torch.Generator().manual_seed(config.seed)
+
+            report = TrainingReport(epochs=config.epochs, pairs=len(pairs))
+
+            start_epoch = 0
+
+            step = 0
+
+        for epoch in range(start_epoch, config.epochs):
             epoch_losses: list[float] = []
 
             for batch in self._batches(pairs, generator):
@@ -555,6 +621,21 @@ class ContrastiveTrainer:
                 extra={"epoch": epoch + 1, "loss": round(mean_loss, 6)},
             )
 
+            if checkpoint_dir is not None:
+                self._save_checkpoint(
+                    checkpoint_dir,
+                    model=model,
+                    optimizer=optimizer,
+                    generator=generator,
+                    report=report,
+                    next_epoch=epoch + 1,
+                    step=step,
+                    pairs=len(pairs),
+                )
+
+            if stop_after_epoch is not None and epoch >= stop_after_epoch:
+                break
+
         report.steps = step
 
         report.initial_loss = report.losses[0]
@@ -568,6 +649,128 @@ class ContrastiveTrainer:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    def _save_checkpoint(
+        self,
+        checkpoint_dir: str | Path,
+        *,
+        model: nn.Module,
+        optimizer: torch.optim.Optimizer,
+        generator: torch.Generator,
+        report: TrainingReport,
+        next_epoch: int,
+        step: int,
+        pairs: int,
+    ) -> None:
+        """
+        Write a rolling checkpoint holding everything a resume needs.
+
+        One file, replaced atomically each epoch: the newest checkpoint is
+        the only one worth keeping, and a half-written one would be loaded
+        as gospel by the next run, so it is renamed into place rather than
+        streamed over the live file. The saved state is the full run — the
+        model and optimizer, the dropout and shuffle streams, the step
+        counter that drives the learning-rate schedule, and the losses so
+        far — plus the schedule the checkpoint belongs to, so a mismatched
+        resume is refused rather than silently misaligned.
+        """
+
+        target = ensure_directory(checkpoint_dir) / _CHECKPOINT_FILENAME
+
+        cuda_rng = (
+            torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+        )
+
+        payload = {
+            "format_version": _CHECKPOINT_VERSION,
+            "epoch": next_epoch,
+            "step": step,
+            "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "torch_rng": torch.get_rng_state(),
+            "cuda_rng": cuda_rng,
+            "shuffle_rng": generator.get_state(),
+            "losses": list(report.losses),
+            "pairs": pairs,
+            "epochs": self._config.epochs,
+        }
+
+        with atomic_write_path(target) as temporary:
+            torch.save(payload, temporary)
+
+    def _load_checkpoint(
+        self,
+        resume_from: str | Path,
+        *,
+        model: nn.Module,
+        optimizer: torch.optim.Optimizer,
+        pairs: int,
+        device: torch.device,
+    ) -> tuple[TrainingReport, int, int, torch.Generator]:
+        """
+        Restore a run from a checkpoint and return where to carry on from.
+
+        Returns the report seeded with the losses so far, the epoch to
+        resume at, the step the learning-rate schedule had reached, and the
+        shuffle generator restored to its saved position.
+
+        Raises
+        ------
+        ValidationError
+            If the checkpoint's format is unrecognised, or it was written
+            for a different pair count or epoch count — either of which
+            would resume onto a schedule the saved step no longer matches.
+        """
+
+        path = Path(resume_from).expanduser()
+
+        if path.is_dir():
+            path = path / _CHECKPOINT_FILENAME
+
+        # A local file this trainer wrote itself, so full unpickling is
+        # safe and necessary — the payload holds optimizer and RNG state,
+        # not just weights.
+        checkpoint: dict[str, Any] = torch.load(path, weights_only=False)
+
+        version = checkpoint.get("format_version")
+
+        if version != _CHECKPOINT_VERSION:
+            raise ValidationError(
+                "checkpoint format is not readable by this version",
+                found=version,
+                expected=_CHECKPOINT_VERSION,
+            )
+
+        if checkpoint["pairs"] != pairs or checkpoint["epochs"] != self._config.epochs:
+            raise ValidationError(
+                "checkpoint was written for a different training schedule",
+                checkpoint_pairs=checkpoint["pairs"],
+                pairs=pairs,
+                checkpoint_epochs=checkpoint["epochs"],
+                epochs=self._config.epochs,
+            )
+
+        model.load_state_dict(checkpoint["model"])
+
+        optimizer.load_state_dict(checkpoint["optimizer"])
+
+        # Restore both streams to exactly where the saved epoch left them,
+        # so the continuation draws the same dropout and shuffles the pairs
+        # into the same order an uninterrupted run would have.
+        torch.set_rng_state(checkpoint["torch_rng"])
+
+        if checkpoint["cuda_rng"] is not None and torch.cuda.is_available():
+            torch.cuda.set_rng_state_all(checkpoint["cuda_rng"])
+
+        generator = torch.Generator()
+
+        generator.set_state(checkpoint["shuffle_rng"])
+
+        report = TrainingReport(epochs=self._config.epochs, pairs=pairs)
+
+        report.losses = list(checkpoint["losses"])
+
+        return report, int(checkpoint["epoch"]), int(checkpoint["step"]), generator
 
     def _step(
         self,

@@ -32,6 +32,13 @@ on. And a probe of anchor vectors is re-encoded either side of training,
 so a run can tell "the fine-tune did not help" apart from "the weights
 did not move" — the two have opposite remedies.
 
+Like stage one, the contrastive step is interruptible: ``run`` forwards a
+``checkpoint_dir``/``resume_from`` pair through to
+:meth:`ContrastiveTrainer.train`, so a long fine-tune on a shared GPU box
+can be checkpointed each epoch and resumed bit-for-bit. The baseline is
+re-scored from the untouched pretrained source on every resume, so the
+"number to beat" is reproduced rather than reloaded.
+
 Torch is imported inside :meth:`FinetunePipeline.run` rather than at
 module scope, because the neural stack is an optional extra and the
 config and pipeline layers must stay importable without it.
@@ -265,9 +272,38 @@ class FinetunePipeline:
 
         return self.config.compute
 
-    def run(self) -> FinetuneResult:
+    def run(
+        self,
+        *,
+        checkpoint_dir: str | Path | None = None,
+        resume_from: str | Path | None = None,
+        stop_after_epoch: int | None = None,
+    ) -> FinetuneResult:
         """
         Score, fine-tune, score again, and write a servable encoder.
+
+        Stage two is a long run on a shared GPU box, so — like ``qfme
+        pretrain`` — the contrastive step is interruptible. Pass
+        ``checkpoint_dir`` to write a rolling checkpoint each epoch and
+        ``resume_from`` to pick one back up; the baseline is re-scored from
+        the untouched pretrained source each time, so a resumed run
+        reproduces the number it would have had uninterrupted.
+
+        Parameters
+        ----------
+        checkpoint_dir:
+            Where the contrastive trainer writes ``checkpoint.pt`` after
+            each epoch. ``None`` fine-tunes without checkpointing.
+
+        resume_from:
+            A checkpoint file, or a directory holding one, to restore
+            before training. The pair set and schedule must match the run
+            that wrote it, or the resume is refused.
+
+        stop_after_epoch:
+            Stop after finishing this 0-based epoch index, modelling an
+            interruption. The learning-rate schedule still spans the full
+            configured epoch count, so a later resume continues it unbroken.
 
         Raises
         ------
@@ -354,7 +390,12 @@ class FinetunePipeline:
                 weight_decay=settings.weight_decay,
                 seed=settings.seed or 0,
             ),
-        ).train([TextPair(pair.anchor, pair.positive, pair.negatives) for pair in train])
+        ).train(
+            [TextPair(pair.anchor, pair.positive, pair.negatives) for pair in train],
+            checkpoint_dir=checkpoint_dir,
+            resume_from=resume_from,
+            stop_after_epoch=stop_after_epoch,
+        )
 
         if report.measurable:
             self.echo(f"    loss {report.initial_loss:.4f} -> {report.final_loss:.4f}")
@@ -491,7 +532,18 @@ class FinetunePipeline:
         return train, held, facts
 
 
-def finetune(config: ExperimentConfig, *, echo: Callable[[str], None] = print) -> FinetuneResult:
+def finetune(
+    config: ExperimentConfig,
+    *,
+    echo: Callable[[str], None] = print,
+    checkpoint_dir: str | Path | None = None,
+    resume_from: str | Path | None = None,
+    stop_after_epoch: int | None = None,
+) -> FinetuneResult:
     """Run one fine-tuning experiment. Convenience wrapper over the pipeline."""
 
-    return FinetunePipeline(config, echo=echo).run()
+    return FinetunePipeline(config, echo=echo).run(
+        checkpoint_dir=checkpoint_dir,
+        resume_from=resume_from,
+        stop_after_epoch=stop_after_epoch,
+    )

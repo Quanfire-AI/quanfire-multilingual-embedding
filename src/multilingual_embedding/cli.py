@@ -25,7 +25,9 @@ fresh contextual encoder with a masked-language objective, and is
 interruptible, so a long run on a shared GPU box can be checkpointed each
 epoch and resumed bit for bit. ``finetune`` is stage two of that path: it
 contrastively fine-tunes a pretrained encoder into a usable sentence
-embedder and writes a servable model.
+embedder and writes a servable model, and it is interruptible the same
+way — ``--checkpoint-dir`` and ``--resume-from`` carry a long contrastive
+run across a shared box exactly as they carry a pretraining run.
 
 Four of them exit non-zero on a result rather than on an error, so a
 data pipeline can gate on them. ``validate`` audits a corpus before
@@ -736,6 +738,35 @@ def _add_finetune_parser(subparsers: Any) -> None:
 
     parser.add_argument("--output", type=Path, help="Write the full comparison as JSON")
 
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=Path,
+        help=(
+            "Write checkpoint.pt here after each contrastive epoch, so a long "
+            "run on a shared GPU box can be resumed (omit to run without "
+            "checkpointing)"
+        ),
+    )
+
+    parser.add_argument(
+        "--resume-from",
+        type=Path,
+        help=(
+            "A checkpoint file, or a directory holding one, to restore before "
+            "fine-tuning. The pair set and schedule must match the run that wrote it"
+        ),
+    )
+
+    parser.add_argument(
+        "--stop-after-epoch",
+        type=int,
+        help=(
+            "Stop after finishing this 0-based epoch index. Models an "
+            "interruption; the schedule still spans the full configured epoch "
+            "count, so a later --resume-from continues it unbroken"
+        ),
+    )
+
 
 def _add_adapt_parser(subparsers: Any) -> None:
     parser = subparsers.add_parser(
@@ -1423,7 +1454,11 @@ def _run_finetune(args: argparse.Namespace) -> int:
 
     config = load_config(args.config, profile=args.profile, overrides=overrides)
 
-    result = FinetunePipeline(config).run()
+    result = FinetunePipeline(config).run(
+        checkpoint_dir=args.checkpoint_dir,
+        resume_from=args.resume_from,
+        stop_after_epoch=args.stop_after_epoch,
+    )
 
     print("\n" + "=" * 68)
 
@@ -1433,9 +1468,22 @@ def _run_finetune(args: argparse.Namespace) -> int:
 
     print(result.summary())
 
-    # Non-zero when the fine-tune did not beat the pretrained encoder it
-    # started from, so a pipeline that chains pretrain -> finetune ->
-    # deploy stops rather than shipping a model that made retrieval worse.
+    # A run deliberately cut short with --stop-after-epoch has not finished
+    # training, so its before/after comparison is not the verdict yet — it
+    # exits zero the way an interrupted pretrain does, because a partial run
+    # that will be resumed is not a failure.
+    interrupted = (
+        args.stop_after_epoch is not None
+        and args.stop_after_epoch < config.finetune.epochs - 1
+    )
+
+    if interrupted:
+        return EXIT_SUCCESS
+
+    # Otherwise non-zero when the fine-tune did not beat the pretrained
+    # encoder it started from, so a pipeline that chains pretrain ->
+    # finetune -> deploy stops rather than shipping a model that made
+    # retrieval worse.
     return EXIT_SUCCESS if result.helped else EXIT_ERROR
 
 
