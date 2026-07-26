@@ -94,6 +94,88 @@ def _saved_adapter(root: Path, *, query_prefix: str, passage_prefix: str) -> Pat
     )
 
 
+def _saved_encoder(root: Path) -> Path:
+    """
+    A from-scratch encoder directory — ``encoder/`` + ``tokenizer/``, no
+    ``adapter.json`` — the exact shape ``qfme pretrain`` and ``qfme
+    finetune`` write. Building it here rather than downloading keeps the
+    test offline and exercises the same loading path a deployment takes.
+    """
+
+    from multilingual_embedding.config.base import TokenizerConfig
+    from multilingual_embedding.embedding.neural import (
+        EncoderConfig,
+        NeuralTextEncoder,
+        TransformerEncoderModel,
+    )
+    from multilingual_embedding.tokenizer.tokenizer import SentencePieceTokenizer
+    from multilingual_embedding.tokenizer.trainer import SentencePieceTrainerAdapter
+
+    # A templated multilingual corpus, the same recipe the pretraining
+    # tests use — enough distinct pieces for a small vocabulary to train on.
+    templates = {
+        "en": (
+            ["The researcher", "A student", "The engineer"],
+            ["studies", "explains", "teaches"],
+            ["machine learning", "natural language", "the new model"],
+        ),
+        "hi": (
+            ["शोधकर्ता", "एक छात्र", "अभियंता"],
+            ["पढ़ता है", "समझाता है", "सिखाता है"],
+            ["मशीन लर्निंग", "प्राकृतिक भाषा", "नया मॉडल"],
+        ),
+    }
+
+    sentences: list[str] = []
+
+    for subjects, verbs, objects in templates.values():
+        for subject in subjects:
+            for verb in verbs:
+                for obj in objects:
+                    sentences.append(" ".join([subject, verb, obj] * 4))
+
+    experiment = root / "scratch"
+
+    tokenizer_directory = experiment / "tokenizer"
+
+    trainer = SentencePieceTrainerAdapter(
+        TokenizerConfig(vocab_size=80, character_coverage=0.9995)
+    )
+
+    model_path = trainer.train(sentences, tokenizer_directory)
+
+    tokenizer = SentencePieceTokenizer(model_path)
+
+    tokenizer.save(tokenizer_directory)
+
+    # One row past the vocabulary is the reserved mask id, exactly as the
+    # pretraining pipeline builds it. max_length is 32 on purpose: the card
+    # test asserts that number, which only reads true if it came off this
+    # encoder's own encoder.json rather than the adapter path's 512 default.
+    config = EncoderConfig(
+        vocabulary_size=tokenizer.vocabulary_size + 1,
+        dimension=32,
+        layers=2,
+        heads=4,
+        max_length=32,
+    )
+
+    torch.manual_seed(0)
+
+    encoder = NeuralTextEncoder(TransformerEncoderModel(config), tokenizer, device="cpu")
+
+    encoder.save(experiment / "encoder")
+
+    return experiment
+
+
+@pytest.fixture(scope="module")
+def scratch_encoder(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    root = tmp_path_factory.mktemp("scratch")
+
+    return _saved_encoder(root)
+
+
 @pytest.fixture(scope="module")
 def asymmetric_adapter(tmp_path_factory: pytest.TempPathFactory) -> Path:
     root = tmp_path_factory.mktemp("asymmetric")
@@ -375,6 +457,65 @@ class TestErrors:
         assert set(body["error"]) == {"message", "type", "param"}
 
         assert body["error"]["type"] == "invalid_request_error"
+
+
+class TestServingAFromScratchEncoder:
+    """
+    The endpoint serves an ``encoder/`` directory, not only a LoRA adapter.
+
+    A from-scratch or fine-tuned encoder carries no ``adapter.json``, so
+    the old server — which loaded through ``from_adapter`` unconditionally
+    — failed to start on the very artefact ``qfme finetune``'s help
+    promises ``qfme serve`` will load. These prove the promise is now kept:
+    the server routes on directory shape and answers over the encoder.
+    """
+
+    @pytest.fixture(scope="class")
+    def client(self, scratch_encoder: Path) -> TestClient:
+        return TestClient(create_app(ServingConfig(adapter_directory=scratch_encoder)))
+
+    def test_it_starts_and_answers(self, client: TestClient) -> None:
+        """The regression itself: a request that once could not be served."""
+
+        response = client.post("/v1/embeddings", json={"input": "tok5 tok6 tok7"})
+
+        assert response.status_code == 200, response.text
+
+        assert len(response.json()["data"]) == 1
+
+    def test_every_vector_has_the_model_dimension(self, client: TestClient) -> None:
+        body = client.post("/v1/embeddings", json={"input": ["one two", "three four"]}).json()
+
+        dimension = client.get("/v1/models").json()["data"][0]["dimension"]
+
+        assert dimension == 32
+
+        assert all(len(item["embedding"]) == dimension for item in body["data"])
+
+    def test_it_is_symmetric_so_needs_no_side(self, client: TestClient) -> None:
+        """
+        A from-scratch encoder was never trained with query/passage sides,
+        so it neither demands an ``input_type`` nor applies a prefix.
+        """
+
+        body = client.post("/v1/embeddings", json={"input": "tok5"}).json()
+
+        assert body["prefix_applied"] is None
+
+    def test_the_card_reports_the_encoders_own_context_limit(self, client: TestClient) -> None:
+        """
+        Read off this encoder's ``encoder.json`` (32), not the adapter
+        path's 512 default — proof the manifest was sourced from the right
+        artefact when the server routed to the contextual path.
+        """
+
+        card = client.get("/v1/models").json()["data"][0]
+
+        assert card["max_length"] == 32
+
+        assert card["query_prefix"] is None
+
+        assert card["passage_prefix"] is None
 
 
 class TestStartup:

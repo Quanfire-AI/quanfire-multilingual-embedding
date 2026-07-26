@@ -3,7 +3,11 @@ The embeddings endpoint.
 
 A web service over the artefact-loading pattern already in place, using
 the de facto industry-standard request and response schema so an existing
-client migrates by changing a base URL.
+client migrates by changing a base URL. It serves either kind of model
+this project produces — a LoRA adapter over a pretrained checkpoint, or a
+from-scratch / fine-tuned encoder written by ``qfme pretrain`` and
+``qfme finetune`` — routing on the directory's shape, so the same command
+serves both.
 
 **The decision this module exists to get right.** The standard schema has
 no field distinguishing a query from a passage. The models this project
@@ -64,7 +68,11 @@ class ServingConfig:
     Parameters
     ----------
     adapter_directory:
-        A directory written by ``save_adapter``.
+        The model to serve. Either a LoRA adapter directory written by
+        ``save_adapter``, or a from-scratch / fine-tuned experiment
+        directory holding ``encoder/`` + ``tokenizer/`` — the kind
+        ``qfme pretrain`` and ``qfme finetune`` write. The server routes
+        on shape, so the same flag serves both.
 
     model_id:
         The name clients send and receive. Defaults to the directory's
@@ -102,23 +110,49 @@ class _ServedModel:
     def __init__(self, config: ServingConfig) -> None:
         self.config = config
 
-        self.pipeline = SemanticSearchPipeline.from_adapter(
-            config.adapter_directory,
-            local_files_only=config.local_files_only,
-        )
+        directory = config.adapter_directory
+
+        # Route on shape, exactly as `evaluate` and `mine-negatives` do: a
+        # from-scratch or fine-tuned experiment writes `encoder/` +
+        # `tokenizer/` and carries no `adapter.json`; a LoRA adapter is the
+        # other case. Serving whichever was handed over is what makes
+        # `qfme finetune`'s own promise — that `qfme serve` loads the
+        # encoder it wrote — finally true, rather than a from_adapter call
+        # that fails on the missing adapter.json a moment later.
+        if (directory / "encoder").is_dir() and (directory / "tokenizer").is_dir():
+            self.pipeline = SemanticSearchPipeline.from_directory(directory)
+
+            # The encoder records its own limit and whether it normalises,
+            # in the same encoder.json the loader just read; take the card's
+            # numbers from there rather than from an adapter.json this model
+            # never wrote. A from-scratch encoder is symmetric, so it has no
+            # prefixes and --local-files-only is moot — nothing is fetched.
+            payload = json.loads(
+                (directory / "encoder" / "encoder.json").read_text(encoding="utf-8")
+            )
+
+            self.manifest = {
+                "max_length": payload["architecture"]["max_length"],
+                "normalize": payload.get("normalize", True),
+            }
+        else:
+            self.pipeline = SemanticSearchPipeline.from_adapter(
+                directory,
+                local_files_only=config.local_files_only,
+            )
+
+            # Read from the artefact rather than the encoder. max_length and
+            # normalize are recorded in adapter.json but are not part of the
+            # TextEncoder protocol, and a getattr fallback would publish a
+            # confident 0 for a model whose real limit is 256 — a model card
+            # that states a wrong number is worse than one that omits it.
+            self.manifest = json.loads(
+                (directory / "adapter.json").read_text(encoding="utf-8")
+            )
 
         self.query_prefix, self.passage_prefix = self.pipeline.prefixes
 
         self.model_id = config.resolved_model_id()
-
-        # Read from the artefact rather than the encoder. max_length and
-        # normalize are recorded in adapter.json but are not part of the
-        # TextEncoder protocol, and a getattr fallback would publish a
-        # confident 0 for a model whose real limit is 256 — a model card
-        # that states a wrong number is worse than one that omits it.
-        self.manifest = json.loads(
-            (config.adapter_directory / "adapter.json").read_text(encoding="utf-8")
-        )
 
     @property
     def is_asymmetric(self) -> bool:

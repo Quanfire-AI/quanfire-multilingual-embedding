@@ -968,10 +968,13 @@ def _add_evaluate_parser(subparsers: Any) -> None:
 def _add_serve_parser(subparsers: Any) -> None:
     parser = subparsers.add_parser(
         "serve",
-        help="Serve an adapter over HTTP",
+        help="Serve a model over HTTP behind an embeddings endpoint",
         description=(
-            "Serve an adapter behind an embeddings endpoint. Requires the "
-            "`serve` extra: uv sync --extra serve --extra pretrained"
+            "Serve a model behind an embeddings endpoint. The model can be a "
+            "LoRA adapter from `qfme adapt --save-adapter`, or a from-scratch / "
+            "fine-tuned encoder directory from `qfme pretrain` / `qfme finetune`; "
+            "the server routes on shape. Requires the `serve` extra: "
+            "uv sync --extra serve --extra pretrained"
         ),
     )
 
@@ -979,7 +982,12 @@ def _add_serve_parser(subparsers: Any) -> None:
         "--adapter",
         type=Path,
         required=True,
-        help="Adapter directory produced by `qfme adapt --save-adapter`",
+        help=(
+            "Model to serve: a LoRA adapter directory from `qfme adapt "
+            "--save-adapter`, or a from-scratch / fine-tuned experiment "
+            "directory (with encoder/ + tokenizer/) from `qfme pretrain` / "
+            "`qfme finetune`"
+        ),
     )
 
     parser.add_argument(
@@ -1776,7 +1784,7 @@ def _evaluate_contextual(args: argparse.Namespace, experiment: Path) -> int:
 
 
 def _run_serve(args: argparse.Namespace) -> int:
-    """Serve an adapter over HTTP until interrupted.
+    """Serve a model — a LoRA adapter or a from-scratch encoder — over HTTP.
 
     Binds the loopback address by default. The endpoint has no
     authentication and no rate limiting, so a default of ``0.0.0.0``
