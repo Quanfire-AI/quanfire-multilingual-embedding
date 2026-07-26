@@ -35,7 +35,8 @@ did not move" — the two have opposite remedies.
 Like stage one, the contrastive step is interruptible: ``run`` forwards a
 ``checkpoint_dir``/``resume_from`` pair through to
 :meth:`ContrastiveTrainer.train`, so a long fine-tune on a shared GPU box
-can be checkpointed each epoch and resumed bit-for-bit. The baseline is
+can be checkpointed each epoch and resumed onto the same trajectory —
+bit-for-bit on CPU, and on CUDA as close as the backend allows. The baseline is
 re-scored from the untouched pretrained source on every resume, so the
 "number to beat" is reproduced rather than reloaded.
 

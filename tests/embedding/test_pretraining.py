@@ -476,18 +476,29 @@ class TestCheckpointResume:
     """
 
     @staticmethod
-    def _config() -> MaskedLanguageConfig:
-        return MaskedLanguageConfig(epochs=4, batch_size=16, learning_rate=3e-3, seed=1)
+    def _config(**overrides: object) -> MaskedLanguageConfig:
+        settings: dict[str, object] = {
+            "epochs": 4,
+            "batch_size": 16,
+            "learning_rate": 3e-3,
+            "seed": 1,
+        }
+
+        settings.update(overrides)
+
+        return MaskedLanguageConfig(**settings)  # type: ignore[arg-type]
 
     def _train(
         self,
         corpus: list[str],
+        *,
+        config: MaskedLanguageConfig | None = None,
         **kwargs: object,
     ) -> tuple[list[float], list[float]]:
         trainer = MaskedLanguageModelTrainer(
             build_encoder(),
             mask_token_id=MASK_ID,
-            config=self._config(),
+            config=config or self._config(),
         )
 
         report = trainer.train(corpus, **kwargs)  # type: ignore[arg-type]
@@ -559,6 +570,37 @@ class TestCheckpointResume:
 
         with pytest.raises(ValidationError, match="schedule"):
             self._train(build_corpus()[:-2], resume_from=tmp_path)
+
+    def test_a_changed_batch_size_is_refused(self, tmp_path: object) -> None:
+        # Same corpus and epochs, but a different batch size changes the step
+        # count the schedule spans, so the saved step would anneal along the
+        # wrong curve. Corpus size and epochs alone would not have caught it.
+        corpus = build_corpus()
+
+        self._train(corpus, checkpoint_dir=tmp_path, stop_after_epoch=1)
+
+        with pytest.raises(ValidationError, match="schedule"):
+            self._train(corpus, config=self._config(batch_size=8), resume_from=tmp_path)
+
+    def test_a_changed_learning_rate_is_refused(self, tmp_path: object) -> None:
+        corpus = build_corpus()
+
+        self._train(corpus, checkpoint_dir=tmp_path, stop_after_epoch=1)
+
+        with pytest.raises(ValidationError, match="schedule"):
+            self._train(
+                corpus, config=self._config(learning_rate=1e-3), resume_from=tmp_path
+            )
+
+    def test_a_changed_warmup_ratio_is_refused(self, tmp_path: object) -> None:
+        corpus = build_corpus()
+
+        self._train(corpus, checkpoint_dir=tmp_path, stop_after_epoch=1)
+
+        with pytest.raises(ValidationError, match="schedule"):
+            self._train(
+                corpus, config=self._config(warmup_ratio=0.25), resume_from=tmp_path
+            )
 
 
 class TestConfigAndReport:

@@ -68,7 +68,11 @@ from multilingual_embedding.utils.validation import require_positive
 
 from .architecture import EncoderConfig, TransformerEncoderModel
 from .encoder import NeuralTextEncoder, autocast_for
-from .training import decay_parameter_groups
+from .training import (
+    decay_parameter_groups,
+    differing_schedule_fields,
+    schedule_signature,
+)
 
 __all__ = [
     "MaskedLanguageConfig",
@@ -91,7 +95,9 @@ _CHECKPOINT_FILENAME = "checkpoint.pt"
 # Bumped when the checkpoint layout changes in a way that makes an older
 # file unreadable. A run resumed from an incompatible checkpoint would
 # restore the wrong state silently, so the version is checked, not trusted.
-_CHECKPOINT_VERSION = 1
+# v2 records the full schedule signature (see schedule_signature) rather
+# than only documents and epochs.
+_CHECKPOINT_VERSION = 2
 
 
 class MaskedLanguageModelHead(nn.Module):
@@ -562,10 +568,13 @@ class MaskedLanguageModelTrainer:
         interruptible. Pass ``checkpoint_dir`` to write a rolling
         checkpoint at every epoch boundary; pass ``resume_from`` to pick a
         run back up from one. A run resumed from its own checkpoints
-        produces bit-for-bit the losses an uninterrupted run would have —
+        follows the same loss trajectory an uninterrupted run would have —
         the model, the optimizer, and every random stream are all
         restored, and the corpus ordering is a pure function of
-        ``(seed, epoch)`` rather than of how far the run had got.
+        ``(seed, epoch)`` rather than of how far the run had got. The match
+        is bit-for-bit on CPU; on CUDA it is as close as the backend's
+        non-deterministic kernels allow, well within the noise of a
+        different seed but not exact.
 
         Parameters
         ----------
@@ -869,8 +878,13 @@ class MaskedLanguageModelTrainer:
             "mask_rng": mask_generator.get_state(),
             "losses": list(report.losses),
             "accuracies": list(report.accuracies),
-            "documents": documents,
-            "epochs": self._config.epochs,
+            "schedule": schedule_signature(
+                count=documents,
+                epochs=self._config.epochs,
+                batch_size=self._config.batch_size,
+                warmup_ratio=self._config.warmup_ratio,
+                learning_rate=self._config.learning_rate,
+            ),
         }
 
         with atomic_write_path(target) as temporary:
@@ -896,8 +910,10 @@ class MaskedLanguageModelTrainer:
         ------
         ValidationError
             If the checkpoint's format is unrecognised, or it was written
-            for a different corpus size or epoch count — either of which
-            would resume onto a schedule the saved step no longer matches.
+            under a different schedule — a changed corpus size, epoch count,
+            batch size, warmup ratio or learning rate — any of which would
+            resume onto a curve the saved step no longer matches. See
+            :func:`schedule_signature`.
         """
 
         path = Path(resume_from).expanduser()
@@ -919,13 +935,22 @@ class MaskedLanguageModelTrainer:
                 expected=_CHECKPOINT_VERSION,
             )
 
-        if checkpoint["documents"] != documents or checkpoint["epochs"] != self._config.epochs:
+        current_schedule = schedule_signature(
+            count=documents,
+            epochs=self._config.epochs,
+            batch_size=self._config.batch_size,
+            warmup_ratio=self._config.warmup_ratio,
+            learning_rate=self._config.learning_rate,
+        )
+
+        drift = differing_schedule_fields(checkpoint.get("schedule", {}), current_schedule)
+
+        if drift:
             raise ValidationError(
                 "checkpoint was written for a different training schedule",
-                checkpoint_documents=checkpoint["documents"],
-                documents=documents,
-                checkpoint_epochs=checkpoint["epochs"],
-                epochs=self._config.epochs,
+                differing=", ".join(drift),
+                checkpoint_schedule=checkpoint.get("schedule"),
+                schedule=current_schedule,
             )
 
         model.load_state_dict(checkpoint["model"])

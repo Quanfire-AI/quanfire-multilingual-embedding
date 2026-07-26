@@ -36,7 +36,7 @@ is the usual starting point for sentence encoders and the default here.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -62,6 +62,8 @@ __all__ = [
     "Trainable",
     "TrainingReport",
     "decay_parameter_groups",
+    "differing_schedule_fields",
+    "schedule_signature",
 ]
 
 _logger = get_logger(__name__)
@@ -73,7 +75,9 @@ _CHECKPOINT_FILENAME = "checkpoint.pt"
 # restore the wrong state silently, so the version is checked, not trusted.
 # Kept independent of pretraining's version: the two stages checkpoint
 # different state and one's format moving should not invalidate the other's.
-_CHECKPOINT_VERSION = 1
+# v2 records the full schedule signature (see schedule_signature) rather
+# than only pairs and epochs.
+_CHECKPOINT_VERSION = 2
 
 
 def decay_parameter_groups(
@@ -107,6 +111,87 @@ def decay_parameter_groups(
         {"params": decayed, "weight_decay": weight_decay},
         {"params": undecayed, "weight_decay": 0.0},
     ]
+
+
+def schedule_signature(
+    *,
+    count: int,
+    epochs: int,
+    batch_size: int,
+    warmup_ratio: float,
+    learning_rate: float,
+) -> dict[str, Any]:
+    """
+    The knobs that decide *where in the schedule* a resumed step lands.
+
+    A checkpoint records the optimizer step it reached, not the shape of
+    the schedule that produced it. Resume the same step under a different
+    schedule and the learning rate at that step silently changes: the total
+    step count is ``ceil(count / batch_size) * epochs``, the warmup boundary
+    is ``warmup_ratio`` of it, and the peak is ``learning_rate`` — so a
+    smaller batch, an extra epoch, a different warmup or peak all move the
+    curve out from under the step the checkpoint restored. None of it
+    raises; the run just anneals along a curve it was never training on.
+
+    This is the signature the two ends compare. It is deliberately the set
+    that changes the curve and nothing cosmetic, so a resume is refused
+    only when it would actually diverge, not whenever the config was
+    touched. Shared by both trainers because the schedule maths is.
+    """
+
+    return {
+        "count": count,
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "warmup_ratio": warmup_ratio,
+        "learning_rate": learning_rate,
+    }
+
+
+def differing_schedule_fields(
+    saved: Mapping[str, Any],
+    current: Mapping[str, Any],
+) -> list[str]:
+    """
+    Which schedule knobs drift between a checkpoint and the run resuming it.
+
+    Integer knobs (``count``, ``epochs``, ``batch_size``) are compared
+    exactly. The float knobs (``warmup_ratio``, ``learning_rate``) go
+    through :func:`math.isclose`, so a value that round-tripped through the
+    checkpoint's serialisation and came back a bit shifted does not read as
+    a changed schedule and refuse a resume that is in fact identical.
+
+    Returns the drifting field names in a stable order, empty when the two
+    schedules agree. A missing key on either side counts as a difference,
+    which is what makes a v1 checkpoint (no signature at all) fail the
+    comparison rather than slip through it.
+    """
+
+    exact = ("count", "epochs", "batch_size")
+
+    approximate = ("warmup_ratio", "learning_rate")
+
+    differing: list[str] = []
+
+    for name in exact:
+        if saved.get(name) != current.get(name):
+            differing.append(name)
+
+    for name in approximate:
+        left = saved.get(name)
+        right = current.get(name)
+
+        # A missing value on either side counts as drift (a v1 checkpoint
+        # carries no signature at all); short-circuiting also keeps the
+        # None cases away from the float() and isclose() below.
+        if (
+            left is None
+            or right is None
+            or not math.isclose(float(left), float(right), rel_tol=1e-9, abs_tol=1e-12)
+        ):
+            differing.append(name)
+
+    return differing
 
 
 class Trainable(Protocol):
@@ -480,10 +565,16 @@ class ContrastiveTrainer:
         interruptible, exactly as masked-language pretraining is. Pass
         ``checkpoint_dir`` to write a rolling checkpoint at every epoch
         boundary; pass ``resume_from`` to pick a run back up from one. A run
-        resumed from its own checkpoints produces bit-for-bit the losses an
+        resumed from its own checkpoints follows the same loss trajectory an
         uninterrupted run would have — the model, the optimizer, the dropout
         stream, and the shuffle stream are all restored, and the
-        learning-rate schedule continues from the saved step.
+        learning-rate schedule continues from the saved step. The match is
+        bit-for-bit on CPU; on CUDA it is as close as the backend's
+        non-deterministic kernels allow, which is well within the noise of a
+        different seed but is not exact reproduction. Enabling
+        ``torch.use_deterministic_algorithms`` would close that gap at a
+        throughput cost and is left as a future opt-in rather than forced on
+        every run.
 
         Parameters
         ----------
@@ -691,8 +782,13 @@ class ContrastiveTrainer:
             "cuda_rng": cuda_rng,
             "shuffle_rng": generator.get_state(),
             "losses": list(report.losses),
-            "pairs": pairs,
-            "epochs": self._config.epochs,
+            "schedule": schedule_signature(
+                count=pairs,
+                epochs=self._config.epochs,
+                batch_size=self._config.batch_size,
+                warmup_ratio=self._config.warmup_ratio,
+                learning_rate=self._config.learning_rate,
+            ),
         }
 
         with atomic_write_path(target) as temporary:
@@ -718,8 +814,10 @@ class ContrastiveTrainer:
         ------
         ValidationError
             If the checkpoint's format is unrecognised, or it was written
-            for a different pair count or epoch count — either of which
-            would resume onto a schedule the saved step no longer matches.
+            under a different schedule — a changed pair count, epoch count,
+            batch size, warmup ratio or learning rate — any of which would
+            resume onto a curve the saved step no longer matches. See
+            :func:`schedule_signature`.
         """
 
         path = Path(resume_from).expanduser()
@@ -741,13 +839,22 @@ class ContrastiveTrainer:
                 expected=_CHECKPOINT_VERSION,
             )
 
-        if checkpoint["pairs"] != pairs or checkpoint["epochs"] != self._config.epochs:
+        current_schedule = schedule_signature(
+            count=pairs,
+            epochs=self._config.epochs,
+            batch_size=self._config.batch_size,
+            warmup_ratio=self._config.warmup_ratio,
+            learning_rate=self._config.learning_rate,
+        )
+
+        drift = differing_schedule_fields(checkpoint.get("schedule", {}), current_schedule)
+
+        if drift:
             raise ValidationError(
                 "checkpoint was written for a different training schedule",
-                checkpoint_pairs=checkpoint["pairs"],
-                pairs=pairs,
-                checkpoint_epochs=checkpoint["epochs"],
-                epochs=self._config.epochs,
+                differing=", ".join(drift),
+                checkpoint_schedule=checkpoint.get("schedule"),
+                schedule=current_schedule,
             )
 
         model.load_state_dict(checkpoint["model"])
@@ -914,11 +1021,17 @@ class ContrastiveTrainer:
         if len(batch) > 1 or any(pair.negatives for pair in batch):
             yield batch
 
-    @staticmethod
-    def _parameter_groups(model: nn.Module) -> list[dict[str, object]]:
-        """Decayed and undecayed groups; see :func:`decay_parameter_groups`."""
+    def _parameter_groups(self, model: nn.Module) -> list[dict[str, object]]:
+        """Decayed and undecayed groups; see :func:`decay_parameter_groups`.
 
-        return decay_parameter_groups(model, weight_decay=0.01)
+        The decay is the one the config carries, not a constant: a
+        ``ContrastiveConfig.weight_decay`` a caller set would otherwise be
+        silently ignored here while the pretraining trainer honoured its
+        own, so the same knob would mean different things on the two halves
+        of the from-scratch path.
+        """
+
+        return decay_parameter_groups(model, weight_decay=self._config.weight_decay)
 
     def _learning_rate(self, step: int, warmup_steps: int, total_steps: int) -> float:
         """Linear warmup followed by linear decay."""

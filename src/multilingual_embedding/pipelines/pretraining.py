@@ -24,8 +24,9 @@ can reproduce exactly.
 *It is interruptible.* A from-scratch run is long and a shared GPU box is
 not always yours for its whole length. Pass ``checkpoint_dir`` to write a
 rolling checkpoint each epoch and ``resume_from`` to pick one back up; a
-resumed run reproduces bit-for-bit the run an uninterrupted one would have
-produced. This is the pipeline built to be run on the training box.
+resumed run follows the same trajectory an uninterrupted one would have —
+bit-for-bit on CPU, and on CUDA as close as the backend's kernels allow.
+This is the pipeline built to be run on the training box.
 """
 
 from __future__ import annotations

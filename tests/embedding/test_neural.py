@@ -344,11 +344,26 @@ class TestCheckpointResume:
     """
 
     @staticmethod
-    def _config() -> ContrastiveConfig:
-        return ContrastiveConfig(epochs=4, batch_size=8, learning_rate=3e-3, seed=1)
+    def _config(**overrides: object) -> ContrastiveConfig:
+        settings: dict[str, object] = {
+            "epochs": 4,
+            "batch_size": 8,
+            "learning_rate": 3e-3,
+            "seed": 1,
+        }
 
-    def _train(self, pairs: list[TextPair], **kwargs: object) -> list[float]:
-        trainer = ContrastiveTrainer(build_encoder(), self._config())
+        settings.update(overrides)
+
+        return ContrastiveConfig(**settings)  # type: ignore[arg-type]
+
+    def _train(
+        self,
+        pairs: list[TextPair],
+        *,
+        config: ContrastiveConfig | None = None,
+        **kwargs: object,
+    ) -> list[float]:
+        trainer = ContrastiveTrainer(build_encoder(), config or self._config())
 
         return trainer.train(pairs, **kwargs).losses  # type: ignore[arg-type]
 
@@ -415,6 +430,99 @@ class TestCheckpointResume:
 
         with pytest.raises(ValidationError, match="schedule"):
             self._train(pairs[:-4], resume_from=tmp_path)
+
+    def test_a_changed_batch_size_is_refused(self, tmp_path: Path) -> None:
+        # Same pairs and epochs, but a different batch size changes the step
+        # count the learning-rate schedule is drawn over, so the saved step
+        # would anneal along the wrong curve. count and epochs alone would
+        # not have caught this — it is exactly what the widened guard adds.
+        pairs = TestItActuallyLearns._topic_pairs()
+
+        self._train(pairs, checkpoint_dir=tmp_path, stop_after_epoch=1)
+
+        with pytest.raises(ValidationError, match="schedule"):
+            self._train(
+                pairs,
+                config=self._config(batch_size=4),
+                resume_from=tmp_path,
+            )
+
+    def test_a_changed_learning_rate_is_refused(self, tmp_path: Path) -> None:
+        # The peak the schedule anneals from. Resuming a saved step under a
+        # different peak silently trains along a curve the checkpoint never
+        # belonged to.
+        pairs = TestItActuallyLearns._topic_pairs()
+
+        self._train(pairs, checkpoint_dir=tmp_path, stop_after_epoch=1)
+
+        with pytest.raises(ValidationError, match="schedule"):
+            self._train(
+                pairs,
+                config=self._config(learning_rate=1e-3),
+                resume_from=tmp_path,
+            )
+
+    def test_a_changed_warmup_ratio_is_refused(self, tmp_path: Path) -> None:
+        # Where warmup ends and decay begins. A different ratio moves the
+        # boundary out from under the saved step.
+        pairs = TestItActuallyLearns._topic_pairs()
+
+        self._train(pairs, checkpoint_dir=tmp_path, stop_after_epoch=1)
+
+        with pytest.raises(ValidationError, match="schedule"):
+            self._train(
+                pairs,
+                config=self._config(warmup_ratio=0.25),
+                resume_from=tmp_path,
+            )
+
+    def test_an_unchanged_schedule_still_resumes(self, tmp_path: Path) -> None:
+        # The guard must refuse only real drift, not any resume: the same
+        # schedule — down to the float knobs surviving a serialisation
+        # round-trip — still picks the run back up.
+        pairs = TestItActuallyLearns._topic_pairs()
+
+        reference = self._train(pairs)
+
+        self._train(pairs, checkpoint_dir=tmp_path, stop_after_epoch=1)
+
+        resumed = self._train(pairs, resume_from=tmp_path)
+
+        assert resumed == reference
+
+
+class TestWeightDecayReachesTheOptimizer:
+    """
+    A configured ``weight_decay`` must actually decay the weights.
+
+    The trainer once split its parameter groups with a hardcoded 0.01, so a
+    caller who set ``ContrastiveConfig.weight_decay`` to anything else was
+    silently ignored — the pretraining trainer honoured its own while this
+    one did not. These pin the value that ends up on the optimizer group to
+    the value on the config.
+    """
+
+    def test_configured_decay_is_the_one_on_the_decayed_group(self) -> None:
+        encoder = build_encoder()
+
+        trainer = ContrastiveTrainer(encoder, ContrastiveConfig(weight_decay=0.123))
+
+        groups = trainer._parameter_groups(encoder.train_mode())
+
+        # The decayed group carries the weight matrices; the other is the
+        # biases and norms, which are never decayed.
+        decayed = next(group for group in groups if group["weight_decay"] != 0.0)
+
+        assert decayed["weight_decay"] == pytest.approx(0.123)
+
+    def test_a_zero_decay_config_leaves_every_group_undecayed(self) -> None:
+        encoder = build_encoder()
+
+        trainer = ContrastiveTrainer(encoder, ContrastiveConfig(weight_decay=0.0))
+
+        groups = trainer._parameter_groups(encoder.train_mode())
+
+        assert all(group["weight_decay"] == 0.0 for group in groups)
 
 
 class TestPersistence:
