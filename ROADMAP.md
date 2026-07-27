@@ -335,6 +335,45 @@ It is a diagnostic, not a score. Every pair mined here has both sides in one lan
 a separated space is the expected outcome; a value near 1.0 clears the precondition for
 cross-lingual retrieval and demonstrates nothing beyond it.
 
+#### The aligned miner closes the row, and the adapter fails the test it opened — 27 July 2026
+
+`qfme mine-aligned` builds the parallel text the `Cross-lingual` row needed: it joins two
+language corpora through a Wikipedia `langlinks` dump, so an anchor in one language is
+paired with the human-written article on the same subject in another. The join is the whole
+risk — a mis-parsed SQL tuple or a title that normalises differently on the two sides
+silently shrinks the set with nothing to point at — so the langlinks parser and the
+normalise-both-sides lookup are tested against the punctuation and escapes that break the
+naïve approach, and the statistics count *why* each source document failed to align.
+
+Run over the Hindi and Tamil dumps it aligned **32,166 of 118,571 Hindi articles (27.1%)**
+into **121,383 cross-script pairs**, mean token overlap **0.014** — genuinely zero shared
+units, which is the point. This is the first parallel set the project has produced, and the
+first honest cross-lingual retrieval number it can report.
+
+That number is a **caution, not a win.** Scored on a seeded 1,980-pair hi↔ta pool (both
+directions, identical pool for all three models, unit vectors, degenerate encodings
+dropped):
+
+| model | recall@1 | recall@10 | MRR |
+| --- | --- | --- | --- |
+| published `intfloat/multilingual-e5-small` | **0.5187** | 0.800 | 0.621 |
+| `indic-b-baseline` (LoRA, in-batch negatives) | 0.4141 | 0.722 | 0.520 |
+| `indic-b-hardneg` (LoRA + mined negatives) | 0.3768 | 0.697 | 0.492 |
+
+The adaptation that *raised* same-language Indic retrieval by ~30% (0.4952 → 0.6439)
+**lowers** cross-lingual retrieval by ~10 points against the base it started from, and the
+hard negatives lower it again. Two shifts confound the result and both point the same way:
+the eval is cross-**script** (the adapter trained only within a language) and out-of-**domain**
+(the adapter trained on MILPaC legal/QA, scored here on Wikipedia leads). The adapter also
+emits a zero vector on 20 of 2,000 cross-lingual inputs — a 1% collapse the base never has.
+
+The lesson is owned rather than buried: a within-language LoRA is not a free upgrade for a
+multilingual model. It sharpens the language it was trained on and dulls the cross-lingual
+matching that is the model's reason to exist. An adapter meant to serve cross-lingual
+traffic has to be *trained* on aligned pairs — which now exist — not adapted on monolingual
+ones and hoped to transfer. `reports/hi-ta-aligned.json` holds the join statistics;
+`reports/optionb/aligned-transfer.json` holds the scores.
+
 #### Hard negatives are mined, and the rate they cost is not claimed — 23 July 2026
 
 `qfme mine-negatives` ranks a pair set's own positives against each anchor with any
@@ -365,9 +404,31 @@ asserts no key in the statistics contains the string `false_negative`, because a
 named for the rate would be read as the rate and would be wrong by an unknown factor in an
 unknown direction.
 
-**Open.** Whether any of this improves `models/indic-v1` is unmeasured. The comparison —
-mine against the adapter, retrain, score against the same held-out set — needs the 4070 Ti
-and has not been run. Until it has, this is a capability, not a result.
+**Measured — 27 July 2026, and it is a wash.** The comparison has now been run on the
+4070 Ti. Two LoRA adapters, identical in every setting but one, trained on the same 40,000
+hi/ta pairs with the same seed and scored on the same held-out 2,000: in-batch negatives
+only (`indic-b-baseline`) reached recall@1 **0.6439** [CI 0.6226–0.6646], MRR 0.7101;
+in-batch **plus 168,000 mined hard negatives** (`indic-b-hardneg`) reached **0.6494**
+[CI 0.6282–0.6701], MRR 0.7082 — a +0.0055 shift on recall@1 (11 of 1,991 queries), a
+*negative* shift on MRR, and confidence intervals that overlap almost entirely. Hard
+negatives, on this pair distribution, moved nothing.
+
+The mining report says why. **47.2%** of the kept negatives scored above their own
+positive — the population false negatives are drawn from — and the audit sample confirms
+the character on inspection: an anchor "political career" whose mined negative is a second,
+equally-correct passage about the same person's political career. These are genuine false
+negatives, and re-mining with a tighter similarity ceiling does not remove them: dropping
+the ceiling from 0.95 to **0.80** rejected **12** additional negatives out of 168,000 and
+moved the suspicion rate by 0.08 points, because the false negatives sit at similarity
+~0.68, far below any sane ceiling. The ceiling is the wrong instrument. These positives are
+short Wikipedia leads with a low self-similarity (~0.57), so any on-topic passage outranks
+them; the fix is stronger positives, not filtered negatives, and that is a different pair
+set, not a different flag.
+
+So hard-negative mining is a working capability that this data does not reward. It is left
+in place — the objective is the strict generalisation of in-batch and costs nothing when a
+pair set carries no negatives — and it is not claimed as an improvement. Scores in
+`reports/optionb/`.
 
 ### Phase D — Serving
 
