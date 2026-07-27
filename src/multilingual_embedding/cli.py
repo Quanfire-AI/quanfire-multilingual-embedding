@@ -1,7 +1,7 @@
 """
 Command line interface.
 
-Installed as ``qfme``. Thirteen subcommands cover the lifecycle::
+Installed as ``qfme``. Fifteen subcommands cover the lifecycle::
 
     qfme stats    --source data/corpus.jsonl
     qfme validate --source data/corpus.jsonl
@@ -9,6 +9,9 @@ Installed as ``qfme``. Thirteen subcommands cover the lifecycle::
     qfme extract-judgments --source data/corpora/judgments --output judgments.jsonl.gz
     qfme prepare-eval --source data/corpora/milpac --output eval/milpac.jsonl.gz
     qfme mine-pairs --source hi.jsonl.gz --output pairs/hi.jsonl.gz
+    qfme mine-aligned --source hi.jsonl.gz --target ta.jsonl.gz \
+        --langlinks hiwiki-langlinks.sql.gz --source-language hi \
+        --target-language ta --output pairs/hi-ta.jsonl.gz
     qfme mine-negatives --pairs pairs/hi.jsonl.gz --adapter models/indic-v1 \
         --output pairs/hi-hard.jsonl.gz
     qfme train    --config experiments/demo.yaml
@@ -38,6 +41,17 @@ pretrained encoder it started from. ``pretrain`` fails when a multi-epoch
 run's loss did not fall — the objective learned nothing, and nothing
 should be fine-tuned on it. Each is a legitimate outcome and one nothing
 should deploy.
+
+``mine-pairs`` and ``mine-aligned`` are two miners for two questions.
+``mine-pairs`` draws anchor and positive from one article in one
+language, so it teaches and measures monolingual retrieval.
+``mine-aligned`` joins two language editions of the same article through
+a Wikipedia langlinks dump and emits the anchor in one language and the
+positive in the other, so the pair cannot be solved by string overlap —
+it is the only miner that produces genuinely cross-lingual retrieval,
+the gap the evaluation report flags. It prints the alignment rate
+prominently, because a silent join failure would quietly shrink the
+evaluation set to nothing.
 
 Every config-driven subcommand accepts ``--set key.path=value`` for ad
 hoc overrides, and ``--profile`` for the settings a machine dictates, so
@@ -127,6 +141,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_mine_pairs_parser(subparsers)
 
+    _add_mine_aligned_parser(subparsers)
+
     _add_mine_negatives_parser(subparsers)
 
     _add_train_parser(subparsers)
@@ -170,6 +186,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "extract-judgments": _run_extract_judgments,
         "prepare-eval": _run_prepare_eval,
         "mine-pairs": _run_mine_pairs,
+        "mine-aligned": _run_mine_aligned,
         "mine-negatives": _run_mine_negatives,
         "train": _run_train,
         "pretrain": _run_pretrain,
@@ -423,8 +440,7 @@ def _add_prepare_eval_parser(subparsers: Any) -> None:
     parser.add_argument(
         "--datasets",
         help=(
-            "Comma-separated MILPaC datasets to keep, e.g. Acts,IP,CCI-FAQ. "
-            "Omit to keep all three"
+            "Comma-separated MILPaC datasets to keep, e.g. Acts,IP,CCI-FAQ. Omit to keep all three"
         ),
     )
 
@@ -467,6 +483,82 @@ def _add_mine_pairs_parser(subparsers: Any) -> None:
         "--report",
         type=Path,
         help="Write the mining statistics as JSON to this path",
+    )
+
+
+def _add_mine_aligned_parser(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "mine-aligned",
+        help="Build cross-lingual pairs from two corpora and a langlinks dump",
+        description=(
+            "Mine aligned pairs whose anchor and positive are in different "
+            "languages but about the same subject, using Wikipedia's "
+            "interlanguage links to align them. The result measures true "
+            "cross-lingual retrieval (a Hindi query against a Tamil passage), "
+            "the gap the evaluation report flags. --langlinks is the SOURCE "
+            "wiki's dump, e.g. hiwiki-latest-langlinks.sql.gz."
+        ),
+    )
+
+    parser.add_argument(
+        "--source",
+        type=Path,
+        required=True,
+        help="Source-language corpus (its 'id' field must be the wiki page id)",
+    )
+
+    parser.add_argument(
+        "--target",
+        type=Path,
+        required=True,
+        help="Target-language corpus, indexed by title to align against",
+    )
+
+    parser.add_argument(
+        "--langlinks",
+        type=Path,
+        required=True,
+        help=(
+            "The SOURCE wiki's langlinks SQL dump (optionally gzipped); "
+            "rows to --target-language give the alignment"
+        ),
+    )
+
+    parser.add_argument(
+        "--source-language",
+        required=True,
+        help="Source language code, e.g. hi (labels pairs and fills a missing one)",
+    )
+
+    parser.add_argument(
+        "--target-language",
+        required=True,
+        help="Target language code, e.g. ta (selects which langlinks rows to keep)",
+    )
+
+    parser.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="Destination JSON Lines file; gzipped when it ends .gz",
+    )
+
+    parser.add_argument(
+        "--format",
+        default="auto",
+        choices=["auto", "text", "lines", "jsonl"],
+    )
+
+    parser.add_argument(
+        "--kinds",
+        default="aligned_title_lead,aligned_lead",
+        help="Comma-separated aligned pair sources to mine",
+    )
+
+    parser.add_argument(
+        "--report",
+        type=Path,
+        help="Write the mining and join statistics as JSON to this path",
     )
 
 
@@ -1249,6 +1341,123 @@ def _run_mine_pairs(args: argparse.Namespace) -> int:
     return EXIT_SUCCESS
 
 
+def _run_mine_aligned(args: argparse.Namespace) -> int:
+    """
+    Mine cross-lingual pairs, and report the join rate honestly.
+
+    The join rate is printed prominently: a low aligned share means the
+    langlinks dump and the target corpus disagree about titles, and a
+    pair set built from a bad join measures nothing useful. Better to see
+    it here than to wonder later why cross-lingual recall looks flat.
+    """
+
+    import gzip
+    import json as _json
+
+    from multilingual_embedding.corpus.aligned import (
+        AlignedPairConfig,
+        AlignedStatistics,
+        iter_aligned_documents,
+        iter_aligned_pairs,
+        to_aligned_document,
+    )
+    from multilingual_embedding.corpus.langlinks import build_target_title_map, normalize_title
+    from multilingual_embedding.corpus.reader import reader_for
+
+    kinds = tuple(kind.strip() for kind in args.kinds.split(",") if kind.strip())
+
+    config = AlignedPairConfig(kinds=kinds)
+
+    # Index the target corpus by folded title. Only the title, language
+    # and lead are kept, so the second corpus does not have to fit beside
+    # the first even when both are whole Wikipedias.
+    print(f"Indexing target corpus {args.target} by title ...")
+
+    target_reader = reader_for(args.target, format=args.format)
+
+    target_index = {}
+
+    for document in target_reader.iter_documents():
+        view = to_aligned_document(document, language=args.target_language)
+
+        if view is not None:
+            target_index[normalize_title(view.title)] = view
+
+    print(f"  {len(target_index)} target documents indexed")
+
+    title_map = build_target_title_map(args.langlinks, target_language=args.target_language)
+
+    print(f"  {len(title_map)} interlanguage links to {args.target_language}")
+
+    source_reader = reader_for(args.source, format=args.format)
+
+    destination = Path(args.output).expanduser()
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    opener = gzip.open if destination.suffix == ".gz" else open
+
+    statistics = AlignedStatistics()
+
+    aligned_documents = iter_aligned_documents(
+        source_reader.iter_documents(),
+        target_index,
+        title_map,
+        source_language=args.source_language,
+        statistics=statistics,
+    )
+
+    with opener(destination, "wt", encoding="utf-8") as handle:
+        for pair in iter_aligned_pairs(aligned_documents, config, statistics):
+            handle.write(_json.dumps(pair.to_record(), ensure_ascii=False) + "\n")
+
+    summary = statistics.to_dict()
+
+    print(f"\nWrote {statistics.produced} aligned pairs to {destination}")
+
+    print()
+
+    aligned_share = (
+        statistics.aligned / statistics.source_documents if statistics.source_documents else 0.0
+    )
+
+    print(
+        f"Aligned {statistics.aligned} of {statistics.source_documents} "
+        f"source documents ({aligned_share:.1%})"
+    )
+
+    print(
+        f"  unaligned: {statistics.missing_langlink} without an interlanguage link, "
+        f"{statistics.missing_target} whose target title was absent from the corpus"
+    )
+
+    if statistics.source_documents and aligned_share < 0.2:
+        # Not an error — a small wiki genuinely links little — but a
+        # reader should be told before trusting the pairs.
+        print(
+            "  note: fewer than 20% aligned; check that --langlinks is the SOURCE "
+            "wiki's dump and that the two corpora are the right languages"
+        )
+
+    print()
+
+    print(f"{'kind':<20}{'pairs':>9}{'mean overlap':>15}")
+
+    for kind, count in sorted(summary["by_kind"].items()):
+        overlap = summary["mean_overlap_by_kind"][kind]
+
+        print(f"{kind:<20}{count:>9}{overlap:>15.2f}")
+
+    if args.report:
+        from multilingual_embedding.utils.io import write_json
+
+        write_json(args.report, summary)
+
+        print(f"\nStatistics written to {args.report}")
+
+    return EXIT_SUCCESS
+
+
 def _run_mine_negatives(args: argparse.Namespace) -> int:
     """
     Mine hard negatives against a model, and report what was thrown away.
@@ -1517,8 +1726,7 @@ def _run_finetune(args: argparse.Namespace) -> int:
     # exits zero the way an interrupted pretrain does, because a partial run
     # that will be resumed is not a failure.
     interrupted = (
-        args.stop_after_epoch is not None
-        and args.stop_after_epoch < config.finetune.epochs - 1
+        args.stop_after_epoch is not None and args.stop_after_epoch < config.finetune.epochs - 1
     )
 
     if interrupted:
