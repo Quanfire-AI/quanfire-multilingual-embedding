@@ -23,9 +23,9 @@ from multilingual_embedding.pipelines.adaptation import prefixed
 from multilingual_embedding.pipelines.search import SemanticSearchPipeline
 from multilingual_embedding.embedding.neural import PretrainedTextEncoder
 
-EVAL = Path("data/pairs/indic-aligned-eval.jsonl.gz")
 CHECKPOINT = "intfloat/multilingual-e5-small"
 ADAPTER = sys.argv[1] if len(sys.argv) > 1 else "models/indic-aligned-multi"
+EVAL = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("data/pairs/indic-aligned-eval.jsonl.gz")
 OUT = Path("reports/optionb/indic-multilingual-score.json")
 
 MODELS = [
@@ -58,11 +58,17 @@ def valid(v: np.ndarray) -> np.ndarray:
     return np.isfinite(v).all(1) & (np.linalg.norm(v, axis=1) > 1e-8)
 
 
-def scores_for(a: np.ndarray, p: np.ndarray) -> np.ndarray:
+def scores_for(a: np.ndarray, p: np.ndarray, self_mask: np.ndarray | None = None) -> np.ndarray:
     a = a / np.linalg.norm(a, axis=1, keepdims=True)
     p = p / np.linalg.norm(p, axis=1, keepdims=True)
     sim = a @ p.T
     n = len(a)
+    # A symmetric X<->Y eval reuses passages as both queries and candidates, so a
+    # query can match its own identical text at sim=1.0 and bury the true positive.
+    # Mask any candidate whose text is identical to the query (never the diagonal:
+    # anchor and positive are different-language passages, so their ids differ).
+    if self_mask is not None:
+        sim = np.where(self_mask, -np.inf, sim)
     own = sim[np.arange(n), np.arange(n)]
     return (sim >= own[:, None]).sum(1) - 1  # pessimistic ranks
 
@@ -110,9 +116,18 @@ def main() -> int:
     print(f"\nscoring {int(good.sum())} pairs valid under all models "
           f"(dropped {len(held)-int(good.sum())})\n", flush=True)
 
+    # self-mask: candidate j is identical text to query i (id-based, cheap)
+    anc_kept = [t for t, g in zip(anchors, good) if g]
+    pos_kept = [t for t, g in zip(positives, good) if g]
+    ids = {t: i for i, t in enumerate(dict.fromkeys(anc_kept + pos_kept))}
+    anc_id = np.array([ids[t] for t in anc_kept])
+    pos_id = np.array([ids[t] for t in pos_kept])
+    self_mask = anc_id[:, None] == pos_id[None, :]
+    np.fill_diagonal(self_mask, False)  # never mask the true positive
+
     results = {}
     for name, (a, p) in vecs.items():
-        ranks = scores_for(a[good], p[good])
+        ranks = scores_for(a[good], p[good], self_mask)
         results[name] = summarize(ranks, lang_kept)
         o = results[name]["overall"]
         print(f"{name:20s} recall@1 {o['recall_at_1']:.4f}  recall@10 {o['recall_at_10']:.4f}  "
