@@ -118,6 +118,31 @@ recall@10, noise). That is a favourable Pareto trade — small, but real and fre
 The non-pivot mining did exactly what it was mined to do. `v1` remains in the
 lineage as the pivot-only baseline this was measured against.
 
+## A public benchmark, and the honest limit it exposes
+
+We scored v2 and base e5 on **FLORES-200 devtest** — 1,012 sentences, fully
+parallel across all ten languages, from a corpus (wikinews/web) we never
+trained on. Cross-lingual recall@1 over all directed language pairs:
+
+| FLORES-200 | all 90 pairs | non-Hindi 72 pairs |
+|---|---|---|
+| published e5 | **0.9866** | **0.9847** |
+| v2 | 0.9637 | 0.9609 |
+
+**v2 loses to base e5 here, in every language** (−0.016 to −0.056, Sanskrit
+worst). This is not a contradiction of our headline — it's a difficulty
+regime. FLORES is single-sentence bitext where base e5 is already **near
+ceiling (0.985)**; there is almost no headroom, and a LoRA adapter is a
+perturbation of the space, so on an already-solved task it can mostly only
+move down. Our own eval is *passage-level* retrieval with hard same-language
+distractors, where e5 sits at 0.79 and the adapter has room to help.
+
+The honest conclusion: **v2 is a specialist, not a drop-in e5 upgrade.** It
+improves hard, passage-level, in-domain cross-lingual retrieval; it does not
+improve — and slightly degrades — easy sentence-level bitext where the base
+model is already excellent for Indian languages. Any claim of a public-
+benchmark win would be false, and this table is why we don't make one.
+
 ## How to use it, given all that
 
 The adapter's value is *cross-script* retrieval, which base e5 was bad at. Base
