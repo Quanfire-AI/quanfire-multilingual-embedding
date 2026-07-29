@@ -480,9 +480,27 @@ negatives outrank their own positive (`suspicion_rate` 0.4981) — half the nega
 false. The absolute-ceiling guards can't catch them because they sit near the positive, not
 near a paraphrase ceiling, so a new **relative** guard was implemented: `--positive-margin`
 rejects any candidate scoring within a margin of its own positive, targeting the
-false-negative population directly. A gated re-mine and retrain against it is under test;
-its report will record the gated `suspicion_rate` and whether removing the false negatives
-recovers the in-domain loss without giving back the FLORES gain.
+false-negative population directly.
+
+**Gated re-mine and retrain — 29 July 2026, and the trade-off is gone.** Re-mining the same
+250k pairs with `--positive-margin` took `suspicion_rate` **0.4981 → 0.0000** (≈1.9M suspect
+candidates dropped) while keeping 84% of the negative volume. The adapter trained on those
+cleaned negatives, `models/indic-aligned-hn-gated`, was scored on the same three instruments:
+
+| instrument | control | hn (plain) | **hn-gated** |
+|---|---:|---:|---:|
+| X↔Y in-domain recall@1 | 0.8955 | 0.8801 | **0.8940** |
+| FLORES-200 non-Hindi recall@1 | 0.9606 | 0.9757 | **0.9768** |
+| hi-pivot mixed-pool recall@10 | 0.8839 | 0.8695 | **0.8870** |
+
+Gating **recovers the in-domain loss** (back to 0.8940, level with the 0.8955 control, where
+plain negatives sat at 0.8801) **and keeps the FLORES gain** (0.9768, above both control and
+plain hn). So the in-domain damage was the false negatives, not hard negatives as such:
+remove them with the relative guard and the regulariser benefit survives at no in-domain
+cost. Gated hard negatives are therefore a genuine improvement, not a wash — a candidate to
+reconsider for promotion over `-v2`, held back only because the margin over it is a fraction
+of a point in-domain against a larger out-of-domain lift, a call worth making deliberately.
+Consolidated scores in `reports/optionb/hn-verdict.json`.
 
 ### Phase D — Serving
 
