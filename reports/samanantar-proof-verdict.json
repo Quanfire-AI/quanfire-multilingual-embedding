@@ -1,0 +1,26 @@
+{
+  "published-e5": {
+    "flores_nonhi": 0.9846700702678963,
+    "flores_all": 0.9865832235397453,
+    "indomain_nonhi": 0.7874606632776567,
+    "indomain_all": 0.7874606632776567
+  },
+  "v2": {
+    "flores_nonhi": 0.9608860342555994,
+    "flores_all": 0.9636583223539745,
+    "indomain_nonhi": 0.8963931251512951,
+    "indomain_all": 0.8963931251512951
+  },
+  "samanantar-proof": {
+    "flores_nonhi": 0.9895833333333334,
+    "flores_all": 0.9909310496267018,
+    "indomain_nonhi": 0.8195352214960058,
+    "indomain_all": 0.8195352214960058
+  },
+  "mix": {
+    "flores_nonhi": 0.9825839920948618,
+    "flores_all": 0.9843653930610453,
+    "indomain_nonhi": 0.8917937545388526,
+    "indomain_all": 0.8917937545388526
+  }
+}

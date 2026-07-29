@@ -36,6 +36,8 @@ worth stating once:
 | `indic-aligned-c250k` | Control: same 250k pairs, no hard negatives | Ablation reference |
 | `indic-aligned-hn` | Same pairs plus mined hard negatives | Ablation; a trade-off, not promoted |
 | `indic-aligned-hn-gated` | Same pairs plus hard negatives mined with the `--positive-margin` guard (false negatives removed) | Ablation; the gated win — recovers in-domain *and* keeps FLORES |
+| `samanantar-proof` | Sentence-scale Samanantar en↔indic bitext only (240k, 8 langs) | Proof; closes FLORES (0.9896, beats base) but gives back in-domain |
+| `indic-aligned-mix` | ~50/50 blend of article pairs and Samanantar sentence pairs (490k) | **Both-at-once** — closes FLORES *and* holds in-domain; promotion candidate over v2 |
 
 The ten-language adapters raise cross-lingual retrieval from 0.7875 → 0.8964 recall@1
 in-domain. The plain hard-negative variant (`indic-aligned-hn`) trades ~1.5 points in-domain
@@ -43,9 +45,18 @@ in-domain. The plain hard-negative variant (`indic-aligned-hn`) trades ~1.5 poin
 (`indic-aligned-hn-gated`), mined with `--positive-margin` so its suspicion rate falls from
 0.498 to 0.000, removes that trade-off: it recovers in-domain to 0.8940 (level with control)
 *and* keeps the FLORES gain at 0.9768 — so gated hard negatives are a genuine improvement, a
-candidate to reconsider for promotion over v2. Full working is in the ROADMAP entries dated
-27–29 July 2026. When one of these is the canonical serving artefact, copy it into place
-exactly as below.
+candidate to reconsider for promotion over v2.
+
+The **public-bitext limit** — v2 regressing to 0.961 non-Hindi on FLORES-200 where base E5
+scores 0.985 — turned out to be a *scale* gap, not a ceiling: v2 trained on article-scale
+pairs, FLORES is a sentence benchmark. `samanantar-proof`, trained only on sentence-scale
+Samanantar en↔indic bitext, **beats base E5** on FLORES (0.9896) but mirrors the trade-off
+(in-domain 0.8195). A ~50/50 blend, `indic-aligned-mix`, collapses it: FLORES **0.9826**
+(level with base) *and* in-domain **0.8918** (within 0.5% of v2). It is the strongest single
+adapter on both instruments and the promotion candidate over v2, pending a production-scale
+Samanantar run (more data, a sa/ur sentence source, a tuned ratio). Full working is in the
+ROADMAP entries dated 27–29 July 2026. When one of these is the canonical serving artefact,
+copy it into place exactly as below.
 
 ## Then verify it
 

@@ -1,0 +1,44 @@
+# Mix run: hold BOTH scales at once.
+#
+# The proof showed sentence-only training (samanantar-proof) beats base E5
+# on FLORES (0.9896) but gives back v2's article-scale in-domain gain
+# (0.8964 -> 0.8195). This trains one adapter on a ~50/50 blend of
+# article-scale Wikipedia pairs (v2's corpus) and sentence-scale Samanantar
+# bitext, to test whether a single adapter can keep v2's in-domain strength
+# AND close FLORES. Everything else is held identical to v2.
+#
+#     .venv/bin/qfme adapt --config mix.yaml --profile configs/gpu.yaml
+name: indic-aligned-mix
+
+seed: 0
+
+adaptation:
+  checkpoint: intfloat/multilingual-e5-small
+
+  pairs: data/pairs/mix-article-sentence-490k.jsonl.gz
+
+  train_pairs: 486000
+  eval_pairs: 2000
+  sample_pairs: 490000
+
+  adaptation: in-distribution
+  train_kinds: ""
+  eval_kinds: ""
+  train_languages: ""
+  eval_languages: ""
+
+  epochs: 1
+  learning_rate: 0.0001
+
+  rank: 32
+  targets: query,value
+
+  pooling: mean
+  max_length: 256
+  query_prefix: ""
+  passage_prefix: ""
+
+  save_adapter: models/indic-aligned-mix
+  data_provenance: public
+
+  report: reports/indic-aligned-mix-adapt.json

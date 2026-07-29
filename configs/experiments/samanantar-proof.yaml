@@ -1,0 +1,49 @@
+# Proof slice: does sentence-scale public bitext close the FLORES gap?
+#
+# Everything here is held identical to indic-aligned-v2 (multi-np) so the
+# ONLY variable is the training corpus: v2 trained on article-scale
+# Wikipedia aligned pairs; this trains on sentence-scale Samanantar
+# en<->indic bitext (30k x 8 languages = 240k pairs, sa+ur absent from
+# Samanantar). FLORES-200 devtest is the held-out test, scored separately
+# and never trained on.
+#
+#     .venv/bin/qfme adapt --config samanantar-proof.yaml --profile configs/gpu.yaml
+name: samanantar-proof-240k
+
+seed: 0
+
+adaptation:
+  checkpoint: intfloat/multilingual-e5-small
+
+  pairs: data/pairs/samanantar-proof-240k.jsonl.gz
+
+  train_pairs: 236000
+  eval_pairs: 2000
+  sample_pairs: 240000
+
+  # Nothing varies between train and eval draw -> in-distribution, exactly
+  # v2's label. The real cross-lingual claim is tested on FLORES, outside.
+  adaptation: in-distribution
+  train_kinds: ""
+  eval_kinds: ""
+  train_languages: ""
+  eval_languages: ""
+
+  epochs: 1
+  learning_rate: 0.0001
+
+  # v2's LoRA shape, verbatim.
+  rank: 32
+  targets: query,value
+
+  pooling: mean
+  max_length: 256
+  # v2 trained with empty prefixes; the FLORES/xling scorers prepend
+  # "query: "/"passage: " at eval. Match v2 so the two are comparable.
+  query_prefix: ""
+  passage_prefix: ""
+
+  save_adapter: models/samanantar-proof
+  data_provenance: public
+
+  report: reports/samanantar-proof-adapt.json

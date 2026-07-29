@@ -24,9 +24,10 @@ are measured against. The second and third need the optional `neural` extra.
 **ten Indian languages** (Hindi, Bengali, Gujarati, Kannada, Malayalam, Marathi, Sanskrit,
 Tamil, Telugu, Urdu) beats base e5 on **all nine non-Hindi languages** for cross-lingual
 retrieval (recall@1 0.7875 → **0.8964**), training **0.50%** of its parameters into a
-**3.4 MB** artefact. Honest limit: on the FLORES-200 public benchmark — single-sentence
-bitext e5 has already near-solved — it *loses* to e5; it is an in-domain passage specialist,
-not a leaderboard entry. [Full numbers below.](#what-this-has-achieved)
+**3.4 MB** artefact. The one public-bitext limit — v2 losing to e5 on FLORES-200's
+single-sentence bitext — is now closed: a Samanantar sentence slice blended in
+(`indic-aligned-mix`) reaches FLORES parity with base (0.9826) while holding the in-domain
+gain. [Full numbers below.](#what-this-has-achieved)
 
 ---
 
@@ -169,10 +170,13 @@ recall@1 is well-posed:
 | non-Hindi X↔Y, within target language (recall@1, n=8,262) | 0.7875 | **0.8964** |
 | hi-pivot mixed-pool (recall@10) | 0.7495 | **0.8852** |
 
-The honest limit: on **FLORES-200**, a public sentence-aligned benchmark the model never
-trained on, base E5 already scores 0.985 non-Hindi recall@1 and the adapter moves to 0.961 —
-a small regression. The corpus wins decisively on its own Wikipedia distribution and does
-not (yet) transfer to arbitrary public bitext. That gap is recorded, not papered over.
+The one honest limit, now closed: on **FLORES-200**, a public sentence-aligned benchmark the
+model never trained on, base E5 scores 0.985 non-Hindi recall@1 and v2 moved to 0.961 — a
+small regression, because v2 trained on article-scale pairs and FLORES is single-sentence. It
+was a scale gap, not a ceiling. Blending in a held-out Samanantar sentence slice via
+`qfme ingest-parallel` closes it: sentence-only training beats base on FLORES (0.9896) and the
+`indic-aligned-mix` blend reaches parity (0.9826) while holding the in-domain gain (0.8918).
+Both directions are recorded, not papered over.
 
 ### The control: it is not learning to match strings
 

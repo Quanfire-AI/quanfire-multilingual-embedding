@@ -59,6 +59,19 @@ without a minor bump.
 
 ### Added
 
+- **The FLORES public-bitext limit, closed — 2026-07-29.** The one open exit criterion —
+  v2 regressing to 0.961 non-Hindi on FLORES-200 where base e5 scores 0.985 — was diagnosed
+  as a *scale* mismatch (article-trained adapter, sentence benchmark) and closed with the
+  `qfme ingest-parallel` path. A 240k proof slice of AI4Bharat Samanantar (en↔indic sentence
+  pairs, 8 languages; sa/ur absent upstream) was ingested and trained with v2's exact
+  hyperparameters. Sentence-only training (`samanantar-proof`) **beat base e5 on FLORES**
+  (0.9896) but mirrored v2's trade-off in-domain (0.8195); a ~50/50 article+sentence blend
+  (`indic-aligned-mix`) reaches FLORES parity with base (0.9826) *and* holds v2's in-domain
+  gain (0.8918) — one adapter strong on both, the promotion candidate over v2. Recipe:
+  `configs/experiments/samanantar-proof.yaml` and `mix.yaml`, `scratch_samanantar_prep.py`,
+  `scratch_samanantar_flores.py`; scores in `reports/samanantar-proof-verdict.json`. Scope is
+  proof-scale (one epoch, untuned ratio, no sa/ur sentence data); a production run awaits.
+
 - **`--positive-margin`, a relative hard-negative guard.** `qfme mine-negatives` gained a
   `positive_margin` setting (and `NegativeConfig.positive_margin`) that rejects any candidate
   scoring within a margin of, or above, its own positive. The existing guards are absolute —
