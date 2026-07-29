@@ -59,6 +59,32 @@ without a minor bump.
 
 ### Added
 
+- **`--positive-margin`, a relative hard-negative guard.** `qfme mine-negatives` gained a
+  `positive_margin` setting (and `NegativeConfig.positive_margin`) that rejects any candidate
+  scoring within a margin of, or above, its own positive. The existing guards are absolute —
+  a same-document check and a fixed similarity ceiling — and they miss the false negatives
+  that sit *near the positive* rather than near a paraphrase ceiling. The statistics gained
+  `rejected_outranks_positive` to count what the margin drops. Off by default (`None`), so
+  existing mining is byte-identical. Three tests pin the gate, the default-off behaviour, and
+  cosine-range validation.
+
+- **Ten-language cross-lingual adaptation, measured.** `qfme mine-aligned` was run across
+  ten Indian-language Wikipedia editions (hi, ta, bn, gu, kn, ml, mr, sa, te, ur) joined
+  through langlinks, and a single LoRA adapter trained on the resulting cross-lingual pairs.
+  Cross-lingual retrieval rises from **0.7875 → 0.8964 recall@1** (non-Hindi X↔Y, held out)
+  and hi-pivot recall@10 from 0.7495 → 0.8852. The public-bitext transfer limit is recorded:
+  on FLORES-200 (never trained on) the base scores 0.985 and the adapter 0.961, a small
+  regression. This reverses the earlier caution where a *within-language* adapter lowered
+  cross-lingual retrieval; the fix was training on aligned pairs, not adapting and hoping to
+  transfer. Consolidated scores in `reports/optionb/hn-verdict.json`.
+
+- **A hard-negative verdict, at scale.** The 250k-pair ablation makes mined negatives a
+  measured trade-off: ~−1.5 recall@1 in-domain, ~+1.5 on FLORES-200 — a regularizer, not an
+  improvement. The mining report shows why the in-domain cost is intrinsic here: 49.8% of the
+  kept negatives outrank their own positive. The canonical adapter carries no hard negatives;
+  the capability stays in place (it is the strict generalisation of in-batch and costs nothing
+  when a pair set has no negatives) and is not claimed as a win.
+
 - **A no-customer-text policy, asserted rather than described.**
   `tests/test_data_policy.py` requires every JSON Lines file git tracks — anywhere in the
   repository — to declare a `source` on every record, and every one of those to begin

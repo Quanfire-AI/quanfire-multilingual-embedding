@@ -259,6 +259,55 @@ class TestTheGuards:
         # to ``a1``. The guard is per anchor, not per candidate.
         assert statistics.rejected_too_similar == 2
 
+    def test_a_candidate_outranking_the_positive_is_rejected_by_the_margin(
+        self, encoder: LookupEncoder
+    ) -> None:
+        """
+        For ``a0`` the hardest candidate ``q1`` scores 0.985 while its own
+        positive ``q0`` scores only 0.500 — a suspected false negative the
+        absolute ceiling misses (0.985 sits under a 0.999 ceiling). The
+        relative guard drops it and falls through to ``q2`` (0.174), which
+        sits safely below the positive. Nothing that survives outranks its
+        positive, so the suspicion count is driven to zero.
+        """
+
+        mined, statistics = mine_negatives(
+            PAIRS,
+            encoder,
+            NegativeConfig(count=4, pool=8, maximum_similarity=0.999, positive_margin=0.0),
+        )
+
+        assert mined[0].negatives == ("q2",)
+
+        # a0 drops q1; a1 drops both q2 (0.985) and q0 (0.866) above its
+        # positive q1 (0.174). The guard is per anchor, per candidate.
+        assert statistics.rejected_outranks_positive == 3
+
+        assert statistics.outranking_the_positive == 0
+
+    def test_the_positive_margin_is_off_by_default(self, encoder: LookupEncoder) -> None:
+        """
+        With no margin, the hardest candidate survives even when it
+        outscores the positive — the old behaviour, unchanged.
+        """
+
+        mined, statistics = mine_negatives(
+            PAIRS,
+            encoder,
+            NegativeConfig(count=4, pool=8, maximum_similarity=0.999),
+        )
+
+        # q1 (0.985) outscores a0's positive q0 (0.500) yet survives.
+        assert mined[0].negatives[0] == "q1"
+
+        assert statistics.rejected_outranks_positive == 0
+
+        assert statistics.outranking_the_positive >= 1
+
+    def test_a_margin_outside_the_cosine_range_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            NegativeConfig(positive_margin=3.0)
+
     def test_a_candidate_below_the_floor_is_rejected(self, encoder: LookupEncoder) -> None:
         """
         ``q2`` scores 0.174, which in-batch sampling supplies for free.

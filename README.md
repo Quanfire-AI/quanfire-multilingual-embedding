@@ -20,10 +20,13 @@ are measured against. The second and third need the optional `neural` extra.
 
 **1499 tests · 94% coverage · `ruff` clean · `mypy --strict` clean · layer graph verified acyclic**
 
-**Proven on real data:** a published checkpoint adapted on mined Hindi and Tamil Wikipedia
-pairs beats itself by **+28.6% (Hindi)** and **+40.9% (Tamil)** recall@1 on held-out
-retrieval, training **0.50%** of its parameters into a **3.4 MB** artefact.
-[Full numbers below.](#what-this-has-achieved)
+**Proven on real data:** a published checkpoint adapted on mined Wikipedia pairs across
+**ten Indian languages** (Hindi, Bengali, Gujarati, Kannada, Malayalam, Marathi, Sanskrit,
+Tamil, Telugu, Urdu) beats base e5 on **all nine non-Hindi languages** for cross-lingual
+retrieval (recall@1 0.7875 → **0.8964**), training **0.50%** of its parameters into a
+**3.4 MB** artefact. Honest limit: on the FLORES-200 public benchmark — single-sentence
+bitext e5 has already near-solved — it *loses* to e5; it is an in-domain passage specialist,
+not a leaderboard entry. [Full numbers below.](#what-this-has-achieved)
 
 ---
 
@@ -51,8 +54,9 @@ retrieval, training **0.50%** of its parameters into a **3.4 MB** artefact.
 - [Limitations](#limitations)
 
 > **Where this is going:** [ROADMAP.md](ROADMAP.md) tracks the remaining work — domain pair
-> miners, dimension truncation, and from-scratch pretraining. Hard-negative mining now
-> ships and is waiting on a GPU run to prove it earns its place.
+> miners, dimension truncation, and from-scratch pretraining. Hard-negative mining has now
+> been measured on a GPU: a specialisation/generalisation trade-off, not a free win, so the
+> shipped adapter is trained without it (see Limitations).
 > [ECOSYSTEM.md](ECOSYSTEM.md) places this repository within the wider QuanFire AI stack;
 > everything outside embeddings lives there and nowhere in this README.
 
@@ -149,6 +153,27 @@ Tamil at 76% of its Hindi score; after adaptation Tamil reaches 83% of Hindi's. 
 helps most exactly where the published model is thinnest — which is where a proprietary
 corpus earns its keep.
 
+### From two languages to ten, and genuinely cross-lingual
+
+The headline above adapts each language on its own pairs. The next result trains **one
+adapter across all ten languages at once** (hi, ta, bn, gu, kn, ml, mr, sa, te, ur) on
+cross-lingual pairs mined through Wikipedia langlinks — each pair joins two editions of the
+*same* article, so the model learns to place a sentence and its translation together rather
+than a sentence and its paraphrase.
+
+Two instruments, both leak-free — the eval pairs are held out and the pool is built so
+recall@1 is well-posed:
+
+| instrument | E5 base | adapted v2 |
+|---|---:|---:|
+| non-Hindi X↔Y, within target language (recall@1, n=8,262) | 0.7875 | **0.8964** |
+| hi-pivot mixed-pool (recall@10) | 0.7495 | **0.8852** |
+
+The honest limit: on **FLORES-200**, a public sentence-aligned benchmark the model never
+trained on, base E5 already scores 0.985 non-Hindi recall@1 and the adapter moves to 0.961 —
+a small regression. The corpus wins decisively on its own Wikipedia distribution and does
+not (yet) transfer to arbitrary public bitext. That gap is recorded, not papered over.
+
 ### The control: it is not learning to match strings
 
 Gains run *inversely* to lexical overlap, in both languages, and Tamil is Dravidian while
@@ -230,6 +255,7 @@ most solvable by string matching. It is reported, not hidden, and `--max-overlap
 | Train a SentencePiece tokenizer and shared vocabulary | ✅ | `qfme train` |
 | Train a static word2vec model and search it | ✅ | `qfme train`, `qfme search` |
 | Mine contrastive pairs from unlabelled text, leakage measured | ✅ | `qfme mine-pairs` |
+| Mine cross-lingual pairs by joining two language editions through langlinks | ✅ | `qfme mine-aligned` |
 | Mine hard negatives against a trained adapter, with an auditable sample | ✅ | `qfme mine-negatives` |
 | Train a transformer encoder contrastively from scratch | ✅ | Python API |
 | Adapt a published checkpoint with LoRA on mined pairs | ✅ | `qfme adapt` |
@@ -237,9 +263,10 @@ most solvable by string matching. It is reported, not hidden, and `--max-overlap
 | Save an adapted model as a ~3.4 MB artefact | ✅ | `save_adapter` |
 | Serve an adapted model, prefixes applied correctly | ✅ | `SemanticSearchPipeline.from_adapter` |
 | Score retrieval per language, per pair kind, per overlap band, with Wilson intervals | ✅ | `evaluate_retrieval` |
+| Score cross-lingual retrieval (X↔Y within a target language, and FLORES-200) | ✅ | `scratch_score_xling.py`, `scratch_flores_bench.py` |
 | Declare an experiment's design and have the data checked against it | ✅ | `--adaptation` |
 | Measure the false-negative rate of mined negatives | ⚠️ | `--audit`, then a person |
-| Domain-specific miners, synthetic pairs, cross-lingual pairs | ❌ | Phase C |
+| Domain-specific miners, synthetic pairs | ❌ | Phase C |
 | HTTP embeddings endpoint, ONNX export, container image | ❌ | Phase D |
 | Neural path in `TrainingPipeline` (a transformer from scratch, from one command) | ❌ | Phase D |
 | From-scratch pretraining (MLM then contrastive) | ❌ | Phase E |
@@ -288,7 +315,7 @@ Stated up front, because a framework that claims everything is useful for nothin
 | 5 | Static embeddings — word2vec, sentence encoders, similarity search | **Implemented** |
 | A | Transformer encoder, contrastive InfoNCE training | **Implemented** |
 | B | LoRA, gradient caching, mixed precision, **external checkpoint adaptation** | **Implemented** — exit criterion met on hardware, 21 July 2026 |
-| C | Pair mining from unlabelled text | **Substantially done** — Wikipedia structure miners, `qfme mine-pairs` and `qfme mine-negatives` ship; the negative-mining gain is unproven on a GPU, and domain miners and synthetic pairs are outstanding |
+| C | Pair mining from unlabelled text | **Substantially done** — Wikipedia structure miners (`qfme mine-pairs`), cross-lingual langlink mining (`qfme mine-aligned`, ten Indic languages) and hard negatives (`qfme mine-negatives`) all ship; the negative-mining gain is now measured (a trade-off, not a win); domain miners and synthetic pairs are outstanding |
 | D | Serving | **Started** — `from_adapter` serves a saved model locally; endpoint, ONNX, container outstanding |
 | E | From-scratch pretraining | **Planned** — capability, not the default; see [ROADMAP.md](ROADMAP.md) |
 
@@ -562,10 +589,12 @@ A complete worked example is in [`examples/train_and_search.py`](examples/train_
 
 ## Training on Wikipedia, in multiple languages
 
-**When can this start? It already has.** Hindi and Tamil are done end to end — dumps
-extracted, audited, mined, adapted, measured, and the adapter saved as `models/indic-v1`.
-Nothing is blocking a third language, or a twentieth. What follows is the recipe and its
-real costs.
+**When can this start? It already has — in ten languages.** Hindi, Bengali, Gujarati,
+Kannada, Malayalam, Marathi, Sanskrit, Tamil, Telugu and Urdu are done end to end — dumps
+extracted, audited, mined (same-language *and* cross-lingual, the latter through
+`qfme mine-aligned`), adapted, measured on two leak-free evals plus the FLORES-200 public
+benchmark, and the adapter saved as `models/indic-aligned-v2`. Nothing is blocking an
+eleventh language, or a twentieth. What follows is the recipe and its real costs.
 
 ### The four commands
 
@@ -676,13 +705,19 @@ Practical consequences for a 22-language programme:
   sides. `--adaptation domain` exists for it and needs a pair file from real QuanFire
   documents to run — that is the experiment that would justify "this will help on our
   contracts".
-- **Hard negatives are mined but unproven.** `qfme mine-negatives` produces them and the
-  trainer consumes them; no run has yet shown that a model trained with them retrieves
-  better than one trained without. That comparison needs the 4070 Ti and has not been made.
-  Nor is the false-negative rate known — `--audit` writes the sample, and labelling it is
-  the only honest way to the number.
-- **No cross-lingual pairs.** Nothing mines translation pairs, so cross-lingual retrieval
-  works only to the extent the corpus contained comparable content.
+- **Hard negatives are measured, and they are a trade-off.** The comparison has now been made
+  on the 4070 Ti: a control and a hard-negative model on the *identical* 250k pairs, differing
+  only in four mined negatives per pair. The negatives cost ~−1.5 recall@1 in-domain while
+  *improving* the FLORES-200 public number by +1.5 — a regulariser, not an in-domain gain, so
+  the shipped adapter is trained without them. The mining's suspicion rate was 0.498 (about
+  half the mined negatives outrank their positive), which predicted exactly this; a new
+  `--positive-margin` guard that drops those false negatives is under test. The true
+  false-negative *rate* still needs a labelled `--audit` sample.
+- **Cross-lingual pairs are mined, and cross-lingual retrieval is measured.** `qfme
+  mine-aligned` joins two language editions through langlinks, and the shipped adapter beats
+  base e5 on all nine non-Hindi languages in-domain (X↔Y eval) while losing on the easy
+  FLORES-200 sentence bitext. It is an in-domain specialist — reliable where you mine your
+  aligned pairs, not a public-benchmark winner.
 - **`qfme extract` needs the `wikipedia` extra** (`mwparserfromhell`). Without it the
   command raises a message naming the fix rather than an `ImportError`.
 
@@ -1137,7 +1172,7 @@ An honest assessment. The cons are structural choices with reasons, not a defect
 | **Segmentation is rule-based** | Fast, predictable, dependency-free, and it will split on an unknown abbreviation before a capitalised noun. Readers accept pre-segmented input when that is not good enough. |
 | **Deduplication is exact-match only** | Near-duplicate detection carries a false-positive risk, and a false positive here silently deletes legitimate text — most likely in the least-represented language, where it is hardest to spot. |
 | **Language inference refuses to guess** | Returns `None` for Latin, Arabic, Cyrillic and Han. A plausible wrong answer propagates into metadata, segmentation rules and normalizers with nothing downstream able to notice. |
-| **In-batch negatives only** | No hard-negative mining yet, which is the most likely remaining source of gain. |
+| **The shipped adapter trains on in-batch negatives** | Hard-negative mining ships and was measured, but it is a trade-off — it helps public-benchmark transfer and hurts in-domain retrieval — so the canonical model is trained without it. |
 | **Single-process training** | No data-loader parallelism, no distributed training. One process, one device. |
 | **Runtime download on the adapted route** | Base weights are fetched and cached on first use, which breaks the otherwise-absolute "downloads nothing at runtime" property. Opt-in behind an extra, and `local_files_only=True` disables it. |
 
@@ -1253,11 +1288,15 @@ Stated plainly, because knowing where a tool stops is part of using it well.
   published encoders are post-norm; the shapes match, so such a load succeeds and is
   numerically wrong. External checkpoints *are* supported — through their own library, in
   `neural/pretrained.py` — which is a different thing from that loader existing.
-- **Hard negatives are mined but unproven, and their false-negative rate is unknown.**
-  `qfme mine-negatives` ranks a pair set's own positives against each anchor and keeps the
-  hardest survivors; three guards reject the obvious false negatives and `--audit` writes
-  the rest for a person to label. Whether training on them helps this corpus is a GPU
-  experiment that has not been run.
+- **Hard negatives are measured — a trade-off — and their exact false-negative rate is still
+  unlabelled.** `qfme mine-negatives` ranks a pair set's own positives against each anchor and
+  keeps the hardest survivors; three guards reject the obvious false negatives and `--audit`
+  writes the rest for a person to label. The GPU experiment has now been run: on the identical
+  250k pairs, the mined negatives cost ~−1.5 recall@1 in-domain and add +1.5 on the FLORES-200
+  public benchmark — a regulariser, not an in-domain gain, so the shipped model omits them.
+  The mining suspicion rate (0.498, a proxy) predicted this; the true false-negative *rate*
+  still needs a hand-labelled audit sample. A `--positive-margin` guard that drops the
+  suspected false negatives is under test.
 - **CUDA is unverified by any automated test**, though verified by hand on an RTX 4070 Ti
   SUPER: gradient caching cut peak VRAM 12.2×, bf16 a further 1.6×, with final losses
   within 0.51%. Development still happens without an NVIDIA GPU, so device-specific bugs

@@ -3,9 +3,12 @@
 > An embedding model factory: corpus in, trained and evaluated model out — generic or
 > domain-specific.
 
-**Status:** Phases 0, A and B complete. A published checkpoint adapted on real Indic text
-beats itself by **28.6% (Hindi)** and **40.9% (Tamil)** on held-out retrieval, training 0.50%
-of its parameters. Phases C–E planned.
+**Status:** Phases 0, A and B complete; Phase C mining in place and measured. A published
+checkpoint adapted on real Indic text beats itself by **28.6% (Hindi)** and **40.9% (Tamil)**
+on held-out retrieval, training 0.50% of its parameters. A single ten-language adapter
+trained on cross-lingual aligned pairs raises cross-lingual retrieval from **0.7875 → 0.8964
+recall@1** in-domain (the public-bitext transfer limit is recorded, not beaten). Phases D–E
+planned.
 
 ---
 
@@ -298,11 +301,14 @@ manufactured from document structure and content:
 | Synthetic | generated questions answered by a passage |
 | Cross-lingual | translation pairs, where parallel text exists |
 
-- **Deliverables:** miners for each strategy; hard-negative mining against a base
-  encoder (**done**, unproven); pair quality filtering and deduplication; a `qfme mine`
-  command (**done**, as `mine-pairs` and `mine-negatives`).
-- **Exit criterion:** a model trained purely on mined pairs from a domain corpus beats
-  the untrained base on that domain.
+- **Deliverables:** miners for each strategy, including the cross-lingual row via
+  `qfme mine-aligned` (**done**); hard-negative mining against a base encoder (**done**;
+  verdict below — a wash in-domain, a regularizer out-of-domain); pair quality filtering
+  and deduplication; a `qfme mine` command (**done**, as `mine-pairs` and `mine-negatives`).
+- **Exit criterion:** a model trained purely on mined pairs beats the untrained base on
+  its own distribution. **Met** for cross-lingual retrieval on mined aligned pairs
+  (X↔Y recall@1 0.7875 → 0.8964, ten languages); the public-bitext transfer limit is
+  recorded, not met (FLORES-200 below).
 
 #### The miner is not a Wikipedia miner — 22 July 2026
 
@@ -374,6 +380,36 @@ traffic has to be *trained* on aligned pairs — which now exist — not adapted
 ones and hoped to transfer. `reports/hi-ta-aligned.json` holds the join statistics;
 `reports/optionb/aligned-transfer.json` holds the scores.
 
+#### Trained on aligned pairs, ten languages, and the row closes in-domain — 28 July 2026
+
+The previous entry ends on an instruction: an adapter meant to serve cross-lingual traffic
+has to be *trained* on aligned pairs, not adapted on monolingual ones and hoped to transfer.
+That adapter now exists. `qfme mine-aligned` was run across **ten** language editions
+(hi, ta, bn, gu, kn, ml, mr, sa, te, ur) against Hindi through langlinks, and a single LoRA
+adapter (`models/indic-aligned-v1`, refined to `-v2` — v2 canonical) was trained on the
+resulting cross-lingual pairs rather than on within-language ones.
+
+It reverses the caution. Two leak-free instruments, eval pairs held out, pool built so
+recall@1 is well-posed:
+
+| instrument | E5 base | adapted v2 |
+| --- | ---: | ---: |
+| non-Hindi X↔Y, within target language (recall@1, n=8,262) | 0.7875 | **0.8964** |
+| hi-pivot mixed-pool (recall@10) | 0.7495 | **0.8852** |
+
+The within-language LoRA *lowered* cross-lingual retrieval by ~10 points (previous entry);
+the aligned-trained adapter *raises* it by ~11. Same architecture, same base, same rank —
+the only change is that the training pairs are the ones the eval measures. That is the whole
+lesson of the caution paid back as a result.
+
+**The honest limit — the public-bitext row stays open.** On **FLORES-200**, a public
+sentence-aligned benchmark neither model trained on, base E5 scores **0.985** non-Hindi
+recall@1 and the adapter moves to **0.961** — a small regression. The corpus wins decisively
+on its own Wikipedia distribution and does not transfer to arbitrary public bitext. Both
+numbers are reported; the exit criterion is met for the distribution the model was trained
+on and explicitly not claimed beyond it. `reports/optionb/hn-verdict.json` holds the
+consolidated four-model, three-instrument scores.
+
 #### Hard negatives are mined, and the rate they cost is not claimed — 23 July 2026
 
 `qfme mine-negatives` ranks a pair set's own positives against each anchor with any
@@ -429,6 +465,24 @@ So hard-negative mining is a working capability that this data does not reward. 
 in place — the objective is the strict generalisation of in-batch and costs nothing when a
 pair set carries no negatives — and it is not claimed as an improvement. Scores in
 `reports/optionb/`.
+
+**Re-measured at scale, 250k aligned pairs — 28 July 2026, and it is a trade-off.** The
+ablation was rerun on the ten-language aligned data: `models/indic-aligned-hn` mines four
+negatives per pair over 250,000 pairs and trains identically to the canonical `-v2`.
+Against a control adapter trained on the same pairs with no negatives, the mined negatives
+cost **~−1.5 recall@1 in-domain** (X↔Y 0.8955 control → 0.8801 hn) and **add ~+1.5** on the
+out-of-domain FLORES-200 benchmark (0.9606 control → 0.9757 hn). The negatives act as a
+regularizer: they blunt the in-distribution fit slightly and generalise slightly better off
+it. v2 stays canonical; the HN adapter is not promoted.
+
+The mining report explains why the in-domain cost is unavoidable here: **49.8%** of the kept
+negatives outrank their own positive (`suspicion_rate` 0.4981) — half the negatives are
+false. The absolute-ceiling guards can't catch them because they sit near the positive, not
+near a paraphrase ceiling, so a new **relative** guard was implemented: `--positive-margin`
+rejects any candidate scoring within a margin of its own positive, targeting the
+false-negative population directly. A gated re-mine and retrain against it is under test;
+its report will record the gated `suspicion_rate` and whether removing the false negatives
+recovers the in-domain loss without giving back the FLORES gain.
 
 ### Phase D — Serving
 
@@ -675,7 +729,7 @@ preparation parallelises across 20 cores.
 | Config, artefacts, reproducibility, CLI, CI | Complete |
 | Transformer encoder | **Phase A** |
 | Contrastive training | **Phase B** |
-| Pair mining | **Phase C** |
+| Pair mining | **Phase C** — structural/adjacency/metadata miners, `mine-aligned` (cross-lingual via langlinks) and `mine-negatives` (hard negatives, with an absolute ceiling and the new `--positive-margin` relative guard) all done and measured |
 | Serving | **Phase D** — local path (`from_adapter`), the adaptation experiment as a command (`qfme adapt`) and the HTTP endpoint (`qfme serve`) all done; dimension truncation, ONNX, container, auth and a neural stage in `TrainingPipeline` outstanding |
 | From-scratch pretraining | **Phase E** |
 

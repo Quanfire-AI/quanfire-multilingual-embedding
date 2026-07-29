@@ -143,6 +143,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_mine_aligned_parser(subparsers)
 
+    _add_ingest_parallel_parser(subparsers)
+
     _add_mine_negatives_parser(subparsers)
 
     _add_train_parser(subparsers)
@@ -187,6 +189,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "prepare-eval": _run_prepare_eval,
         "mine-pairs": _run_mine_pairs,
         "mine-aligned": _run_mine_aligned,
+        "ingest-parallel": _run_ingest_parallel,
         "mine-negatives": _run_mine_negatives,
         "train": _run_train,
         "pretrain": _run_pretrain,
@@ -562,6 +565,105 @@ def _add_mine_aligned_parser(subparsers: Any) -> None:
     )
 
 
+def _add_ingest_parallel_parser(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "ingest-parallel",
+        help="Ingest a pre-aligned parallel corpus (Samanantar, BPCC, OPUS) into pairs",
+        description=(
+            "Turn two line-aligned files — whose i-th lines are translations "
+            "of each other — into the pair records the training pipeline "
+            "consumes. Unlike mine-aligned, this mines nothing: the alignment "
+            "was already done by whoever built the corpus. Refuses to run if "
+            "the two files disagree on line count, because a truncated join "
+            "silently pairs sentences with the wrong translation."
+        ),
+    )
+
+    parser.add_argument(
+        "--anchor-file",
+        required=True,
+        type=Path,
+        help="File whose lines are the anchor (query) side; .gz is read transparently",
+    )
+
+    parser.add_argument(
+        "--positive-file",
+        required=True,
+        type=Path,
+        help="File whose lines are the positive (passage) side, aligned line-for-line",
+    )
+
+    parser.add_argument(
+        "--anchor-language",
+        default=None,
+        help="Language code of the anchor side, carried into each record",
+    )
+
+    parser.add_argument(
+        "--positive-language",
+        default=None,
+        help="Language code of the positive side; this is the record's `language`",
+    )
+
+    parser.add_argument(
+        "--kind",
+        default="aligned_sentence",
+        help="Provenance label written to each pair (default: aligned_sentence)",
+    )
+
+    parser.add_argument(
+        "--document-prefix",
+        default="parallel",
+        help="Prefix for the per-line document id (default: parallel)",
+    )
+
+    parser.add_argument(
+        "--output",
+        required=True,
+        type=Path,
+        help="Destination pair file; .gz is written transparently",
+    )
+
+    parser.add_argument(
+        "--min-anchor-characters",
+        type=int,
+        default=10,
+        help="Reject an anchor shorter than this (default: 10)",
+    )
+
+    parser.add_argument(
+        "--min-positive-characters",
+        type=int,
+        default=10,
+        help="Reject a positive shorter than this (default: 10)",
+    )
+
+    parser.add_argument(
+        "--max-positive-characters",
+        type=int,
+        default=2000,
+        help="Reject a positive longer than this (default: 2000)",
+    )
+
+    parser.add_argument(
+        "--keep-identical",
+        action="store_true",
+        help="Keep pairs whose two sides are byte-identical (dropped by default)",
+    )
+
+    parser.add_argument(
+        "--no-dedup",
+        action="store_true",
+        help="Do not drop repeated (anchor, positive) pairs (deduplicated by default)",
+    )
+
+    parser.add_argument(
+        "--report",
+        type=Path,
+        help="Write the ingest statistics as JSON to this path",
+    )
+
+
 def _add_mine_negatives_parser(subparsers: Any) -> None:
     parser = subparsers.add_parser(
         "mine-negatives",
@@ -625,6 +727,20 @@ def _add_mine_negatives_parser(subparsers: Any) -> None:
         help=(
             "Reject a candidate at or below this score as no harder than the "
             "in-batch negatives training already has (default: 0.0)"
+        ),
+    )
+
+    parser.add_argument(
+        "--positive-margin",
+        type=float,
+        default=None,
+        help=(
+            "Relative guard, off by default. Reject any candidate scoring within "
+            "this margin of the pair's own positive, i.e. keep only those with "
+            "similarity <= positive_similarity - margin. Unlike --max-similarity "
+            "(an absolute ceiling), this drops the suspected false negatives the "
+            "suspicion rate measures. 0.0 rejects only those at or above the "
+            "positive; 0.05 also drops the near-ties beneath it"
         ),
     )
 
@@ -1458,6 +1574,89 @@ def _run_mine_aligned(args: argparse.Namespace) -> int:
     return EXIT_SUCCESS
 
 
+def _run_ingest_parallel(args: argparse.Namespace) -> int:
+    """
+    Ingest a parallel corpus, and refuse a misaligned one loudly.
+
+    The line-count guard lives in ``iter_parallel_pairs`` and raises rather
+    than truncating, so a corpus that would silently pair sentences with
+    the wrong translation fails here with a count, not later as flat
+    cross-lingual recall nobody can explain.
+    """
+
+    import gzip
+    import json as _json
+
+    from multilingual_embedding.corpus.parallel import (
+        ParallelConfig,
+        ParallelStatistics,
+        iter_parallel_pairs,
+    )
+
+    def _open_lines(path: Path) -> Any:
+        resolved = path.expanduser()
+        opener = gzip.open if resolved.suffix == ".gz" else open
+        return opener(resolved, "rt", encoding="utf-8")
+
+    config = ParallelConfig(
+        minimum_anchor_characters=args.min_anchor_characters,
+        minimum_positive_characters=args.min_positive_characters,
+        maximum_positive_characters=args.max_positive_characters,
+        deduplicate=not args.no_dedup,
+        drop_identical=not args.keep_identical,
+    )
+
+    statistics = ParallelStatistics()
+
+    destination = Path(args.output).expanduser()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    out_opener = gzip.open if destination.suffix == ".gz" else open
+
+    print(f"Ingesting {args.anchor_file} <-> {args.positive_file}")
+
+    with (
+        _open_lines(args.anchor_file) as anchor_handle,
+        _open_lines(args.positive_file) as positive_handle,
+        out_opener(destination, "wt", encoding="utf-8") as out_handle,
+    ):
+        pairs = iter_parallel_pairs(
+            anchor_handle,
+            positive_handle,
+            anchor_language=args.anchor_language,
+            positive_language=args.positive_language,
+            kind=args.kind,
+            document_prefix=args.document_prefix,
+            config=config,
+            statistics=statistics,
+        )
+
+        for pair in pairs:
+            out_handle.write(_json.dumps(pair.to_record(), ensure_ascii=False) + "\n")
+
+    summary = statistics.to_dict()
+
+    print(f"\nWrote {statistics.produced:,} pairs to {destination}")
+    print(f"  read {statistics.read:,} lines")
+
+    rejected = summary["rejected"]
+    total_rejected = sum(rejected.values())
+
+    print(f"  rejected {total_rejected:,}")
+    for reason, count in rejected.items():
+        if count:
+            print(f"    {reason:<14} {count:,}")
+
+    print(f"  mean overlap {summary['mean_overlap']}")
+
+    if args.report:
+        from multilingual_embedding.utils.io import write_json
+
+        write_json(args.report, summary)
+        print(f"\nStatistics written to {args.report}")
+
+    return EXIT_SUCCESS
+
+
 def _run_mine_negatives(args: argparse.Namespace) -> int:
     """
     Mine hard negatives against a model, and report what was thrown away.
@@ -1530,6 +1729,7 @@ def _run_mine_negatives(args: argparse.Namespace) -> int:
             pool=args.pool,
             maximum_similarity=args.max_similarity,
             minimum_similarity=args.min_similarity,
+            positive_margin=args.positive_margin,
             allow_same_document=args.allow_same_document,
             # Read off the adapter rather than accepted as flags. An E5
             # model mined without its prefixes ranks by the wrong
@@ -1554,6 +1754,7 @@ def _run_mine_negatives(args: argparse.Namespace) -> int:
         ("rejected_as_positive", "  the pair's own positive"),
         ("rejected_same_document", "  same document"),
         ("rejected_too_similar", "  above the ceiling"),
+        ("rejected_outranks_positive", "  outranks the positive"),
         ("rejected_too_easy", "  below the floor"),
         ("rejected_unencodable", "  unencodable"),
     ):

@@ -20,6 +20,33 @@ already written into `SemanticSearchPipeline.from_adapter`'s docstring, into
 [`tests/integration/test_saved_adapter.py`](../tests/integration/test_saved_adapter.py).
 A copy somewhere else works, but nothing will find it for you.
 
+## The adapters that exist
+
+`indic-v1` above is the original two-language (hi/ta) adapter, tracked because it predates
+`qfme adapt` and carries the first published numbers. Everything since is produced by
+`qfme adapt` from a committed configuration, so it is reproducible and stays git-ignored —
+but the names recur throughout [ROADMAP.md](../ROADMAP.md) and the reports, so they are
+worth stating once:
+
+| Directory | What it is | Status |
+|---|---|---|
+| `indic-v1` | Two-language (hi/ta) LoRA, the original | Tracked; historical baseline |
+| `indic-aligned-v1` | Ten-language adapter trained on cross-lingual aligned pairs | Superseded by v2 |
+| `indic-aligned-v2` (a.k.a. `indic-aligned-multi-np`) | The refined ten-language adapter | **Canonical** — the cross-lingual numbers are measured on this |
+| `indic-aligned-c250k` | Control: same 250k pairs, no hard negatives | Ablation reference |
+| `indic-aligned-hn` | Same pairs plus mined hard negatives | Ablation; a trade-off, not promoted |
+| `indic-aligned-hn-gated` | Same pairs plus hard negatives mined with the `--positive-margin` guard (false negatives removed) | Ablation; the gated win — recovers in-domain *and* keeps FLORES |
+
+The ten-language adapters raise cross-lingual retrieval from 0.7875 → 0.8964 recall@1
+in-domain. The plain hard-negative variant (`indic-aligned-hn`) trades ~1.5 points in-domain
+(0.8955 → 0.8801 X↔Y) for ~1.5 on FLORES-200 (0.9606 → 0.9757). The **gated** variant
+(`indic-aligned-hn-gated`), mined with `--positive-margin` so its suspicion rate falls from
+0.498 to 0.000, removes that trade-off: it recovers in-domain to 0.8940 (level with control)
+*and* keeps the FLORES gain at 0.9768 — so gated hard negatives are a genuine improvement, a
+candidate to reconsider for promotion over v2. Full working is in the ROADMAP entries dated
+27–29 July 2026. When one of these is the canonical serving artefact, copy it into place
+exactly as below.
+
 ## Then verify it
 
 ```bash

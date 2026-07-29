@@ -184,6 +184,19 @@ class NegativeConfig:
         paraphrase of the positive. Lower is safer and yields easier
         negatives.
 
+    positive_margin:
+        A *relative* guard, off (``None``) by default. When set, reject
+        any candidate scoring within this margin of the pair's own
+        positive — that is, keep only candidates with
+        ``similarity <= positive_similarity - positive_margin``. The
+        absolute ceiling cannot see this: a candidate at cosine 0.7 is
+        below a 0.95 ceiling yet a false negative if its positive scores
+        0.6. This targets exactly the population :attr:`suspicion_rate`
+        measures. ``0.0`` rejects only candidates at or above the
+        positive; a small positive value (say ``0.05``) also drops the
+        near-ties just beneath it. Rejections are counted separately as
+        :attr:`NegativeStatistics.rejected_outranks_positive`.
+
     minimum_similarity:
         Reject a candidate at or below this score as no harder than an
         in-batch negative. Cosine's domain is ``[-1, 1]`` and so is this,
@@ -227,6 +240,8 @@ class NegativeConfig:
 
     minimum_similarity: float = 0.0
 
+    positive_margin: float | None = None
+
     allow_same_document: bool = False
 
     query_prefix: str = ""
@@ -261,6 +276,14 @@ class NegativeConfig:
         if self.audit_sample < 0:
             raise ValidationError("audit_sample cannot be negative", audit_sample=self.audit_sample)
 
+        if self.positive_margin is not None and not -2.0 <= self.positive_margin <= 2.0:
+            # Cosine differences live in [-2, 2]; a margin outside that
+            # either rejects everything or nothing, which is never intended.
+            raise ValidationError(
+                "positive_margin must lie in [-2, 2]",
+                positive_margin=self.positive_margin,
+            )
+
 
 @dataclass(slots=True)
 class NegativeStatistics:
@@ -281,6 +304,13 @@ class NegativeStatistics:
         positive. The honest proxy for the false-negative rate — see the
         module docstring for why it is a proxy and not the rate.
 
+    rejected_outranks_positive:
+        Candidates dropped by the relative
+        :attr:`NegativeConfig.positive_margin` guard for scoring within
+        the margin of their positive. Zero when the guard is off. When
+        the guard is on, these are the suspected false negatives that
+        would otherwise have inflated ``outranking_the_positive``.
+
     audit:
         A sample of the highest-scoring accepted negatives, for
         labelling by hand. Not a metric; excluded from :meth:`to_dict`.
@@ -299,6 +329,8 @@ class NegativeStatistics:
     rejected_too_easy: int = 0
 
     rejected_unencodable: int = 0
+
+    rejected_outranks_positive: int = 0
 
     accepted: int = 0
 
@@ -329,6 +361,7 @@ class NegativeStatistics:
             "rejected_too_similar": self.rejected_too_similar,
             "rejected_too_easy": self.rejected_too_easy,
             "rejected_unencodable": self.rejected_unencodable,
+            "rejected_outranks_positive": self.rejected_outranks_positive,
             "accepted": self.accepted,
             "pairs_without_negatives": self.pairs_without_negatives,
             "anchors_unencodable": self.anchors_unencodable,
@@ -562,6 +595,20 @@ def mine_negatives(
 
                 if similarity >= settings.maximum_similarity:
                     statistics.rejected_too_similar += 1
+
+                    continue
+
+                # Relative guard: a candidate the model scores at or above
+                # the pair's own positive is a suspected false negative,
+                # whatever its absolute similarity. Skip it and keep
+                # scanning down — the candidates below are less similar to
+                # the anchor, so more likely to sit safely under the
+                # positive. `continue`, never `break`.
+                if (
+                    settings.positive_margin is not None
+                    and similarity >= positive_similarity - settings.positive_margin
+                ):
+                    statistics.rejected_outranks_positive += 1
 
                     continue
 
