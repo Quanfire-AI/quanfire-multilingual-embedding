@@ -1,0 +1,42 @@
+{
+  "published-e5": {
+    "flores_nonhi": 0.9846700702678963,
+    "flores_all": 0.9865832235397453,
+    "flores_sa": 0.9468873517786561,
+    "flores_ur": 0.9864748023715415,
+    "indomain_nonhi": 0.7874606632776567,
+    "indomain_all": 0.7874606632776567
+  },
+  "v2": {
+    "flores_nonhi": 0.9608860342555994,
+    "flores_all": 0.9636583223539745,
+    "flores_sa": 0.8979125494071146,
+    "flores_ur": 0.9597949604743083,
+    "indomain_nonhi": 0.8963931251512951,
+    "indomain_all": 0.8963931251512951
+  },
+  "samanantar-proof": {
+    "flores_nonhi": 0.9895833333333334,
+    "flores_all": 0.9909310496267018,
+    "flores_sa": 0.9589303359683795,
+    "flores_ur": 0.9921566205533597,
+    "indomain_nonhi": 0.8195352214960058,
+    "indomain_all": 0.8195352214960058
+  },
+  "prod-a30s70": {
+    "flores_nonhi": 0.9820075757575757,
+    "flores_all": 0.983717610891524,
+    "flores_sa": 0.939167490118577,
+    "flores_ur": 0.9828310276679841,
+    "indomain_nonhi": 0.8937303316388284,
+    "indomain_all": 0.8937303316388284
+  },
+  "prod-a50s50": {
+    "flores_nonhi": 0.979207839262187,
+    "flores_all": 0.9807531840140536,
+    "flores_sa": 0.9344120553359684,
+    "flores_ur": 0.9785696640316206,
+    "indomain_nonhi": 0.8990559186637618,
+    "indomain_all": 0.8990559186637618
+  }
+}

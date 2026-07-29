@@ -1,0 +1,42 @@
+# Production FLORES run, ratio a30s70 (article:sentence), total 1.0M pairs.
+#
+# Scales the proof mix (490k, 8-language sentence side) to 1.0M pairs with a
+# ten-language sentence pool (Samanantar 8 langs + itihasa sa + opus-100 ur)
+# blended against v2's article corpus. Three configs sweep the blend ratio;
+# every other hyperparameter is held identical to v2 / the proof mix.
+#
+#     .venv/bin/qfme adapt --config configs/experiments/prod-a30s70.yaml --profile configs/gpu.yaml
+name: prod-a30s70
+
+seed: 0
+
+adaptation:
+  checkpoint: intfloat/multilingual-e5-small
+
+  pairs: data/pairs/prod-a30s70-1M.jsonl.gz
+
+  train_pairs: 998000
+  eval_pairs: 2000
+  sample_pairs: 1000000
+
+  adaptation: in-distribution
+  train_kinds: ""
+  eval_kinds: ""
+  train_languages: ""
+  eval_languages: ""
+
+  epochs: 1
+  learning_rate: 0.0001
+
+  rank: 32
+  targets: query,value
+
+  pooling: mean
+  max_length: 256
+  query_prefix: ""
+  passage_prefix: ""
+
+  save_adapter: models/prod-a30s70
+  data_provenance: public
+
+  report: reports/prod-a30s70-adapt.json
