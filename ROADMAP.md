@@ -7,9 +7,9 @@
 checkpoint adapted on real Indic text beats itself by **28.6% (Hindi)** and **40.9% (Tamil)**
 on held-out retrieval, training 0.50% of its parameters. A single ten-language adapter
 trained on cross-lingual aligned pairs raises cross-lingual retrieval from **0.7875 → 0.8964
-recall@1** in-domain, and an article+sentence blend (`indic-aligned-mix`) closes the
-public-bitext limit too — **0.9826** FLORES non-Hindi, level with base E5, while holding the
-in-domain gain. Phases D–E planned.
+recall@1** in-domain, and a production article+sentence blend (`prod-a70s30`) beats it on the
+public benchmark too — **0.9805** FLORES non-Hindi (v2 0.9609, near base E5) *and* **0.9029**
+in-domain, exceeding v2 on both. Phases D–E planned.
 
 ---
 
@@ -441,6 +441,40 @@ languages, one epoch), the sentence side lacks sa/ur, and the blend ratio is unt
 production run would use more of Samanantar (and a sa/ur sentence source such as BPCC/OPUS)
 and sweep the ratio. `indic-aligned-mix` is the promotion candidate over v2, pending that
 scale-up.
+
+**The production run closed that scale-up — and it beats v2 outright — 30 July 2026.** The
+proof's three caveats are each answered. A ten-language sentence pool (1.42M pairs) was built:
+Samanantar scaled to 150k pairs × 8 languages, plus the two languages Samanantar lacks —
+**sa** from `rahular/itihasa` (75k classical Sanskrit↔English) and **ur** from OPUS-100 (148k).
+Both sources are non-gated, so the recipe reproduces without an access grant (BPCC carries
+sa/ur but is gated, and was deliberately avoided). That pool was blended against v2's article
+corpus at a fixed 1.0M total, three ratios swept, every hyperparameter held at v2's values:
+
+| Adapter | article : sentence | FLORES non-Hi | in-domain non-Hi |
+|---|---|---|---|
+| base E5 | — | 0.9847 | 0.7875 |
+| `indic-aligned-v2` | article only | 0.9609 | 0.8964 |
+| `prod-a30s70` | 30 : 70 | **0.9820** | 0.8937 |
+| `prod-a50s50` | 50 : 50 | 0.9792 | 0.8991 |
+| `prod-a70s30` | 70 : 30 | 0.9805 | **0.9029** |
+
+`prod-a70s30` is the winner and the promotion choice: it **strictly beats v2 on both
+instruments** — FLORES **0.9805** (+0.0196 over v2, within 0.004 of base) *and* in-domain
+**0.9029** (+0.0065 over v2, +0.115 over base). Not "holds v2 while closing FLORES" as the
+proof mix did — it *exceeds* v2 in-domain and nearly reaches base on FLORES, all ten languages
+at sentence scale. It replaces `indic-aligned-mix` as the promotion candidate over v2. Recipe:
+`configs/experiments/prod-a{30s70,50s50,70s30}.yaml`, `scratch_production_prep.py` (pool),
+`scratch_blend_ratio.py` (ratios), `scratch_prod_flores.py` (scorer);
+`reports/prod-flores-verdict.json` holds the scores.
+
+One honest null result, recorded not buried: the dedicated **sa/ur sentence sources did not
+lift sa/ur on FLORES.** The proof — which had *no* sa/ur training data — scores higher on both
+(sa 0.9589, ur 0.9922) than any production ratio (sa ≈0.94, ur ≈0.98). Cross-lingual transfer
+from the other eight languages already covered sa/ur, and classical-epic Sanskrit (itihasa) is
+a domain mismatch for FLORES's modern prose. The sa/ur sources were the right thing to try;
+the data says they were not the bottleneck. Remaining scope: still one epoch, and a
+production `qfme adapt` re-baseline of the *other* published numbers (mono-lingual, hi-pivot)
+on `prod-a70s30` is the follow-through before it is stamped canonical everywhere.
 
 The earlier hard-negative work is still valid on its own instrument:
 `reports/optionb/hn-verdict.json` holds those consolidated four-model, three-instrument

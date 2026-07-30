@@ -37,7 +37,9 @@ worth stating once:
 | `indic-aligned-hn` | Same pairs plus mined hard negatives | Ablation; a trade-off, not promoted |
 | `indic-aligned-hn-gated` | Same pairs plus hard negatives mined with the `--positive-margin` guard (false negatives removed) | Ablation; the gated win — recovers in-domain *and* keeps FLORES |
 | `samanantar-proof` | Sentence-scale Samanantar en↔indic bitext only (240k, 8 langs) | Proof; closes FLORES (0.9896, beats base) but gives back in-domain |
-| `indic-aligned-mix` | ~50/50 blend of article pairs and Samanantar sentence pairs (490k) | **Both-at-once** — closes FLORES *and* holds in-domain; promotion candidate over v2 |
+| `indic-aligned-mix` | ~50/50 blend of article pairs and Samanantar sentence pairs (490k) | Proof-scale both-at-once — closes FLORES *and* holds in-domain; superseded by the production sweep |
+| `prod-a30s70` / `prod-a50s50` / `prod-a70s30` | Production ratio sweep: article : sentence at 30:70 / 50:50 / 70:30, 1.0M pairs, all 10 langs (Samanantar + itihasa sa + opus-100 ur) | Sweep to tune the blend ratio at scale |
+| `prod-a70s30` | The 70:30 winner of that sweep | **Promotion candidate over v2** — beats v2 on *both* instruments (FLORES 0.9805 vs 0.9609, in-domain 0.9029 vs 0.8964) |
 
 The ten-language adapters raise cross-lingual retrieval from 0.7875 → 0.8964 recall@1
 in-domain. The plain hard-negative variant (`indic-aligned-hn`) trades ~1.5 points in-domain
@@ -51,11 +53,15 @@ The **public-bitext limit** — v2 regressing to 0.961 non-Hindi on FLORES-200 w
 scores 0.985 — turned out to be a *scale* gap, not a ceiling: v2 trained on article-scale
 pairs, FLORES is a sentence benchmark. `samanantar-proof`, trained only on sentence-scale
 Samanantar en↔indic bitext, **beats base E5** on FLORES (0.9896) but mirrors the trade-off
-(in-domain 0.8195). A ~50/50 blend, `indic-aligned-mix`, collapses it: FLORES **0.9826**
-(level with base) *and* in-domain **0.8918** (within 0.5% of v2). It is the strongest single
-adapter on both instruments and the promotion candidate over v2, pending a production-scale
-Samanantar run (more data, a sa/ur sentence source, a tuned ratio). Full working is in the
-ROADMAP entries dated 27–29 July 2026. When one of these is the canonical serving artefact,
+(in-domain 0.8195). The proof-scale ~50/50 blend `indic-aligned-mix` collapsed the trade-off,
+and the **production sweep settled it**: a 1.0M-pair, ten-language blend (Samanantar + itihasa
+sa + opus-100 ur) swept over three article:sentence ratios. The 70:30 winner, `prod-a70s30`,
+**beats v2 on both instruments at once** — FLORES **0.9805** (v2 0.9609, near base) *and*
+in-domain **0.9029** (v2 0.8964) — so it is the promotion candidate over v2. The dedicated
+sa/ur sources did *not* lift sa/ur on FLORES (transfer already covered them); that null result
+is recorded, not hidden. Full working is in the ROADMAP entries dated 27–30 July 2026. Before
+`prod-a70s30` is stamped canonical everywhere, the *other* published numbers (mono-lingual,
+hi-pivot) still need a re-baseline on it. When one of these is the canonical serving artefact,
 copy it into place exactly as below.
 
 ## Then verify it

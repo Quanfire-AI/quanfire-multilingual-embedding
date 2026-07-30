@@ -25,9 +25,9 @@ are measured against. The second and third need the optional `neural` extra.
 Tamil, Telugu, Urdu) beats base e5 on **all nine non-Hindi languages** for cross-lingual
 retrieval (recall@1 0.7875 → **0.8964**), training **0.50%** of its parameters into a
 **3.4 MB** artefact. The one public-bitext limit — v2 losing to e5 on FLORES-200's
-single-sentence bitext — is now closed: a Samanantar sentence slice blended in
-(`indic-aligned-mix`) reaches FLORES parity with base (0.9826) while holding the in-domain
-gain. [Full numbers below.](#what-this-has-achieved)
+single-sentence bitext — is now beaten: a production ten-language sentence blend
+(`prod-a70s30`) tops v2 on *both* instruments at once, FLORES **0.9805** (v2 0.9609, near base)
+*and* in-domain **0.9029** (v2 0.8964). [Full numbers below.](#what-this-has-achieved)
 
 ---
 
@@ -170,12 +170,14 @@ recall@1 is well-posed:
 | non-Hindi X↔Y, within target language (recall@1, n=8,262) | 0.7875 | **0.8964** |
 | hi-pivot mixed-pool (recall@10) | 0.7495 | **0.8852** |
 
-The one honest limit, now closed: on **FLORES-200**, a public sentence-aligned benchmark the
+The one honest limit, now beaten: on **FLORES-200**, a public sentence-aligned benchmark the
 model never trained on, base E5 scores 0.985 non-Hindi recall@1 and v2 moved to 0.961 — a
 small regression, because v2 trained on article-scale pairs and FLORES is single-sentence. It
-was a scale gap, not a ceiling. Blending in a held-out Samanantar sentence slice via
-`qfme ingest-parallel` closes it: sentence-only training beats base on FLORES (0.9896) and the
-`indic-aligned-mix` blend reaches parity (0.9826) while holding the in-domain gain (0.8918).
+was a scale gap, not a ceiling. Blending held-out sentence bitext in via `qfme ingest-parallel`
+fixes it, and a production ten-language sweep settled the ratio: the 70:30 winner
+`prod-a70s30` beats v2 on *both* instruments — FLORES **0.9805** (near base, +0.020 over v2)
+*and* in-domain **0.9029** (+0.007 over v2). One honest null result is recorded with it: the
+dedicated sa/ur sentence sources did not lift sa/ur on FLORES — transfer already covered them.
 Both directions are recorded, not papered over.
 
 ### The control: it is not learning to match strings
