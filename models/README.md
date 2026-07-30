@@ -22,24 +22,25 @@ A copy somewhere else works, but nothing will find it for you.
 
 ## The adapters that exist
 
-`indic-v1` above is the original two-language (hi/ta) adapter, tracked because it predates
-`qfme adapt` and carries the first published numbers. Everything since is produced by
-`qfme adapt` from a committed configuration, so it is reproducible and stays git-ignored —
-but the names recur throughout [ROADMAP.md](../ROADMAP.md) and the reports, so they are
-worth stating once:
+Two adapters are git-tracked: `indic-v1` above — the original two-language (hi/ta) adapter,
+kept because it predates `qfme adapt`, carries the first published numbers and is the
+integration-test fixture — and `prod-a70s30`, the current production adapter (below), shipped
+so it can be served without a GPU rebuild. Everything else is produced by `qfme adapt` from a
+committed configuration, so it is reproducible and stays git-ignored — but the names recur
+throughout [ROADMAP.md](../ROADMAP.md) and the reports, so they are worth stating once:
 
 | Directory | What it is | Status |
 |---|---|---|
-| `indic-v1` | Two-language (hi/ta) LoRA, the original | Tracked; historical baseline |
+| `indic-v1` | Two-language (hi/ta) LoRA, the original | Tracked; historical baseline & test fixture |
 | `indic-aligned-v1` | Ten-language adapter trained on cross-lingual aligned pairs | Superseded by v2 |
-| `indic-aligned-v2` (a.k.a. `indic-aligned-multi-np`) | The refined ten-language adapter | **Canonical** — the cross-lingual numbers are measured on this |
+| `indic-aligned-v2` (a.k.a. `indic-aligned-multi-np`) | The refined ten-language adapter | Previous canonical — superseded by `prod-a70s30`, which beats it on all three published instruments |
 | `indic-aligned-c250k` | Control: same 250k pairs, no hard negatives | Ablation reference |
 | `indic-aligned-hn` | Same pairs plus mined hard negatives | Ablation; a trade-off, not promoted |
 | `indic-aligned-hn-gated` | Same pairs plus hard negatives mined with the `--positive-margin` guard (false negatives removed) | Ablation; the gated win — recovers in-domain *and* keeps FLORES |
 | `samanantar-proof` | Sentence-scale Samanantar en↔indic bitext only (240k, 8 langs) | Proof; closes FLORES (0.9896, beats base) but gives back in-domain |
 | `indic-aligned-mix` | ~50/50 blend of article pairs and Samanantar sentence pairs (490k) | Proof-scale both-at-once — closes FLORES *and* holds in-domain; superseded by the production sweep |
 | `prod-a30s70` / `prod-a50s50` / `prod-a70s30` | Production ratio sweep: article : sentence at 30:70 / 50:50 / 70:30, 1.0M pairs, all 10 langs (Samanantar + itihasa sa + opus-100 ur) | Sweep to tune the blend ratio at scale |
-| `prod-a70s30` | The 70:30 winner of that sweep | **Promotion candidate over v2** — beats v2 on *all three* published instruments (FLORES 0.9805 vs 0.9609, in-domain 0.9029 vs 0.8964, hi-pivot r@10 0.8914 vs 0.8852) |
+| `prod-a70s30` | The 70:30 winner of that sweep | **Canonical / shipped production adapter** (git-tracked) — beats v2 on *all three* published instruments (FLORES 0.9805 vs 0.9609, in-domain 0.9029 vs 0.8964, hi-pivot r@10 0.8914 vs 0.8852); serve with `qfme serve --adapter models/prod-a70s30` |
 | `prod-a70s30-e2` / `prod-a70s30-e3` | `prod-a70s30` retrained at 2 / 3 epochs (single-variable epoch sweep) | Confirms one epoch is the stopping point — more epochs lift in-domain but regress held-out FLORES (0.9805 → 0.9701 → 0.9673) |
 
 The ten-language adapters raise cross-lingual retrieval from 0.7875 → 0.8964 recall@1
@@ -59,7 +60,7 @@ and the **production sweep settled it**: a 1.0M-pair, ten-language blend (Samana
 sa + opus-100 ur) swept over three article:sentence ratios. The 70:30 winner, `prod-a70s30`,
 **beats v2 on all three published instruments at once** — FLORES **0.9805** (v2 0.9609, near
 base), in-domain **0.9029** (v2 0.8964), and hi-pivot mixed-pool r@10 **0.8914** (v2 0.8852) —
-so it is the promotion candidate over v2. (The hi-pivot number was re-baselined last, with the
+so it is promoted over v2 as the canonical, git-tracked production adapter. (The hi-pivot number was re-baselined last, with the
 byte-identical protocol that reproduces the published base 0.7495 and v2 0.8852;
 `reports/prod-pivot-verdict.json`.) The dedicated sa/ur sources did *not* lift sa/ur on FLORES
 (transfer already covered them); that null result is recorded, not hidden. Full working is in

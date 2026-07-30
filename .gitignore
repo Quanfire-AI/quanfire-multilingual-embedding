@@ -105,12 +105,20 @@ data/*
 *.npz
 
 # Adapted checkpoints. The default is to ignore them, for the reason
-# above. models/indic-v1/ is the deliberate exception: it is 3.4 MB, it
-# is *not* reproducible from anything in this repository — it predates
-# `qfme adapt`, and its base checkpoint is an external name whose
-# contents can change — and every published number was measured on it.
-# An artefact that carries claims and cannot be rebuilt has to be kept.
+# above. Two are deliberate exceptions, each ~2.4 MB (trivial):
+#   - models/indic-v1/ — the original two-language (hi/ta) LoRA. It is
+#     *not* reproducible from anything here (it predates `qfme adapt`,
+#     and its base checkpoint is an external name whose contents can
+#     change), the early published numbers were measured on it, and the
+#     integration tests load it as a fixture. An artefact that carries
+#     claims and cannot be rebuilt has to be kept.
+#   - models/prod-a70s30/ — the current production adapter: the
+#     ten-language 70:30 blend that beats v2 on all three published
+#     instruments. It *is* reproducible from its config, but it is the
+#     canonical serving artefact and pins the published numbers to an
+#     exact set of weights, so it ships like a release binary.
 models/*
 !models/indic-v1/
+!models/prod-a70s30/
 !models/README.md
 scratch_samanantar/

@@ -59,6 +59,13 @@ without a minor bump.
 
 ### Added
 
+- **`prod-a70s30` promoted to canonical and shipped — 2026-07-30.** With the epoch count
+  settled, the ten-language 70:30 blend is now the production adapter. Its weights are
+  git-tracked (`models/prod-a70s30/`, a second deliberate exception to the `models/*` ignore
+  alongside the historical `indic-v1` fixture), so the repository ships the measured winner
+  rather than the two-language demo. Serve with `qfme serve --adapter models/prod-a70s30` (empty
+  prefixes, read from its `adapter.json`). `indic-v1` stays tracked as the historical baseline
+  and integration-test fixture — it is not replaced.
 - **Epoch sweep confirms one epoch is the stopping point for `prod-a70s30` — 2026-07-30.** The
   last open question before stamping the promotion canonical was whether a longer schedule beats
   one epoch. Two runs byte-identical to `prod-a70s30` except `epochs` (2 and 3;

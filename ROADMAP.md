@@ -509,6 +509,13 @@ held-out public number for ~0.5 point of in-domain fit is a bad trade, so **one-
 Scorer `scratch_prod_longer.py`; `reports/prod-longer-verdict.json` holds the scores; the e2/e3
 adapters are mirrored under `models/prod-a70s30-e{2,3}/`.
 
+**Promoted and shipped — 30 July 2026.** With the epoch count settled, `prod-a70s30` is now the
+canonical production adapter: its weights are git-tracked (`models/prod-a70s30/`, a second
+deliberate exception to the `models/*` ignore alongside the historical `indic-v1` fixture), so
+the repository finally *ships* the measured winner rather than the two-language demo. Serve it
+with `qfme serve --adapter models/prod-a70s30`. `indic-v1` stays tracked as the historical
+baseline and integration-test fixture; it is not replaced.
+
 The earlier hard-negative work is still valid on its own instrument:
 `reports/optionb/hn-verdict.json` holds those consolidated four-model, three-instrument
 scores.

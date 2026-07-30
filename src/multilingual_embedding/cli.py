@@ -1,7 +1,7 @@
 """
 Command line interface.
 
-Installed as ``qfme``. Fifteen subcommands cover the lifecycle::
+Installed as ``qfme``. Sixteen subcommands cover the lifecycle::
 
     qfme stats    --source data/corpus.jsonl
     qfme validate --source data/corpus.jsonl
@@ -12,6 +12,8 @@ Installed as ``qfme``. Fifteen subcommands cover the lifecycle::
     qfme mine-aligned --source hi.jsonl.gz --target ta.jsonl.gz \
         --langlinks hiwiki-langlinks.sql.gz --source-language hi \
         --target-language ta --output pairs/hi-ta.jsonl.gz
+    qfme ingest-parallel --anchor-file en.txt.gz --positive-file hi.txt.gz \
+        --anchor-language en --positive-language hi --output pairs/en-hi.jsonl.gz
     qfme mine-negatives --pairs pairs/hi.jsonl.gz --adapter models/indic-v1 \
         --output pairs/hi-hard.jsonl.gz
     qfme train    --config experiments/demo.yaml

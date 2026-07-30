@@ -1007,6 +1007,12 @@ qfme serve --adapter models/indic-v1 --port 8000
 # Serving indic-v1 on http://127.0.0.1:8000
 ```
 
+The walkthrough below serves `indic-v1` because it is the small, self-contained tracked demo.
+For real use, serve the **canonical production adapter** — the ten-language `prod-a70s30`, also
+git-tracked: `qfme serve --adapter models/prod-a70s30`. (It uses empty prefixes rather than
+`query: `/`passage: `; the endpoint reads that from its `adapter.json`, so clients need no
+change.)
+
 Startup takes a few seconds: it loads the base checkpoint, applies LoRA, then binds. Add
 `--local-files-only` (and `HF_HUB_OFFLINE=1`) to refuse the network and run entirely
 from the local cache. Ctrl-C stops it.
