@@ -1,0 +1,44 @@
+# Production a70s30, longer run: 3 epochs.
+#
+# Identical to configs/experiments/prod-a70s30.yaml in every hyperparameter
+# except `epochs` (1 -> 3) and the output paths. Together with the one-epoch
+# prod-a70s30 and the two-epoch prod-a70s30-e2, this gives an epoch curve
+# (1, 2, 3) scored on all three published instruments, so the promotion
+# choice is made on the measured curve rather than on the assumption that
+# more epochs is better. Only `epochs` is varied.
+#
+#     .venv/bin/qfme adapt --config configs/experiments/prod-a70s30-e3.yaml --profile configs/gpu.yaml
+name: prod-a70s30-e3
+
+seed: 0
+
+adaptation:
+  checkpoint: intfloat/multilingual-e5-small
+
+  pairs: data/pairs/prod-a70s30-1M.jsonl.gz
+
+  train_pairs: 998000
+  eval_pairs: 2000
+  sample_pairs: 1000000
+
+  adaptation: in-distribution
+  train_kinds: ""
+  eval_kinds: ""
+  train_languages: ""
+  eval_languages: ""
+
+  epochs: 3
+  learning_rate: 0.0001
+
+  rank: 32
+  targets: query,value
+
+  pooling: mean
+  max_length: 256
+  query_prefix: ""
+  passage_prefix: ""
+
+  save_adapter: models/prod-a70s30-e3
+  data_provenance: public
+
+  report: reports/prod-a70s30-e3-adapt.json

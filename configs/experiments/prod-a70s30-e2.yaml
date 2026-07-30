@@ -1,0 +1,44 @@
+# Production a70s30, longer run: 2 epochs.
+#
+# Identical to configs/experiments/prod-a70s30.yaml in every hyperparameter
+# except `epochs` (1 -> 2) and the output paths. The one-epoch prod-a70s30 is
+# the promotion candidate that beats v2 on all three published instruments;
+# this run tests whether a longer-than-one-epoch schedule improves it or
+# begins to overfit the in-domain fit at the cost of the held-out FLORES
+# benchmark. Only `epochs` is varied, so the epoch count is the single cause.
+#
+#     .venv/bin/qfme adapt --config configs/experiments/prod-a70s30-e2.yaml --profile configs/gpu.yaml
+name: prod-a70s30-e2
+
+seed: 0
+
+adaptation:
+  checkpoint: intfloat/multilingual-e5-small
+
+  pairs: data/pairs/prod-a70s30-1M.jsonl.gz
+
+  train_pairs: 998000
+  eval_pairs: 2000
+  sample_pairs: 1000000
+
+  adaptation: in-distribution
+  train_kinds: ""
+  eval_kinds: ""
+  train_languages: ""
+  eval_languages: ""
+
+  epochs: 2
+  learning_rate: 0.0001
+
+  rank: 32
+  targets: query,value
+
+  pooling: mean
+  max_length: 256
+  query_prefix: ""
+  passage_prefix: ""
+
+  save_adapter: models/prod-a70s30-e2
+  data_provenance: public
+
+  report: reports/prod-a70s30-e2-adapt.json
