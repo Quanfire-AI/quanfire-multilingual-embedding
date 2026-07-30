@@ -40,6 +40,7 @@ worth stating once:
 | `indic-aligned-mix` | ~50/50 blend of article pairs and Samanantar sentence pairs (490k) | Proof-scale both-at-once — closes FLORES *and* holds in-domain; superseded by the production sweep |
 | `prod-a30s70` / `prod-a50s50` / `prod-a70s30` | Production ratio sweep: article : sentence at 30:70 / 50:50 / 70:30, 1.0M pairs, all 10 langs (Samanantar + itihasa sa + opus-100 ur) | Sweep to tune the blend ratio at scale |
 | `prod-a70s30` | The 70:30 winner of that sweep | **Promotion candidate over v2** — beats v2 on *all three* published instruments (FLORES 0.9805 vs 0.9609, in-domain 0.9029 vs 0.8964, hi-pivot r@10 0.8914 vs 0.8852) |
+| `prod-a70s30-e2` / `prod-a70s30-e3` | `prod-a70s30` retrained at 2 / 3 epochs (single-variable epoch sweep) | Confirms one epoch is the stopping point — more epochs lift in-domain but regress held-out FLORES (0.9805 → 0.9701 → 0.9673) |
 
 The ten-language adapters raise cross-lingual retrieval from 0.7875 → 0.8964 recall@1
 in-domain. The plain hard-negative variant (`indic-aligned-hn`) trades ~1.5 points in-domain
@@ -63,9 +64,11 @@ byte-identical protocol that reproduces the published base 0.7495 and v2 0.8852;
 `reports/prod-pivot-verdict.json`.) The dedicated sa/ur sources did *not* lift sa/ur on FLORES
 (transfer already covered them); that null result is recorded, not hidden. Full working is in
 the ROADMAP entries dated 27–30 July 2026. The other published numbers are now re-baselined on
-`prod-a70s30`; what remains before it is stamped canonical everywhere is a longer training run
-than one epoch. When one of these is the canonical serving artefact, copy it into place exactly
-as below.
+`prod-a70s30`, and the last open question — whether more than one epoch helps — is answered: a
+2- and 3-epoch sweep (`prod-a70s30-e{2,3}`, mirrored here) lifts the in-domain fit but
+regresses the held-out FLORES benchmark monotonically (0.9805 → 0.9701 → 0.9673), so **one
+epoch stays canonical** (`reports/prod-longer-verdict.json`). When one of these is the canonical
+serving artefact, copy it into place exactly as below.
 
 ## Then verify it
 

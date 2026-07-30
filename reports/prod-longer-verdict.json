@@ -1,0 +1,92 @@
+{
+  "models": [
+    "e5",
+    "v2",
+    "prod-a70s30-e1",
+    "prod-a70s30-e2",
+    "prod-a70s30-e3"
+  ],
+  "note": "prod-a70s30 epoch curve (1/2/3) vs e5 and v2, three published instruments",
+  "pivot": {
+    "e5": {
+      "recall_at_1": 0.0648,
+      "recall_at_10": 0.7495,
+      "mrr": 0.2884
+    },
+    "v2": {
+      "recall_at_1": 0.085,
+      "recall_at_10": 0.8852,
+      "mrr": 0.3428
+    },
+    "prod-a70s30-e1": {
+      "recall_at_1": 0.0806,
+      "recall_at_10": 0.8914,
+      "mrr": 0.3448
+    },
+    "prod-a70s30-e2": {
+      "recall_at_1": 0.0775,
+      "recall_at_10": 0.8971,
+      "mrr": 0.3466
+    },
+    "prod-a70s30-e3": {
+      "recall_at_1": 0.0775,
+      "recall_at_10": 0.8984,
+      "mrr": 0.3477
+    },
+    "_scored": 2283
+  },
+  "xling": {
+    "e5": {
+      "recall_at_1": 0.7875,
+      "recall_at_10": 0.9299,
+      "mrr": 0.8385,
+      "n": 8262
+    },
+    "v2": {
+      "recall_at_1": 0.8964,
+      "recall_at_10": 0.9831,
+      "mrr": 0.9253,
+      "n": 8262
+    },
+    "prod-a70s30-e1": {
+      "recall_at_1": 0.9029,
+      "recall_at_10": 0.9846,
+      "mrr": 0.9309,
+      "n": 8262
+    },
+    "prod-a70s30-e2": {
+      "recall_at_1": 0.9062,
+      "recall_at_10": 0.9868,
+      "mrr": 0.9331,
+      "n": 8262
+    },
+    "prod-a70s30-e3": {
+      "recall_at_1": 0.9084,
+      "recall_at_10": 0.9872,
+      "mrr": 0.9346,
+      "n": 8262
+    }
+  },
+  "flores": {
+    "e5": {
+      "all_pairs_r1": 0.9866,
+      "non_hindi_r1": 0.9847
+    },
+    "v2": {
+      "all_pairs_r1": 0.9637,
+      "non_hindi_r1": 0.9609
+    },
+    "prod-a70s30-e1": {
+      "all_pairs_r1": 0.9818,
+      "non_hindi_r1": 0.9805
+    },
+    "prod-a70s30-e2": {
+      "all_pairs_r1": 0.9721,
+      "non_hindi_r1": 0.9701
+    },
+    "prod-a70s30-e3": {
+      "all_pairs_r1": 0.9693,
+      "non_hindi_r1": 0.9673
+    }
+  }
+}

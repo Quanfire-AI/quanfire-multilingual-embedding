@@ -59,6 +59,17 @@ without a minor bump.
 
 ### Added
 
+- **Epoch sweep confirms one epoch is the stopping point for `prod-a70s30` — 2026-07-30.** The
+  last open question before stamping the promotion canonical was whether a longer schedule beats
+  one epoch. Two runs byte-identical to `prod-a70s30` except `epochs` (2 and 3;
+  `configs/experiments/prod-a70s30-e{2,3}.yaml`) were scored on all three published instruments.
+  All three epoch counts beat v2 on all three, but more epochs lift the in-domain fit
+  (in-domain 0.9029 → 0.9062 → 0.9084; hi-pivot 0.8914 → 0.8971 → 0.8984) while **regressing the
+  held-out FLORES benchmark** monotonically (0.9805 → 0.9701 → 0.9673; base e5 is highest at
+  0.9847). Trading the held-out public number for marginal in-domain gain is a bad trade, so
+  **one-epoch `prod-a70s30` stays canonical** — the sweep validates the promotion rather than
+  replacing it. Scorer `scratch_prod_longer.py`; scores in `reports/prod-longer-verdict.json`;
+  e2/e3 adapters mirrored under `models/prod-a70s30-e{2,3}/`.
 - **The FLORES fix scaled to production, and it beats v2 — 2026-07-30.** The proof's three
   caveats (proof-scale, no sa/ur sentence data, untuned ratio) are each answered. A 1.42M-pair
   ten-language sentence pool was built — Samanantar scaled to 150k × 8 languages, plus the two

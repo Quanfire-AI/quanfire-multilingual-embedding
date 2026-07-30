@@ -482,9 +482,32 @@ lift sa/ur on FLORES.** The proof — which had *no* sa/ur training data — sco
 (sa 0.9589, ur 0.9922) than any production ratio (sa ≈0.94, ur ≈0.98). Cross-lingual transfer
 from the other eight languages already covered sa/ur, and classical-epic Sanskrit (itihasa) is
 a domain mismatch for FLORES's modern prose. The sa/ur sources were the right thing to try;
-the data says they were not the bottleneck. Remaining scope: still one epoch. The re-baseline
-of the other published numbers on `prod-a70s30` is now done (the hi-pivot entry just above);
-what remains before it is stamped canonical everywhere is a longer training run than one epoch.
+the data says they were not the bottleneck. The re-baseline of the other published numbers on
+`prod-a70s30` is now done (the hi-pivot entry just above), and the one remaining question —
+whether more than one epoch improves it — has now been answered (next entry).
+
+**The epoch sweep confirms one epoch is the stopping point — 30 July 2026.** The last open
+question before stamping `prod-a70s30` canonical was whether a longer-than-one-epoch schedule
+beats it. It does not. Two more runs, byte-identical to `prod-a70s30` except `epochs` (2 and 3;
+`configs/experiments/prod-a70s30-e{2,3}.yaml`, single-variable), were scored against e5, v2 and
+one-epoch `prod-a70s30` on all three published instruments:
+
+| epochs | in-domain r@1 | hi-pivot r@10 | FLORES non-Hi (held out) |
+|---|---|---|---|
+| v2 | 0.8964 | 0.8852 | 0.9609 |
+| **1 (`prod-a70s30`)** | 0.9029 | 0.8914 | **0.9805** |
+| 2 | 0.9062 | 0.8971 | 0.9701 |
+| 3 | 0.9084 | 0.8984 | 0.9673 |
+
+All three epoch counts beat v2 on all three instruments, so the promotion holds either way. But
+the sweep exposes a clean trade-off: more epochs lift the **in-domain** fit (in-domain and
+hi-pivot both climb monotonically) while **regressing the held-out FLORES benchmark**
+monotonically — 0.9805 → 0.9701 → 0.9673. Base e5 has the highest FLORES of all (0.9847);
+adaptation always costs some, and one epoch preserves the most. Trading ~1.3 points of the
+held-out public number for ~0.5 point of in-domain fit is a bad trade, so **one-epoch
+`prod-a70s30` stays canonical** — the sweep validates the promotion rather than replacing it.
+Scorer `scratch_prod_longer.py`; `reports/prod-longer-verdict.json` holds the scores; the e2/e3
+adapters are mirrored under `models/prod-a70s30-e{2,3}/`.
 
 The earlier hard-negative work is still valid on its own instrument:
 `reports/optionb/hn-verdict.json` holds those consolidated four-model, three-instrument

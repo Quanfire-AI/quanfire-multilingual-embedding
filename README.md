@@ -180,7 +180,9 @@ fixes it, and a production ten-language sweep settled the ratio: the 70:30 winne
 columns above show — on both published in-domain instruments too (in-domain +0.007, hi-pivot
 +0.006), so it exceeds v2 on all three at once. One honest null result is recorded with it: the
 dedicated sa/ur sentence sources did not lift sa/ur on FLORES — transfer already covered them.
-Both directions are recorded, not papered over.
+Both directions are recorded, not papered over. A 1/2/3-epoch sweep confirms one epoch is the
+stopping point: more epochs lift the in-domain fit but regress held-out FLORES (0.9805 → 0.9701
+→ 0.9673), so one-epoch `prod-a70s30` stays canonical.
 
 ### The control: it is not learning to match strings
 
