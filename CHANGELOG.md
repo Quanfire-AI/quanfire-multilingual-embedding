@@ -65,9 +65,12 @@ without a minor bump.
   Samanantar lacks: **sa** from `rahular/itihasa` (75k) and **ur** from OPUS-100 (148k), both
   non-gated (BPCC carries sa/ur but is gated, and was avoided). Blended against v2's article
   corpus at a fixed 1.0M total over three article:sentence ratios, v2's hyperparameters held.
-  The 70:30 winner, **`prod-a70s30`, beats v2 on both instruments**: FLORES non-Hindi **0.9805**
-  (v2 0.9609, near base 0.9847) *and* in-domain **0.9029** (v2 0.8964) — it exceeds v2
-  in-domain rather than merely holding it. Promotion candidate over v2. Honest null result
+  The 70:30 winner, **`prod-a70s30`, beats v2 on all three published instruments**: FLORES
+  non-Hindi **0.9805** (v2 0.9609, near base 0.9847), in-domain **0.9029** (v2 0.8964), and
+  hi-pivot mixed-pool r@10 **0.8914** (v2 0.8852) — it exceeds v2 in-domain rather than merely
+  holding it. Promotion candidate over v2. The hi-pivot instrument was re-baselined last, with
+  the byte-identical protocol that reproduces the published base (0.7495) and v2 (0.8852)
+  exactly (`scratch_prod_pivot.py`, `reports/prod-pivot-verdict.json`). Honest null result
   recorded: the dedicated sa/ur sources did **not** lift sa/ur on FLORES (cross-lingual
   transfer already covered them; classical Sanskrit is a domain mismatch). Recipe:
   `configs/experiments/prod-a{30s70,50s50,70s30}.yaml`, `scratch_production_prep.py`,

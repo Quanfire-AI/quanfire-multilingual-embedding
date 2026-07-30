@@ -8,8 +8,9 @@ checkpoint adapted on real Indic text beats itself by **28.6% (Hindi)** and **40
 on held-out retrieval, training 0.50% of its parameters. A single ten-language adapter
 trained on cross-lingual aligned pairs raises cross-lingual retrieval from **0.7875 → 0.8964
 recall@1** in-domain, and a production article+sentence blend (`prod-a70s30`) beats it on the
-public benchmark too — **0.9805** FLORES non-Hindi (v2 0.9609, near base E5) *and* **0.9029**
-in-domain, exceeding v2 on both. Phases D–E planned.
+public benchmark too — **0.9805** FLORES non-Hindi (v2 0.9609, near base E5), **0.9029**
+in-domain, and **0.8914** hi-pivot recall@10, exceeding v2 on all three published instruments.
+Phases D–E planned.
 
 ---
 
@@ -458,8 +459,8 @@ corpus at a fixed 1.0M total, three ratios swept, every hyperparameter held at v
 | `prod-a50s50` | 50 : 50 | 0.9792 | 0.8991 |
 | `prod-a70s30` | 70 : 30 | 0.9805 | **0.9029** |
 
-`prod-a70s30` is the winner and the promotion choice: it **strictly beats v2 on both
-instruments** — FLORES **0.9805** (+0.0196 over v2, within 0.004 of base) *and* in-domain
+`prod-a70s30` is the winner and the promotion choice: it **strictly beats v2 on both**
+sweep **instruments** — FLORES **0.9805** (+0.0196 over v2, within 0.004 of base) *and* in-domain
 **0.9029** (+0.0065 over v2, +0.115 over base). Not "holds v2 while closing FLORES" as the
 proof mix did — it *exceeds* v2 in-domain and nearly reaches base on FLORES, all ten languages
 at sentence scale. It replaces `indic-aligned-mix` as the promotion candidate over v2. Recipe:
@@ -467,14 +468,23 @@ at sentence scale. It replaces `indic-aligned-mix` as the promotion candidate ov
 `scratch_blend_ratio.py` (ratios), `scratch_prod_flores.py` (scorer);
 `reports/prod-flores-verdict.json` holds the scores.
 
+**Third instrument re-baselined — prod-a70s30 wins on all three — 30 July 2026.** The two
+sweep instruments above are two of v2's three published numbers; the third, the **hi-pivot
+mixed-pool recall@10**, was still measured on v2. Re-scored on `prod-a70s30` with the
+byte-identical `scratch_hn_verdict.instrument_pivot` protocol — which reproduced the published
+base (0.7495) and v2 (0.8852) exactly — it reads **0.8914 (+0.0062 over v2)**. So the
+promotion candidate now **beats v2 on every published instrument at once**: X↔Y in-domain r@1
+0.9029, hi-pivot r@10 0.8914, FLORES non-Hindi r@1 0.9805. Scorer `scratch_prod_pivot.py`;
+`reports/prod-pivot-verdict.json` holds the scores.
+
 One honest null result, recorded not buried: the dedicated **sa/ur sentence sources did not
 lift sa/ur on FLORES.** The proof — which had *no* sa/ur training data — scores higher on both
 (sa 0.9589, ur 0.9922) than any production ratio (sa ≈0.94, ur ≈0.98). Cross-lingual transfer
 from the other eight languages already covered sa/ur, and classical-epic Sanskrit (itihasa) is
 a domain mismatch for FLORES's modern prose. The sa/ur sources were the right thing to try;
-the data says they were not the bottleneck. Remaining scope: still one epoch, and a
-production `qfme adapt` re-baseline of the *other* published numbers (mono-lingual, hi-pivot)
-on `prod-a70s30` is the follow-through before it is stamped canonical everywhere.
+the data says they were not the bottleneck. Remaining scope: still one epoch. The re-baseline
+of the other published numbers on `prod-a70s30` is now done (the hi-pivot entry just above);
+what remains before it is stamped canonical everywhere is a longer training run than one epoch.
 
 The earlier hard-negative work is still valid on its own instrument:
 `reports/optionb/hn-verdict.json` holds those consolidated four-model, three-instrument

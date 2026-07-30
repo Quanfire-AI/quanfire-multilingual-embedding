@@ -39,7 +39,7 @@ worth stating once:
 | `samanantar-proof` | Sentence-scale Samanantar en↔indic bitext only (240k, 8 langs) | Proof; closes FLORES (0.9896, beats base) but gives back in-domain |
 | `indic-aligned-mix` | ~50/50 blend of article pairs and Samanantar sentence pairs (490k) | Proof-scale both-at-once — closes FLORES *and* holds in-domain; superseded by the production sweep |
 | `prod-a30s70` / `prod-a50s50` / `prod-a70s30` | Production ratio sweep: article : sentence at 30:70 / 50:50 / 70:30, 1.0M pairs, all 10 langs (Samanantar + itihasa sa + opus-100 ur) | Sweep to tune the blend ratio at scale |
-| `prod-a70s30` | The 70:30 winner of that sweep | **Promotion candidate over v2** — beats v2 on *both* instruments (FLORES 0.9805 vs 0.9609, in-domain 0.9029 vs 0.8964) |
+| `prod-a70s30` | The 70:30 winner of that sweep | **Promotion candidate over v2** — beats v2 on *all three* published instruments (FLORES 0.9805 vs 0.9609, in-domain 0.9029 vs 0.8964, hi-pivot r@10 0.8914 vs 0.8852) |
 
 The ten-language adapters raise cross-lingual retrieval from 0.7875 → 0.8964 recall@1
 in-domain. The plain hard-negative variant (`indic-aligned-hn`) trades ~1.5 points in-domain
@@ -56,13 +56,16 @@ Samanantar en↔indic bitext, **beats base E5** on FLORES (0.9896) but mirrors t
 (in-domain 0.8195). The proof-scale ~50/50 blend `indic-aligned-mix` collapsed the trade-off,
 and the **production sweep settled it**: a 1.0M-pair, ten-language blend (Samanantar + itihasa
 sa + opus-100 ur) swept over three article:sentence ratios. The 70:30 winner, `prod-a70s30`,
-**beats v2 on both instruments at once** — FLORES **0.9805** (v2 0.9609, near base) *and*
-in-domain **0.9029** (v2 0.8964) — so it is the promotion candidate over v2. The dedicated
-sa/ur sources did *not* lift sa/ur on FLORES (transfer already covered them); that null result
-is recorded, not hidden. Full working is in the ROADMAP entries dated 27–30 July 2026. Before
-`prod-a70s30` is stamped canonical everywhere, the *other* published numbers (mono-lingual,
-hi-pivot) still need a re-baseline on it. When one of these is the canonical serving artefact,
-copy it into place exactly as below.
+**beats v2 on all three published instruments at once** — FLORES **0.9805** (v2 0.9609, near
+base), in-domain **0.9029** (v2 0.8964), and hi-pivot mixed-pool r@10 **0.8914** (v2 0.8852) —
+so it is the promotion candidate over v2. (The hi-pivot number was re-baselined last, with the
+byte-identical protocol that reproduces the published base 0.7495 and v2 0.8852;
+`reports/prod-pivot-verdict.json`.) The dedicated sa/ur sources did *not* lift sa/ur on FLORES
+(transfer already covered them); that null result is recorded, not hidden. Full working is in
+the ROADMAP entries dated 27–30 July 2026. The other published numbers are now re-baselined on
+`prod-a70s30`; what remains before it is stamped canonical everywhere is a longer training run
+than one epoch. When one of these is the canonical serving artefact, copy it into place exactly
+as below.
 
 ## Then verify it
 
