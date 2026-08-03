@@ -516,6 +516,30 @@ the repository finally *ships* the measured winner rather than the two-language 
 with `qfme serve --adapter models/prod-a70s30`. `indic-v1` stays tracked as the historical
 baseline and integration-test fixture; it is not replaced.
 
+**Reaching past the ten languages, and a measurement lesson — 31 July – 3 August 2026.** Scored
+on a held-out FLORES-200 slice of fifteen major world languages (English, French, German,
+Spanish, Italian, Portuguese, Russian, Arabic, Turkish, Chinese, Japanese, Korean, Thai,
+Vietnamese, Indonesian), the Indic-only `prod-a70s30` shows *positive transfer*, not forgetting:
+all-pairs cross-lingual recall@1 **0.9268** (base E5) → **0.9756**, up on all fifteen. An early
+run flagged a lone French collapse to 0.788 — and it was a **measurement artifact**. This Mac's
+Apple MPS backend is non-deterministic on `scratch_global_baseline.py`: identical runs gave base
+E5 all-pairs anywhere from 0.814 to 0.927, Indonesian 0.295 to 0.927. Re-scored on the box's
+**CUDA** the script is byte-for-byte reproducible across two full runs, and there is no French
+hole (`prod-a70s30` French 0.991, in line with every language). The scorer now refuses to run on
+MPS; the rule is score-the-global-baseline-on-CUDA-only, and the handbook, book and memory were
+corrected from the phantom.
+
+**`prod-a70s30-fr` promoted and shipped — 3 August 2026.** Folding ~30k en↔fr OPUS-100 sentence
+pairs into `prod-a70s30`'s exact 1.0M blend yields `prod-a70s30-fr`, which on the same CUDA
+global baseline **strictly beats `prod-a70s30` on all fifteen** languages (all-pairs 0.9756 →
+**0.9814**; Portuguese 0.914 → 0.952, the largest single gain). A re-check on the three published
+Indic instruments confirms no Indic cost: in-domain X↔Y r@1 +0.0006, hi-pivot mixed-pool r@10
+−0.0013, held-out FLORES non-Hindi r@1 −0.0021 — all within noise, and still clear of v2
+(`reports/indic-fr-verdict.json`; scorer `scratch_indic_fr.py`). So `prod-a70s30-fr` is promoted
+to the canonical, git-tracked serving artefact (`models/prod-a70s30-fr/`, a third deliberate
+exception to the `models/*` ignore); serve with `qfme serve --adapter models/prod-a70s30-fr`.
+`prod-a70s30` stays tracked as the Indic-measured reference.
+
 The earlier hard-negative work is still valid on its own instrument:
 `reports/optionb/hn-verdict.json` holds those consolidated four-model, three-instrument
 scores.

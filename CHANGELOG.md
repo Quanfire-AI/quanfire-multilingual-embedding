@@ -59,6 +59,29 @@ without a minor bump.
 
 ### Added
 
+- **`prod-a70s30-fr` promoted to canonical and shipped — 2026-08-03.** `prod-a70s30`'s exact
+  1.0M blend with ~30k en↔fr OPUS-100 pairs folded in. On the held-out FLORES-200 global baseline
+  (fifteen major world languages, cross-lingual recall@1, scored on CUDA) it is a strict,
+  reproducible win over `prod-a70s30` on all fifteen (all-pairs 0.9756 → 0.9814; Portuguese
+  0.914 → 0.952), at no Indic cost — the three published Indic instruments move within noise
+  (in-domain +0.0006, hi-pivot −0.0013, held-out FLORES −0.0021) and still clear v2. Its weights
+  are git-tracked (`models/prod-a70s30-fr/`, a third deliberate exception to the `models/*`
+  ignore); serve with `qfme serve --adapter models/prod-a70s30-fr`. `prod-a70s30` stays tracked
+  as the Indic-measured reference.
+- **The global baseline is CUDA-only; a phantom "French regression" was an MPS artifact —
+  2026-08-03.** An early run of `scratch_global_baseline.py` reported `prod-a70s30` collapsing
+  French to 0.788. It was not real: this Mac's Apple MPS backend is non-deterministic on that
+  scorer (identical runs gave base E5 all-pairs 0.814 to 0.927; Indonesian 0.295 to 0.927). On
+  the box's CUDA the same script is byte-for-byte reproducible and shows no French hole (0.991).
+  The scorer now refuses to run on MPS (`QFME_ALLOW_MPS=1` overrides, to reproduce the bug); the
+  handbook, book and memory are corrected.
+- **`tokenizer.input_sentence_size` caps the SentencePiece EM training sample — 2026-08-03.**
+  Defaults to `0` ("use all", SentencePiece's own default, so no existing run changes). A
+  positive value subsamples the EM pass, which is what lets a from-scratch run over a
+  multi-million-sentence monolingual corpus finish: an uncapped ~2.2M-sentence Hindi run with a
+  32k unigram vocabulary stalled with no progress. The from-scratch example config sets
+  `1_000_000`; paired with `shuffle_input_sentence` (default True) so the subsample spans the
+  corpus.
 - **`prod-a70s30` promoted to canonical and shipped — 2026-07-30.** With the epoch count
   settled, the ten-language 70:30 blend is now the production adapter. Its weights are
   git-tracked (`models/prod-a70s30/`, a second deliberate exception to the `models/*` ignore

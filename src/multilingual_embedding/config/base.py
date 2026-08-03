@@ -174,6 +174,26 @@ class TokenizerConfig:
     max_sentence_length:
         Longest training sentence, in bytes, passed to SentencePiece.
 
+    input_sentence_size:
+        Cap on how many sentences SentencePiece feeds into its EM
+        training pass. ``0`` (the default, and SentencePiece's own) means
+        "use every staged sentence". On a large monolingual corpus the
+        uncapped EM step slows to a crawl — a from-scratch Hindi run of
+        ~2.2M sentences with a 32k unigram vocabulary stalled here with no
+        progress logged. Setting a cap (e.g. ``1_000_000``) subsamples the
+        EM training set to that many sentences and completes, at no real
+        quality cost: the seed vocabulary is estimated from a large random
+        sample, not the whole corpus. Sentences beyond the cap still shape
+        character coverage. Paired with ``shuffle_input_sentence`` so the
+        subsample is drawn across the corpus, not just its head.
+
+    shuffle_input_sentence:
+        Whether SentencePiece shuffles before it subsamples to
+        ``input_sentence_size``. Only matters when that cap is below the
+        corpus size; then it is what keeps the EM sample representative
+        rather than the first N lines. Defaults to True, matching
+        SentencePiece.
+
     model_prefix:
         Base filename for the trained model artefacts.
     """
@@ -191,6 +211,10 @@ class TokenizerConfig:
     pretokenizer: dict[str, Any] = field(default_factory=lambda: {"type": "whitespace"})
 
     max_sentence_length: int = 16_384
+
+    input_sentence_size: int = 0
+
+    shuffle_input_sentence: bool = True
 
     model_prefix: str = "tokenizer"
 
@@ -222,6 +246,10 @@ class TokenizerConfig:
         )
 
         require_positive(self.max_sentence_length, name="max_sentence_length")
+
+        # Zero is a legitimate value here (SentencePiece's "use every
+        # sentence"), so this is non-negative rather than positive.
+        require_non_negative(self.input_sentence_size, name="input_sentence_size")
 
 
 @dataclass(slots=True)

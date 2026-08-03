@@ -22,12 +22,13 @@ A copy somewhere else works, but nothing will find it for you.
 
 ## The adapters that exist
 
-Two adapters are git-tracked: `indic-v1` above — the original two-language (hi/ta) adapter,
+Three adapters are git-tracked: `indic-v1` above — the original two-language (hi/ta) adapter,
 kept because it predates `qfme adapt`, carries the first published numbers and is the
-integration-test fixture — and `prod-a70s30`, the current production adapter (below), shipped
-so it can be served without a GPU rebuild. Everything else is produced by `qfme adapt` from a
-committed configuration, so it is reproducible and stays git-ignored — but the names recur
-throughout [ROADMAP.md](../ROADMAP.md) and the reports, so they are worth stating once:
+integration-test fixture — `prod-a70s30`, the Indic-measured reference (below), and
+`prod-a70s30-fr`, the current production adapter, shipped so it can be served without a GPU
+rebuild. Everything else is produced by `qfme adapt` from a committed configuration, so it is
+reproducible and stays git-ignored — but the names recur throughout
+[ROADMAP.md](../ROADMAP.md) and the reports, so they are worth stating once:
 
 | Directory | What it is | Status |
 |---|---|---|
@@ -40,8 +41,9 @@ throughout [ROADMAP.md](../ROADMAP.md) and the reports, so they are worth statin
 | `samanantar-proof` | Sentence-scale Samanantar en↔indic bitext only (240k, 8 langs) | Proof; closes FLORES (0.9896, beats base) but gives back in-domain |
 | `indic-aligned-mix` | ~50/50 blend of article pairs and Samanantar sentence pairs (490k) | Proof-scale both-at-once — closes FLORES *and* holds in-domain; superseded by the production sweep |
 | `prod-a30s70` / `prod-a50s50` / `prod-a70s30` | Production ratio sweep: article : sentence at 30:70 / 50:50 / 70:30, 1.0M pairs, all 10 langs (Samanantar + itihasa sa + opus-100 ur) | Sweep to tune the blend ratio at scale |
-| `prod-a70s30` | The 70:30 winner of that sweep | **Canonical / shipped production adapter** (git-tracked) — beats v2 on *all three* published instruments (FLORES 0.9805 vs 0.9609, in-domain 0.9029 vs 0.8964, hi-pivot r@10 0.8914 vs 0.8852); serve with `qfme serve --adapter models/prod-a70s30` |
+| `prod-a70s30` | The 70:30 winner of that sweep | **Indic-measured reference** (git-tracked) — beats v2 on *all three* published Indic instruments (FLORES 0.9805 vs 0.9609, in-domain 0.9029 vs 0.8964, hi-pivot r@10 0.8914 vs 0.8852); superseded as the serving artefact by `prod-a70s30-fr` |
 | `prod-a70s30-e2` / `prod-a70s30-e3` | `prod-a70s30` retrained at 2 / 3 epochs (single-variable epoch sweep) | Confirms one epoch is the stopping point — more epochs lift in-domain but regress held-out FLORES (0.9805 → 0.9701 → 0.9673) |
+| `prod-a70s30-fr` | `prod-a70s30`'s exact 1.0M blend + ~30k en↔fr OPUS-100 pairs | **Canonical / shipped production adapter** (git-tracked) — on the held-out FLORES-200 global baseline (15 world languages, scored on CUDA) a strict, reproducible win over `prod-a70s30` on all 15 (all-pairs 0.9756 → 0.9814; Portuguese 0.914 → 0.952), at no Indic cost (A/B/C neutral within noise); serve with `qfme serve --adapter models/prod-a70s30-fr` |
 
 The ten-language adapters raise cross-lingual retrieval from 0.7875 → 0.8964 recall@1
 in-domain. The plain hard-negative variant (`indic-aligned-hn`) trades ~1.5 points in-domain
@@ -70,6 +72,22 @@ the ROADMAP entries dated 27–30 July 2026. The other published numbers are now
 regresses the held-out FLORES benchmark monotonically (0.9805 → 0.9701 → 0.9673), so **one
 epoch stays canonical** (`reports/prod-longer-verdict.json`). When one of these is the canonical
 serving artefact, copy it into place exactly as below.
+
+**Reaching past the ten languages — and the measurement lesson that came with it.** Scored on a
+held-out FLORES-200 slice of fifteen major world languages, the Indic-only `prod-a70s30` shows
+*positive transfer*, not forgetting: all-pairs cross-lingual recall@1 **0.9268** (base E5) →
+**0.9756**, up on all fifteen. An early run of that baseline reported a lone French collapse to
+0.788 — but that was a **measurement artifact of this Mac's Apple MPS backend**, which is
+non-deterministic on this scorer (identical runs gave base E5 anywhere from 0.814 to 0.927).
+Re-scored on the box's **CUDA** the same script is byte-for-byte reproducible across runs, and
+there is no French hole (0.991, in line with every language). Rule, now enforced by a guard in
+`scratch_global_baseline.py`: score the global baseline on CUDA, never MPS. Folding ~30k en↔fr
+OPUS-100 pairs into the blend (`prod-a70s30-fr`) then strictly improves *all fifteen* global
+languages (all-pairs **0.9756 → 0.9814**, Portuguese 0.914 → 0.952) at no Indic cost — the three
+published Indic instruments move within noise (in-domain +0.0006, hi-pivot −0.0013, held-out
+FLORES −0.0021) and still clear v2. So `prod-a70s30-fr` is promoted to the canonical serving
+artefact; `prod-a70s30` stays tracked as the Indic-measured reference. Full working is in the
+ROADMAP entries dated 31 July – 3 August 2026.
 
 ## Then verify it
 

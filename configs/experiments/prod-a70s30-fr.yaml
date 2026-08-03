@@ -1,0 +1,42 @@
+# French-recovery re-adaptation. Identical to prod-a70s30 in every hyperparameter;
+# the ONLY change is the training blend: prod-a70s30's exact 1.0M pairs PLUS ~30k
+# en<->fr OPUS-100 sentence pairs folded into the sentence side. Adds French signal
+# without removing any Indic signal, so the 13/15 global gains are preserved by
+# construction while the French regression (-0.12 vs base, which v2 never had) is
+# targeted. Verify against the SAME FLORES-200 global baseline before shipping.
+#
+#     .venv/bin/qfme adapt --config configs/experiments/prod-a70s30-fr.yaml --profile configs/gpu.yaml
+name: prod-a70s30-fr
+
+seed: 0
+
+adaptation:
+  checkpoint: intfloat/multilingual-e5-small
+
+  pairs: data/pairs/prod-a70s30-fr.jsonl.gz
+
+  train_pairs: 1027759
+  eval_pairs: 2000
+  sample_pairs: 1029759
+
+  adaptation: in-distribution
+  train_kinds: ""
+  eval_kinds: ""
+  train_languages: ""
+  eval_languages: ""
+
+  epochs: 1
+  learning_rate: 0.0001
+
+  rank: 32
+  targets: query,value
+
+  pooling: mean
+  max_length: 256
+  query_prefix: ""
+  passage_prefix: ""
+
+  save_adapter: models/prod-a70s30-fr
+  data_provenance: public
+
+  report: reports/prod-a70s30-fr-adapt.json

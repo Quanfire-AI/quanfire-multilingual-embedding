@@ -27,6 +27,11 @@ tokenizer:
   # like Manipuri, whose corpus cannot support 32k pieces.
   vocab_size: 32000
   character_coverage: 0.9995
+  # Cap the EM training sample. A full Hindi Wikipedia dump is ~2.2M
+  # sentences, and SentencePiece's uncapped EM pass over that with a 32k
+  # unigram vocabulary stalls with no progress. One million shuffled
+  # sentences seed the vocabulary just as well and let it finish.
+  input_sentence_size: 1000000
 
 pretraining:
   # ~25M parameters at these settings — comfortable on 16 GB with the

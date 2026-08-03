@@ -296,6 +296,13 @@ class SentencePieceTrainerAdapter:
                 character_coverage=self._config.character_coverage,
                 model_type=self._config.model_type.value,
                 max_sentence_length=self._config.max_sentence_length,
+                # Cap the EM training sample on large corpora. 0 means
+                # "use all" (SentencePiece's default); a positive value
+                # subsamples, which is what keeps a multi-million-sentence
+                # monolingual corpus from stalling the EM pass. Shuffled so
+                # the subsample is drawn across the corpus, not its head.
+                input_sentence_size=self._config.input_sentence_size,
+                shuffle_input_sentence=self._config.shuffle_input_sentence,
                 # These ids MUST match vocabulary/special_tokens.py. The
                 # SentencePiece defaults differ (no pad, unk=0, bos=1,
                 # eos=2), and a mismatch is silent: encoding would return

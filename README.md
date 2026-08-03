@@ -1008,10 +1008,12 @@ qfme serve --adapter models/indic-v1 --port 8000
 ```
 
 The walkthrough below serves `indic-v1` because it is the small, self-contained tracked demo.
-For real use, serve the **canonical production adapter** — the ten-language `prod-a70s30`, also
-git-tracked: `qfme serve --adapter models/prod-a70s30`. (It uses empty prefixes rather than
-`query: `/`passage: `; the endpoint reads that from its `adapter.json`, so clients need no
-change.)
+For real use, serve the **canonical production adapter** — `prod-a70s30-fr`, also git-tracked:
+`qfme serve --adapter models/prod-a70s30-fr`. It is the ten-language `prod-a70s30` with ~30k
+en↔fr sentence pairs folded in, which on the held-out FLORES-200 global baseline (fifteen world
+languages, scored on CUDA) strictly beats `prod-a70s30` on all fifteen at no Indic cost. (It
+uses empty prefixes rather than `query: `/`passage: `; the endpoint reads that from its
+`adapter.json`, so clients need no change.)
 
 Startup takes a few seconds: it loads the base checkpoint, applies LoRA, then binds. Add
 `--local-files-only` (and `HF_HUB_OFFLINE=1`) to refuse the network and run entirely
