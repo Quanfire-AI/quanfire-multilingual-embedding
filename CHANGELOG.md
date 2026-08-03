@@ -55,10 +55,33 @@ absent.
 **Not public.** Everything else, `embedding/` and `pipelines/` included. They may move
 without a minor bump.
 
-## Unreleased
+## 0.4.0 — 2026-08-04
+
+This release makes the measured production winner consumable: `prod-a70s30-fr` and the
+completed CLI ship in a pinnable tag, closing the gap where `v0.3.0` — the last tag —
+predated the entire `prod-a70s30` promotion. No public-API surface changed; the minor bump
+reflects the shipped model and the additive `tokenizer.input_sentence_size`.
 
 ### Added
 
+- **The from-scratch neural path, proven end-to-end on the GPU box — 2026-08-03.** The
+  `pretrain` → `finetune` loop ran at real scale on real Hindi Wikipedia: a SentencePiece 32k
+  tokenizer over 2.2M sentences, a 23M-parameter transformer pretrained 34,517 steps (one MLM
+  epoch), contrastive fine-tuning on structural pairs, then two independent held-out
+  re-evaluations. Fine-tuning more than doubled retrieval — recall@1 0.105 → 0.259 (+148%),
+  MRR 0.166 → 0.357, recall@10 0.281 → 0.565 — with disjoint 95% confidence intervals
+  (`[0.092, 0.119]` vs `[0.241, 0.279]`); the pipeline's own `finetune` gate confirmed the gain
+  and exited zero. This proves *capability and correctness*, not absolute quality: one epoch on a
+  23M model leaves the hard low-lexical-overlap band at 0.095, a compute-and-data dial rather
+  than a wiring defect. Handbook 2.3 and book 22.1 carry the result; the OOM tuning step
+  (batch 256 toy default → 64 for the real model) is recorded.
+- **The `qfme` CLI reference completed and validated in both books — 2026-08-04.** Handbook 6.2
+  gained dedicated, source-validated subsections for `mine-aligned`, `ingest-parallel`,
+  `pretrain` and `finetune`, flag tables for `train` and `adapt` (including the LoRA dials
+  `--rank`/`--targets`/`--pooling`/`--query-prefix`/`--passage-prefix`), the provenance-wall and
+  licence-wall framing, and a corrected exit-code table (`finetune`/`pretrain` result-codes and
+  `--stop-after-epoch` success). Book Chapter 13 + Appendix B were audited against `qfme --help`
+  and `cli.py` and reconciled. Both PDFs rebuilt.
 - **`prod-a70s30-fr` promoted to canonical and shipped — 2026-08-03.** `prod-a70s30`'s exact
   1.0M blend with ~30k en↔fr OPUS-100 pairs folded in. On the held-out FLORES-200 global baseline
   (fifteen major world languages, cross-lingual recall@1, scored on CUDA) it is a strict,
