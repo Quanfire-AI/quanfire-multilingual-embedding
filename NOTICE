@@ -1,0 +1,15 @@
+QuanFire Multilingual Embedding
+Copyright 2026 QuanFire (https://www.quanfire.ai)
+
+This product includes software developed at QuanFire.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use this software except in compliance with the License. A copy of the
+License is provided in the LICENSE file and is also available at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+This licence covers the framework source code in this repository. It does
+NOT grant rights to the "QuanFire" name, logo, or other trademarks, and it
+does NOT cover trained model weights, which are distributed separately
+under their own terms.

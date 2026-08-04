@@ -7,6 +7,10 @@ dynamic = ["version"]
 description = "Production-ready multilingual NLP and embedding framework"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
+# SPDX expression (PEP 639). The framework source is Apache-2.0; trained
+# model weights are distributed separately under their own terms (see NOTICE).
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 
 authors = [
     { name = "Ronika Chakrawarty", email = "ronika@quanfire.ai" },
@@ -34,10 +38,9 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Text Processing :: Linguistic",
     "Typing :: Typed",
-    # Licence classifier intentionally omitted: the project licence is
-    # still undecided (see docs/installing.md). PyPI treats a package with
-    # no licence as all-rights-reserved, so the licence must be chosen and
-    # set here — plus a LICENSE file added — before any real publish.
+    # No `License ::` trove classifier: the licence is declared with the
+    # SPDX `license` expression above (PEP 639), and PyPI rejects mixing the
+    # two. The classifier form is deprecated.
 ]
 
 dependencies = [
