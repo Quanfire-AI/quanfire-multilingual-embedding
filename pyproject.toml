@@ -8,6 +8,38 @@ description = "Production-ready multilingual NLP and embedding framework"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 
+authors = [
+    { name = "Ronika Chakrawarty", email = "ronika@quanfire.ai" },
+]
+
+keywords = [
+    "multilingual",
+    "embedding",
+    "sentence-embeddings",
+    "information-retrieval",
+    "nlp",
+    "indic",
+    "hindi",
+]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Natural Language :: Hindi",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Linguistic",
+    "Typing :: Typed",
+    # Licence classifier intentionally omitted: the project licence is
+    # still undecided (see docs/installing.md). PyPI treats a package with
+    # no licence as all-rights-reserved, so the licence must be chosen and
+    # set here — plus a LICENSE file added — before any real publish.
+]
+
 dependencies = [
     "numpy>=1.26,<3.0",
     "pandas>=2.0,<3.0",
@@ -15,6 +47,11 @@ dependencies = [
     "sentencepiece>=0.2,<0.3",
     "tqdm>=4.67,<5.0",
 ]
+
+[project.urls]
+Homepage = "https://www.quanfire.ai"
+Repository = "https://github.com/Quanfire-AI/quanfire-multilingual-embedding"
+Changelog = "https://github.com/Quanfire-AI/quanfire-multilingual-embedding/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # Neural training and inference. Kept optional so that the corpus,
