@@ -141,6 +141,20 @@ path = "src/multilingual_embedding/common/version.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/multilingual_embedding"]
 
+# The sdist ships only source + packaging metadata. Without an explicit
+# allowlist, hatchling sweeps the working directory and would pull in trained
+# model weights, large knowledge-base PDFs, and untracked scratch files that
+# have no place in a published distribution. LICENSE/NOTICE/README are the
+# files declared elsewhere in this pyproject; pyproject.toml itself is always
+# added by the backend.
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "src/multilingual_embedding",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+]
+
 [dependency-groups]
 dev = [
     "build>=1,<2",
