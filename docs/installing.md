@@ -16,7 +16,7 @@ Everything below was executed and its output pasted verbatim.
 One line, if your SSH key has access to the repository — no clone needed:
 
 ```bash
-uv tool install 'git+ssh://git@github.com/<owner>/quanfire-multilingual-embedding[neural,wikipedia]'
+uv tool install 'git+ssh://git@github.com/quanfire-ai/quanfire-multilingual-embedding[neural,wikipedia]'
 ```
 
 ```
@@ -42,7 +42,7 @@ $ cd /tmp
 $ which qfme
 /Users/you/.local/bin/qfme
 $ qfme --version
-qfme 0.3.2
+qfme 0.4.0
 ```
 
 ### What it actually did
@@ -191,7 +191,7 @@ QuanFire repository that wants the corpus, vocabulary, tokenizer or evaluation l
 without reimplementing them.
 
 ```bash
-uv add "quanfire-multilingual-embedding @ git+ssh://git@github.com/<owner>/quanfire-multilingual-embedding.git@v0.3.2"
+uv add "quanfire-multilingual-embedding @ git+ssh://git@github.com/quanfire-ai/quanfire-multilingual-embedding.git@v0.4.0"
 ```
 
 **Pin a tag, never a branch.** `uv tool upgrade` re-fetching the default branch is fine
@@ -237,7 +237,7 @@ GitHub grants access to can install it directly**, with the same one-line comman
 ### For a collaborator with repo access
 
 ```bash
-uv tool install 'git+ssh://git@github.com/<owner>/quanfire-multilingual-embedding[neural,wikipedia]'
+uv tool install 'git+ssh://git@github.com/quanfire-ai/quanfire-multilingual-embedding[neural,wikipedia]'
 ```
 
 ```
@@ -273,8 +273,8 @@ uv tool upgrade quanfire-multilingual-embedding
 ```
 
 ```
-Updating ssh://git@github.com/<owner>/quanfire-multilingual-embedding (HEAD)
- Updated ssh://git@github.com/<owner>/quanfire-multilingual-embedding (c1445b8)
+Updating ssh://git@github.com/quanfire-ai/quanfire-multilingual-embedding (HEAD)
+ Updated ssh://git@github.com/quanfire-ai/quanfire-multilingual-embedding (c1445b8)
 ```
 
 It re-fetches the default branch, so a collaborator picks up new commits without touching
@@ -288,7 +288,7 @@ without a deploy key, or someone you would rather not add to the repository:
 ```bash
 uv build --wheel                    # writes dist/*.whl
 # send the file, then on their machine:
-uv tool install ./quanfire_multilingual_embedding-0.3.2-py3-none-any.whl
+uv tool install ./quanfire_multilingual_embedding-0.4.0-py3-none-any.whl
 ```
 
 The trade is that they get a frozen copy with no upgrade path — `uv tool upgrade` has
@@ -298,7 +298,7 @@ nowhere to look.
 
 | Route | Command | Needs |
 |---|---|---|
-| Public git | `uv tool install 'git+https://github.com/<owner>/<repo>[neural,wikipedia]'` | Making the repository public |
+| Public git | `uv tool install 'git+https://github.com/quanfire-ai/quanfire-multilingual-embedding[neural,wikipedia]'` | Making the repository public |
 | PyPI | `uv tool install 'quanfire-multilingual-embedding[neural,wikipedia]'` | Publishing a release |
 
 Two things want answers before either, rather than assumptions: the licence, still recorded

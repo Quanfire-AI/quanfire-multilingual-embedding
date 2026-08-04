@@ -377,7 +377,7 @@ how the tests verify it; producing a model worth serving wants a card. See
 **To use it** — a `qfme` command available anywhere, like any other CLI tool:
 
 ```bash
-uv tool install 'git+ssh://git@github.com/<owner>/quanfire-multilingual-embedding[neural,wikipedia]'
+uv tool install 'git+ssh://git@github.com/quanfire-ai/quanfire-multilingual-embedding[neural,wikipedia]'
 qfme --version
 ```
 
@@ -1024,7 +1024,7 @@ by hand:
 
 ```bash
 curl -s localhost:8000/health
-# {"status":"ok","model":"indic-v1","framework_version":"0.3.2"}
+# {"status":"ok","model":"indic-v1","framework_version":"0.4.0"}
 
 curl -s localhost:8000/v1/models
 # id indic-v1 · dimension 384 · max_length 256 · normalized true

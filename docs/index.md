@@ -108,7 +108,7 @@ Note what that does *not* say: the weights are not loaded into this project's tr
 That encoder is pre-norm while most published ones are post-norm, and the shapes match, so
 a cross-load would succeed and be numerically wrong with nothing raising. External
 checkpoints are therefore run through their own library instead, behind the same
-`TextEncoder` contract. See [ROADMAP.md](https://github.com/quanfire/quanfire-multilingual-embedding/blob/main/ROADMAP.md).
+`TextEncoder` contract. See [ROADMAP.md](https://github.com/quanfire-ai/quanfire-multilingual-embedding/blob/main/ROADMAP.md).
 
 **Still absent.** These are missing rather than stubbed:
 

@@ -1,6 +1,6 @@
 site_name: QuanFire Multilingual Embedding
 site_description: A production-grade multilingual NLP and embedding framework
-repo_url: https://github.com/quanfire/quanfire-multilingual-embedding
+repo_url: https://github.com/quanfire-ai/quanfire-multilingual-embedding
 edit_uri: ""
 
 theme:
