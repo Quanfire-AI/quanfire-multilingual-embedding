@@ -23,14 +23,14 @@
     "data_provenance": "public",
     "trained_on": "data/pairs/prod-a70s30-fr.jsonl.gz",
     "scored_against": "data/pairs/prod-a70s30-fr.jsonl.gz",
-    "train_pairs": 1023223,
+    "train_pairs": 1023266,
     "adaptation": "in-distribution",
     "train_kinds": [
       "aligned_lead",
       "aligned_nonpivot",
       "aligned_title_lead",
-      "opus100",
-      "sentence"
+      "sentence",
+      "tatoeba"
     ],
     "train_languages": [
       "bn",
@@ -58,8 +58,8 @@
       "te",
       "ur"
     ],
-    "recall_at_1_before": 0.7047,
-    "recall_at_1_after": 0.8769,
+    "recall_at_1_before": 0.7121,
+    "recall_at_1_after": 0.8943,
     "epochs": 1,
     "learning_rate": 0.0001,
     "batch_size": 256
