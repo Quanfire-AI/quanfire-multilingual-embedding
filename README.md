@@ -30,6 +30,11 @@ single-sentence bitext — is now beaten: a production ten-language sentence ble
 0.9609, near base), in-domain **0.9029** (v2 0.8964), and hi-pivot recall@10 **0.8914** (v2
 0.8852). [Full numbers below.](#what-this-has-achieved)
 
+**Pretrained weights** — the shipped adapter is published on Hugging Face at
+[quanfire-ai/multilingual-embedding](https://huggingface.co/quanfire-ai/multilingual-embedding),
+released under CC BY-SA 4.0 on commercially-clean training data. Framework source is Apache-2.0;
+see [License](#license).
+
 ---
 
 ## Table of contents
@@ -1019,6 +1024,10 @@ instruments stay neutral within sampling noise (in-domain −0.0035 ≈ one stan
 hi-pivot flat, FLORES non-Hindi −0.0020) while still beating v2 on all three. (It uses empty
 prefixes rather than `query: `/`passage: `; the endpoint reads that from its `adapter.json`,
 so clients need no change.)
+
+Don't want to clone this repo just for the weights? Pull them from Hugging Face:
+`hf download quanfire-ai/multilingual-embedding --local-dir multilingual-embedding`
+then `qfme serve --adapter multilingual-embedding`.
 
 Startup takes a few seconds: it loads the base checkpoint, applies LoRA, then binds. Add
 `--local-files-only` (and `HF_HUB_OFFLINE=1`) to refuse the network and run entirely
