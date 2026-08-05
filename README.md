@@ -1365,3 +1365,9 @@ effect: **the weights are commercially usable and redistributable** — you can 
 in a paid product and release them — as long as redistributed weights stay share-alike
 and preserve attribution. The adapter metadata (`adapter.json`) records the training
 `kinds` for auditability.
+
+The Indic-measurement reference `prod-a70s30` is cited throughout these results but is
+deliberately **not** among the released weights: it predates the clean-provenance retrain,
+and its sentence side was Samanantar (CC BY-NC) + opus-100 (unknown licence), which would
+carry a NonCommercial restriction. Its numbers stand as a measurement baseline; the shipped
+weights are `prod-a70s30-fr`, re-sourced from the CC0/CC BY doors described above.

@@ -22,11 +22,14 @@ A copy somewhere else works, but nothing will find it for you.
 
 ## The adapters that exist
 
-Three adapters are git-tracked: `indic-v1` above — the original two-language (hi/ta) adapter,
+Two adapters are git-tracked: `indic-v1` above — the original two-language (hi/ta) adapter,
 kept because it predates `qfme adapt`, carries the first published numbers and is the
-integration-test fixture — `prod-a70s30`, the Indic-measured reference (below), and
-`prod-a70s30-fr`, the current production adapter, shipped so it can be served without a GPU
-rebuild. Everything else is produced by `qfme adapt` from a committed configuration, so it is
+integration-test fixture — and `prod-a70s30-fr`, the current production adapter, shipped so it
+can be served without a GPU rebuild and trained only on commercially-clean data. `prod-a70s30`
+(the Indic-measured reference, below) is deliberately **not** tracked: its sentence side was
+Samanantar (CC BY-NC) + opus-100 (unknown licence), so shipping those weights would carry a
+NonCommercial restriction; its numbers are documented here but the binary is not distributed.
+Everything else is produced by `qfme adapt` from a committed configuration, so it is
 reproducible and stays git-ignored — but the names recur throughout
 [ROADMAP.md](../ROADMAP.md) and the reports, so they are worth stating once:
 
@@ -41,9 +44,9 @@ reproducible and stays git-ignored — but the names recur throughout
 | `samanantar-proof` | Sentence-scale Samanantar en↔indic bitext only (240k, 8 langs) | Proof; closes FLORES (0.9896, beats base) but gives back in-domain |
 | `indic-aligned-mix` | ~50/50 blend of article pairs and Samanantar sentence pairs (490k) | Proof-scale both-at-once — closes FLORES *and* holds in-domain; superseded by the production sweep |
 | `prod-a30s70` / `prod-a50s50` / `prod-a70s30` | Production ratio sweep: article : sentence at 30:70 / 50:50 / 70:30, 1.0M pairs, all 10 langs (Samanantar + itihasa sa + opus-100 ur) | Sweep to tune the blend ratio at scale |
-| `prod-a70s30` | The 70:30 winner of that sweep | **Indic-measured reference** (git-tracked) — beats v2 on *all three* published Indic instruments (FLORES 0.9805 vs 0.9609, in-domain 0.9029 vs 0.8964, hi-pivot r@10 0.8914 vs 0.8852); superseded as the serving artefact by `prod-a70s30-fr` |
+| `prod-a70s30` | The 70:30 winner of that sweep | **Indic-measured reference** — beats v2 on *all three* published Indic instruments (FLORES 0.9805 vs 0.9609, in-domain 0.9029 vs 0.8964, hi-pivot r@10 0.8914 vs 0.8852); **not distributed** (its sentence side was CC BY-NC + unknown-licence data); superseded as the serving artefact by the clean-provenance `prod-a70s30-fr` |
 | `prod-a70s30-e2` / `prod-a70s30-e3` | `prod-a70s30` retrained at 2 / 3 epochs (single-variable epoch sweep) | Confirms one epoch is the stopping point — more epochs lift in-domain but regress held-out FLORES (0.9805 → 0.9701 → 0.9673) |
-| `prod-a70s30-fr` | `prod-a70s30`'s exact 1.0M blend + ~30k en↔fr OPUS-100 pairs | **Canonical / shipped production adapter** (git-tracked) — on the held-out FLORES-200 global baseline (15 world languages, scored on CUDA) a strict, reproducible win over `prod-a70s30` on all 15 (all-pairs 0.9756 → 0.9814; Portuguese 0.914 → 0.952), at no Indic cost (A/B/C neutral within noise); serve with `qfme serve --adapter models/prod-a70s30-fr` |
+| `prod-a70s30-fr` | The 70:30 blend rebuilt on **commercially-clean** data (BPCC-Mined CC0 sentence side + Tatoeba CC BY en↔fr, over the CC BY-SA Wikipedia article side) | **Canonical / shipped production adapter** (git-tracked) — on the held-out FLORES-200 global baseline (15 world languages, scored on CUDA) all-pairs recall **0.9762** tops both `prod-a70s30` (0.9756) and the 0.9268 base, and **recovers French to 0.990** with no language regressed vs base (it trades within noise per-language rather than strictly dominating); Indic neutral within sampling noise and still clears v2 on all three; serve with `qfme serve --adapter models/prod-a70s30-fr` |
 
 The ten-language adapters raise cross-lingual retrieval from 0.7875 → 0.8964 recall@1
 in-domain. The plain hard-negative variant (`indic-aligned-hn`) trades ~1.5 points in-domain
@@ -82,12 +85,25 @@ non-deterministic on this scorer (identical runs gave base E5 anywhere from 0.81
 Re-scored on the box's **CUDA** the same script is byte-for-byte reproducible across runs, and
 there is no French hole (0.991, in line with every language). Rule, now enforced by a guard in
 `scratch_global_baseline.py`: score the global baseline on CUDA, never MPS. Folding ~30k en↔fr
-OPUS-100 pairs into the blend (`prod-a70s30-fr`) then strictly improves *all fifteen* global
-languages (all-pairs **0.9756 → 0.9814**, Portuguese 0.914 → 0.952) at no Indic cost — the three
-published Indic instruments move within noise (in-domain +0.0006, hi-pivot −0.0013, held-out
-FLORES −0.0021) and still clear v2. So `prod-a70s30-fr` is promoted to the canonical serving
-artefact; `prod-a70s30` stays tracked as the Indic-measured reference. Full working is in the
-ROADMAP entries dated 31 July – 3 August 2026.
+pairs into the blend (`prod-a70s30-fr`) then lifts the global all-pairs recall above both the
+base and `prod-a70s30` and recovers French, at no Indic cost — the three published Indic
+instruments move within sampling noise and still clear v2. So `prod-a70s30-fr` is promoted to
+the canonical serving artefact.
+
+**The clean-provenance retrain (Door A, August 2026).** The blend above was first assembled
+from Samanantar (CC BY-NC) on the sentence side and opus-100 (unknown licence) for the French
+fold — fine for measurement, but not weights QuanFire could redistribute for commercial use.
+So `prod-a70s30-fr` was **re-sourced, not re-engineered**: the identical recipe was rebuilt on
+**BPCC-Mined (CC0)** — which redistributes the same Samanantar sentences under a clean licence —
+and **Tatoeba (CC BY)** for en↔fr, over the unchanged CC BY-SA Wikipedia article side. Re-scored
+on CUDA the clean weights hold the win: global all-pairs **0.9762** (> `prod-a70s30` 0.9756,
+> base 0.9268), French **0.990** recovered with no language regressed vs base, and Indic neutral
+within noise (in-domain −0.0035 ≈ one standard error over n≈8.3k, hi-pivot flat, FLORES
+non-Hindi −0.0020) while still beating v2 on all three. The shipped weights therefore train on
+**CC0 + Apache-2.0 + CC BY + CC BY-SA only** and are released under CC BY-SA 4.0 — commercially
+usable and redistributable. `prod-a70s30` itself was *not* re-sourced; it is kept only as the
+Indic-measurement reference and its (NC-trained) weights are no longer distributed. Full working
+is in the ROADMAP entries dated 31 July – 5 August 2026.
 
 ## Then verify it
 
@@ -127,7 +143,8 @@ other than what was measured. Nothing raises.
 ## Why this directory is tracked, mostly
 
 `.gitignore` ignores `models/*` — trained artefacts are build outputs and do not belong
-in git. `models/indic-v1/` and this file are the documented exceptions: 3.4 MB is trivial
-for git, and an artefact that carries published claims and cannot be rebuilt has to be
-kept somewhere durable. Retrained successors are reproducible from a config and stay
-ignored by default.
+in git. `models/indic-v1/`, `models/prod-a70s30-fr/` and this file are the documented
+exceptions: 3.4 MB is trivial for git, and an artefact that carries published claims (or
+ships as the serving binary) and cannot be cheaply rebuilt has to be kept somewhere durable.
+`prod-a70s30-fr` is additionally the point where the shipped weights are held to clean
+provenance. Retrained successors and the reference-only `prod-a70s30` stay ignored by default.

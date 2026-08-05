@@ -105,26 +105,30 @@ data/*
 *.npz
 
 # Adapted checkpoints. The default is to ignore them, for the reason
-# above. Three are deliberate exceptions, each ~2.4 MB (trivial):
+# above. Two are deliberate exceptions, each ~2.4 MB (trivial):
 #   - models/indic-v1/ — the original two-language (hi/ta) LoRA. It is
 #     *not* reproducible from anything here (it predates `qfme adapt`,
 #     and its base checkpoint is an external name whose contents can
 #     change), the early published numbers were measured on it, and the
 #     integration tests load it as a fixture. An artefact that carries
 #     claims and cannot be rebuilt has to be kept.
-#   - models/prod-a70s30/ — the previous canonical adapter: the
-#     ten-language 70:30 blend that beats v2 on all three published Indic
-#     instruments. Kept tracked as the Indic-measured reference; superseded
-#     as the serving artefact by prod-a70s30-fr (below).
-#   - models/prod-a70s30-fr/ — the current production adapter: prod-a70s30's
-#     exact 1.0M blend plus ~30k en↔fr OPUS-100 pairs. On the held-out
-#     FLORES-200 global baseline (15 world languages, scored on CUDA) it is
-#     a strict, reproducible win over prod-a70s30 on all 15, at no Indic cost
-#     (A/B/C neutral within noise). Canonical serving artefact; ships like a
-#     release binary and pins the published global numbers to exact weights.
+#   - models/prod-a70s30-fr/ — the current production adapter, retrained
+#     on commercially-clean data (BPCC-Mined CC0 sentence side + Tatoeba
+#     CC BY en↔fr, over the CC BY-SA Wikipedia article side). On the
+#     held-out FLORES-200 global baseline (15 world languages, scored on
+#     CUDA) it lifts all-pairs recall above both the base model and v2 and
+#     recovers French, at no Indic cost within sampling noise. Canonical
+#     serving artefact; ships like a release binary and pins the published
+#     global numbers to exact, provenance-clean weights.
+#
+# models/prod-a70s30/ is intentionally NOT tracked: its sentence side was
+# Samanantar (CC BY-NC) + opus-100 (unknown licence), so redistributing
+# those weights would carry a NonCommercial restriction. It survives only
+# as the Indic-measurement reference — its numbers are documented in
+# README.md and the handbook; the binary is not distributed. prod-a70s30-fr
+# supersedes it as the serving artefact.
 models/*
 !models/indic-v1/
-!models/prod-a70s30/
 !models/prod-a70s30-fr/
 !models/README.md
 scratch_samanantar/
