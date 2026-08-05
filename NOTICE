@@ -12,4 +12,6 @@ License is provided in the LICENSE file and is also available at:
 This licence covers the framework source code in this repository. It does
 NOT grant rights to the "QuanFire" name, logo, or other trademarks, and it
 does NOT cover trained model weights, which are distributed separately
-under their own terms.
+under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/) --
+see the "License" section of README.md for the weights' training-data
+provenance and the reason for the share-alike terms.

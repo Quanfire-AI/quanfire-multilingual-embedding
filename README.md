@@ -1010,10 +1010,15 @@ qfme serve --adapter models/indic-v1 --port 8000
 The walkthrough below serves `indic-v1` because it is the small, self-contained tracked demo.
 For real use, serve the **canonical production adapter** — `prod-a70s30-fr`, also git-tracked:
 `qfme serve --adapter models/prod-a70s30-fr`. It is the ten-language `prod-a70s30` with ~30k
-en↔fr sentence pairs folded in, which on the held-out FLORES-200 global baseline (fifteen world
-languages, scored on CUDA) strictly beats `prod-a70s30` on all fifteen at no Indic cost. (It
-uses empty prefixes rather than `query: `/`passage: `; the endpoint reads that from its
-`adapter.json`, so clients need no change.)
+en↔fr sentence pairs folded in to recover French. On the held-out FLORES-200 global baseline
+(fifteen world languages, scored on CUDA) it lifts all-pairs recall to **0.9762** — above
+`prod-a70s30`'s 0.9756 and the 0.9268 base — and **recovers French to 0.990** with no language
+regressed against the base model. Per-language it trades within noise versus `prod-a70s30`
+(small ±0.001–0.002 moves either way) rather than strictly dominating it, and the Indic
+instruments stay neutral within sampling noise (in-domain −0.0035 ≈ one standard error,
+hi-pivot flat, FLORES non-Hindi −0.0020) while still beating v2 on all three. (It uses empty
+prefixes rather than `query: `/`passage: `; the endpoint reads that from its `adapter.json`,
+so clients need no change.)
 
 Startup takes a few seconds: it loads the base checkpoint, applies LoRA, then binds. Add
 `--local-files-only` (and `HF_HUB_OFFLINE=1`) to refuse the network and run entirely
@@ -1328,4 +1333,35 @@ Stated plainly, because knowing where a tool stops is part of using it well.
 
 ## License
 
-To be decided.
+Two licences, because code and weights carry different obligations.
+
+**Framework source code — Apache-2.0.** Everything under `src/`, the CLI, tests and
+docs are Apache-2.0 (see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE)). Free for
+commercial and private use, modification and redistribution, with attribution.
+
+**Trained model weights — CC BY-SA 4.0.** The git-tracked adapters (the canonical
+`prod-a70s30-fr` and the demo `indic-v1`) are released under
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/): use them commercially
+and redistribute them freely, provided you keep attribution and license derivative
+weights under the same share-alike terms. The share-alike floor comes from the
+training data, not preference — see the provenance below.
+
+### Training-data provenance (shipped `prod-a70s30-fr`)
+
+Every source is openly licensed and documented. The adapter is a LoRA adaptation over
+a frozen base; it never trains on non-commercial or unknown-licence data.
+
+| Source | Role in the blend | Licence |
+|---|---|---|
+| Wikipedia langlink-mined pairs | article side (~70%) | CC BY-SA 4.0 |
+| BPCC-Mined bitext (10 languages) | sentence side (~30%) | CC0 |
+| itihasa (Sanskrit) | sentence side | Apache-2.0 |
+| Tatoeba (en↔fr) | French recovery fold | CC BY |
+| `intfloat/multilingual-e5-small` | base checkpoint | MIT |
+
+CC BY-SA is the strongest obligation in the mix, so it sets the weights licence; CC0,
+Apache, CC BY and MIT are all compatible with it and add only attribution. The net
+effect: **the weights are commercially usable and redistributable** — you can ship them
+in a paid product and release them — as long as redistributed weights stay share-alike
+and preserve attribution. The adapter metadata (`adapter.json`) records the training
+`kinds` for auditability.
