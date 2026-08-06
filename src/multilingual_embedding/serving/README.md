@@ -102,7 +102,7 @@ FastAPI and are the quickest way to exercise the routes by hand.
 
 ```bash
 curl -s localhost:8000/health
-# {"status":"ok","model":"indic-v1","framework_version":"0.4.0"}
+# {"status":"ok","model":"indic-v1","framework_version":"0.5.0"}
 
 curl -s localhost:8000/v1/embeddings \
   -H 'content-type: application/json' \

@@ -1038,7 +1038,7 @@ by hand:
 
 ```bash
 curl -s localhost:8000/health
-# {"status":"ok","model":"indic-v1","framework_version":"0.4.0"}
+# {"status":"ok","model":"indic-v1","framework_version":"0.5.0"}
 
 curl -s localhost:8000/v1/models
 # id indic-v1 · dimension 384 · max_length 256 · normalized true

@@ -286,3 +286,78 @@ class TestLoading:
 
         with pytest.raises(PretrainedEncoderError, match="width"):
             PretrainedTextEncoder(Opaque(), tokenizer(), device="cpu")
+
+
+class TestRevisionPinning:
+    """
+    A pinned revision is the other half of reproducibility. ``local_files_only``
+    stops a run reaching the network; a revision stops a bare name resolving to
+    whatever the cache happens to hold. It has to reach the model *and* the
+    tokenizer — a checkpoint is the pair, and pinning one while the other floats
+    resolves to a different tokenizer build on another machine and encodes the
+    same text differently, silently.
+    """
+
+    def test_revision_reaches_both_the_model_and_the_tokenizer(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import transformers
+
+        captured: dict[str, object] = {}
+
+        built_model = model()
+
+        built_tokenizer = tokenizer()
+
+        def fake_model(name: str, **kwargs: object) -> object:
+            captured["model_revision"] = kwargs.get("revision")
+
+            return built_model
+
+        def fake_tokenizer(name: str, **kwargs: object) -> object:
+            captured["tokenizer_revision"] = kwargs.get("revision")
+
+            return built_tokenizer
+
+        monkeypatch.setattr(transformers.AutoModel, "from_pretrained", fake_model)
+
+        monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", fake_tokenizer)
+
+        PretrainedTextEncoder.load("any/name", device="cpu", revision="abc123")
+
+        assert captured["model_revision"] == "abc123"
+
+        assert captured["tokenizer_revision"] == "abc123"
+
+    def test_an_unpinned_load_passes_no_revision(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The default is unchanged behaviour: name resolves as it always did."""
+
+        import transformers
+
+        captured: dict[str, object] = {}
+
+        built_model = model()
+
+        built_tokenizer = tokenizer()
+
+        def fake_model(name: str, **kwargs: object) -> object:
+            captured["model_revision"] = kwargs.get("revision")
+
+            return built_model
+
+        def fake_tokenizer(name: str, **kwargs: object) -> object:
+            captured["tokenizer_revision"] = kwargs.get("revision")
+
+            return built_tokenizer
+
+        monkeypatch.setattr(transformers.AutoModel, "from_pretrained", fake_model)
+
+        monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", fake_tokenizer)
+
+        PretrainedTextEncoder.load("any/name", device="cpu")
+
+        assert captured["model_revision"] is None
+
+        assert captured["tokenizer_revision"] is None

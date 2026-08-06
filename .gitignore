@@ -131,4 +131,11 @@ models/*
 !models/indic-v1/
 !models/prod-a70s30-fr/
 !models/README.md
-scratch_samanantar/
+
+# Local data-prep scratch. The `scratch_*` scripts and directories are
+# throwaway discovery and corpus-preparation helpers (BPCC, Tatoeba,
+# OPUS-100, FLORES, ParaCrawl) that depend on large local corpora under
+# data/ and are not part of the framework. flores-global-devtest.jsonl is a
+# regenerable evaluation slice. None of these belong in git history.
+scratch_*
+flores-global-devtest.jsonl

@@ -285,6 +285,140 @@ class TestItFailsLoudly:
             load_adapter(saved, device="cpu")
 
 
+class TestTheBaseRevisionIsPinned:
+    """
+    An adapter names its base rather than storing it, so the base can change
+    under the name after the adapter was measured. Recording the revision it was
+    built against closes that gap: reloaded with it, the encoder resolves to the
+    weights that produced the numbers — not whatever the cache now holds.
+    """
+
+    def test_the_recorded_revision_survives_a_round_trip(self) -> None:
+        import json
+
+        directory = base_checkpoint()
+
+        encoder, config = adapted(directory)
+
+        saved = save_adapter(
+            encoder,
+            directory / "saved",
+            lora=config,
+            data_provenance="public",
+            checkpoint_revision="614241f622f53c4eeff9890bdc4f31cfecc418b3",
+        )
+
+        manifest = json.loads((saved / "adapter.json").read_text(encoding="utf-8"))
+
+        assert manifest["checkpoint_revision"] == "614241f622f53c4eeff9890bdc4f31cfecc418b3"
+
+        _, metadata = load_adapter(saved, device="cpu")
+
+        assert metadata.checkpoint_revision == "614241f622f53c4eeff9890bdc4f31cfecc418b3"
+
+    def test_an_unpinned_adapter_omits_the_key_and_reads_none(self) -> None:
+        """
+        A null key would read as a revision considered and left blank; its
+        absence reads as an adapter that names its base without pinning it,
+        which is the true state of an unpinned save.
+        """
+
+        import json
+
+        directory = base_checkpoint()
+
+        encoder, config = adapted(directory)
+
+        saved = save_adapter(encoder, directory / "saved", lora=config, data_provenance="public")
+
+        manifest = json.loads((saved / "adapter.json").read_text(encoding="utf-8"))
+
+        assert "checkpoint_revision" not in manifest
+
+        _, metadata = load_adapter(saved, device="cpu")
+
+        assert metadata.checkpoint_revision is None
+
+    def test_the_pinned_revision_reaches_the_base_load(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        Writing the revision is pointless if the reload does not use it. This
+        asserts the value the manifest records is the value handed to the base
+        load — the link between the two that makes the pin real.
+        """
+
+        directory = base_checkpoint()
+
+        encoder, config = adapted(directory)
+
+        saved = save_adapter(
+            encoder,
+            directory / "saved",
+            lora=config,
+            data_provenance="public",
+            checkpoint_revision="deadbeefcafe",
+        )
+
+        captured: dict[str, object] = {}
+
+        real_load = PretrainedTextEncoder.load.__func__  # type: ignore[attr-defined]
+
+        def spy(cls: type, name: str, **kwargs: object) -> object:
+            captured["revision"] = kwargs.get("revision")
+
+            # The base here is a local directory, which has no revisions; drop
+            # it before delegating so the reload succeeds while the assertion
+            # still sees what load_adapter computed.
+            kwargs["revision"] = None
+
+            return real_load(cls, name, **kwargs)
+
+        monkeypatch.setattr(PretrainedTextEncoder, "load", classmethod(spy))
+
+        load_adapter(saved, device="cpu")
+
+        assert captured["revision"] == "deadbeefcafe"
+
+    def test_an_explicit_revision_overrides_the_manifest(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        The manifest is the default, not a lock. Loading against a different
+        base build than the one saved is done by passing a revision, and it
+        must win over the recorded one.
+        """
+
+        directory = base_checkpoint()
+
+        encoder, config = adapted(directory)
+
+        saved = save_adapter(
+            encoder,
+            directory / "saved",
+            lora=config,
+            data_provenance="public",
+            checkpoint_revision="the-recorded-one",
+        )
+
+        captured: dict[str, object] = {}
+
+        real_load = PretrainedTextEncoder.load.__func__  # type: ignore[attr-defined]
+
+        def spy(cls: type, name: str, **kwargs: object) -> object:
+            captured["revision"] = kwargs.get("revision")
+
+            kwargs["revision"] = None
+
+            return real_load(cls, name, **kwargs)
+
+        monkeypatch.setattr(PretrainedTextEncoder, "load", classmethod(spy))
+
+        load_adapter(saved, device="cpu", revision="an-override")
+
+        assert captured["revision"] == "an-override"
+
+
 class TestProvenanceIsRecordedAndRequired:
     """
     Where the training data came from is a legal fact about the model, so

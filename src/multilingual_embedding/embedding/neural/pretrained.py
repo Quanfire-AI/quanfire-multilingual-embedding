@@ -230,6 +230,7 @@ class PretrainedTextEncoder:
         max_length: int = 512,
         normalize: bool = True,
         local_files_only: bool = False,
+        revision: str | None = None,
         **options: Any,
     ) -> PretrainedTextEncoder:
         """
@@ -244,6 +245,20 @@ class PretrainedTextEncoder:
             Refuse to reach the network. Worth setting for anything whose
             result is meant to be reproducible — otherwise an upstream
             repository can change what a run trains from, silently.
+
+        revision:
+            The exact upstream commit (a git SHA, tag or branch) to load,
+            pinning the name to one immutable point in its history. This is
+            the other half of reproducibility: ``local_files_only`` stops a
+            run reaching the network, but a bare name still resolves to
+            whatever revision the cache happens to hold; a name plus a
+            revision resolves to the same weights on every machine. It
+            reaches the tokenizer as well as the model, because a
+            checkpoint is the pair and pinning one without the other is
+            reproducibility with a hole in it. Ignored by the upstream
+            library when ``name`` is a local directory, which has no
+            revisions — so pinning a served adapter's base is safe whether
+            it names a hub repository or a frozen local copy.
 
         Raises
         ------
@@ -267,11 +282,13 @@ class PretrainedTextEncoder:
             tokenizer = AutoTokenizer.from_pretrained(  # type: ignore[no-untyped-call]
                 name,
                 local_files_only=local_files_only,
+                revision=revision,
             )
 
             model = AutoModel.from_pretrained(
                 name,
                 local_files_only=local_files_only,
+                revision=revision,
                 **options,
             )
         except Exception as error:
@@ -279,6 +296,7 @@ class PretrainedTextEncoder:
                 "Could not load the checkpoint",
                 name=name,
                 local_files_only=local_files_only,
+                revision=revision,
                 detail=str(error)[:300],
             ) from error
 

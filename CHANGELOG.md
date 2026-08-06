@@ -55,6 +55,45 @@ absent.
 **Not public.** Everything else, `embedding/` and `pipelines/` included. They may move
 without a minor bump.
 
+## 0.5.0 — 2026-08-06
+
+This release lets an adapter pin the exact upstream revision of the base it names,
+closing a reproducibility hole. An adapter stores only its low-rank update and names
+its base — `intfloat/multilingual-e5-small` — rather than copying it; until now that
+name resolved to whatever the upstream repository's default branch held at load time,
+so a consumer serving `prod-a70s30-fr` could get different base weights than the ones
+its published numbers were measured against, with nothing raising. No public-API
+surface changed (`embedding/` is not public); the minor bump reflects the additive
+`revision` parameters and the pinned shipped adapter.
+
+### Added
+
+- **`revision` on `PretrainedTextEncoder.load` — 2026-08-06.** Threads an upstream
+  commit (SHA, tag or branch) to *both* the model and the tokenizer `from_pretrained`
+  calls. It is the other half of what `local_files_only` began: the flag stops a run
+  reaching the network, but a bare name still resolves to whatever revision the cache
+  holds; a name plus a revision resolves to the same weights on every machine. It
+  reaches the tokenizer as well as the model because a checkpoint is the pair — pinning
+  the weights while the tokenizer floats encodes the same text differently on another
+  machine, silently. Ignored by the upstream library when the name is a local
+  directory, so pinning a served adapter's base is safe whether it names a hub
+  repository or a frozen local copy.
+- **`checkpoint_revision` in the adapter manifest — 2026-08-06.** `save_adapter` records
+  it (optional; omitted from the manifest rather than written null when unpinned), and
+  `load_adapter` reads it to pin the base automatically — an adapter that pinned its
+  base now reloads reproducibly with no argument. An explicit `revision=` on
+  `load_adapter` overrides the manifest, for loading against a different base build than
+  the one saved. `AdapterMetadata.checkpoint_revision` exposes it, reading `None` for an
+  adapter that did not pin one. No format-version bump: the field is additive and
+  optional, so an older loader ignores it and a manifest without it behaves exactly as
+  before.
+- **The shipped `prod-a70s30-fr` adapter now pins its base — 2026-08-06.** Its manifest
+  records `checkpoint_revision` `614241f622f53c4eeff9890bdc4f31cfecc418b3`, the
+  `intfloat/multilingual-e5-small` revision the production numbers were measured
+  against. Serving it — `qfme serve --adapter models/prod-a70s30-fr --local-files-only`,
+  with that revision pre-fetched into the cache — now resolves to exactly those base
+  weights, byte-for-byte, on every host.
+
 ## 0.4.0 — 2026-08-04
 
 This release makes the measured production winner consumable: `prod-a70s30-fr` and the

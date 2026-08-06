@@ -90,6 +90,24 @@ class AdapterMetadata:
         return str(self.payload["checkpoint"])
 
     @property
+    def checkpoint_revision(self) -> str | None:
+        """
+        The exact upstream revision of the base, or ``None`` if unpinned.
+
+        An adapter names its base rather than storing it, so the base can
+        change under the name after the adapter was measured. Recording the
+        revision the adapter was built against closes that gap: reloaded
+        with it, the encoder resolves to the same weights that produced the
+        numbers. ``None`` for an adapter that did not pin one — legibly
+        unpinned rather than a revision that would claim more than the file
+        records.
+        """
+
+        revision = self.payload.get("checkpoint_revision")
+
+        return str(revision) if revision is not None else None
+
+    @property
     def query_prefix(self) -> str:
         """Marker the query side expects, empty for a symmetric model."""
 
@@ -123,6 +141,7 @@ def save_adapter(
     data_provenance: str,
     query_prefix: str = "",
     passage_prefix: str = "",
+    checkpoint_revision: str | None = None,
     notes: dict[str, Any] | None = None,
 ) -> Path:
     """
@@ -153,6 +172,15 @@ def save_adapter(
         Recorded so the adapter cannot be served without them. An E5
         model used without ``query: `` still returns vectors; they are
         just worse, and nothing says so.
+
+    checkpoint_revision:
+        The exact upstream revision of the base the adapter was built
+        against — a git SHA, tag or branch. Recorded so the reload pins
+        the named base to one immutable point in its history, rather than
+        resolving to whatever the cache happens to hold. Optional and
+        omitted when ``None``: an adapter whose base is a local frozen copy
+        needs no revision, and one written before this field existed reads
+        back as unpinned rather than claiming a revision it never recorded.
 
     notes:
         Free-form provenance — what it trained on, what it scored. Kept
@@ -191,28 +219,34 @@ def save_adapter(
 
     parameters = sum(tensor.numel() for tensor in state.values())
 
-    write_json(
-        target / _METADATA_FILENAME,
-        {
-            "format_version": _FORMAT_VERSION,
-            "checkpoint": encoder.name,
-            "dimension": encoder.dimension,
-            "pooling": encoder._model.pooling,
-            "max_length": encoder._max_length,
-            "normalize": encoder._normalize,
-            "data_provenance": str(data_provenance),
-            "query_prefix": query_prefix,
-            "passage_prefix": passage_prefix,
-            "lora": {
-                "rank": lora.rank,
-                "alpha": lora.alpha,
-                "dropout": lora.dropout,
-                "targets": list(lora.targets),
-            },
-            "adapter_parameters": parameters,
-            "notes": notes or {},
+    manifest: dict[str, Any] = {
+        "format_version": _FORMAT_VERSION,
+        "checkpoint": encoder.name,
+        "dimension": encoder.dimension,
+        "pooling": encoder._model.pooling,
+        "max_length": encoder._max_length,
+        "normalize": encoder._normalize,
+        "data_provenance": str(data_provenance),
+        "query_prefix": query_prefix,
+        "passage_prefix": passage_prefix,
+        "lora": {
+            "rank": lora.rank,
+            "alpha": lora.alpha,
+            "dropout": lora.dropout,
+            "targets": list(lora.targets),
         },
-    )
+        "adapter_parameters": parameters,
+        "notes": notes or {},
+    }
+
+    # Written only when the base is actually pinned. A null key would read
+    # as a revision that was considered and left blank; its absence reads
+    # as an adapter that names its base without pinning it, which is the
+    # true state of an unpinned save.
+    if checkpoint_revision is not None:
+        manifest["checkpoint_revision"] = str(checkpoint_revision)
+
+    write_json(target / _METADATA_FILENAME, manifest)
 
     _logger.info(
         "Saved adapter",
@@ -231,6 +265,7 @@ def load_adapter(
     *,
     device: str | torch.device | None = None,
     local_files_only: bool = False,
+    revision: str | None = None,
 ) -> tuple[PretrainedTextEncoder, AdapterMetadata]:
     """
     Rebuild an adapted encoder from disk.
@@ -245,6 +280,14 @@ def load_adapter(
         Refuse to fetch the base checkpoint from the network. Worth
         setting when a result must be reproducible, since an upstream
         repository can change what is behind a name.
+
+    revision:
+        The exact upstream revision of the base to resolve, overriding the
+        ``checkpoint_revision`` the manifest recorded. Left ``None``, the
+        pinned revision in the manifest is used, so an adapter that pinned
+        its base reloads reproducibly with no argument here — passing one
+        is only for loading against a different base build than the one the
+        adapter was saved against.
 
     Raises
     ------
@@ -284,11 +327,18 @@ def load_adapter(
             supported=sorted(_SUPPORTED_LOAD_VERSIONS),
         )
 
+    # An explicit revision overrides the manifest's; otherwise the base is
+    # pinned to whatever the adapter recorded, which is the whole point of
+    # writing it. A manifest without one leaves this None — the prior
+    # behaviour, resolving the name to whatever is cached.
+    base_revision = revision if revision is not None else payload.get("checkpoint_revision")
+
     encoder = PretrainedTextEncoder.load(
         payload["checkpoint"],
         pooling=payload.get("pooling", "mean"),
         device=device,
         max_length=int(payload.get("max_length", 512)),
+        revision=base_revision,
         # Restored rather than left to default. An encoder saved with
         # normalization off and reloaded with it on returns vectors of a
         # different magnitude for the same text: cosine scores are
@@ -328,6 +378,7 @@ def load_adapter(
         extra={
             "directory": str(source),
             "base": payload["checkpoint"],
+            "base_revision": base_revision,
             "device": str(encoder.device),
         },
     )

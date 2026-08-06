@@ -42,7 +42,7 @@ $ cd /tmp
 $ which qfme
 /Users/you/.local/bin/qfme
 $ qfme --version
-qfme 0.4.0
+qfme 0.5.0
 ```
 
 ### What it actually did
@@ -191,7 +191,7 @@ QuanFire repository that wants the corpus, vocabulary, tokenizer or evaluation l
 without reimplementing them.
 
 ```bash
-uv add "quanfire-multilingual-embedding @ git+ssh://git@github.com/quanfire-ai/quanfire-multilingual-embedding.git@v0.4.0"
+uv add "quanfire-multilingual-embedding @ git+ssh://git@github.com/quanfire-ai/quanfire-multilingual-embedding.git@v0.5.0"
 ```
 
 **Pin a tag, never a branch.** `uv tool upgrade` re-fetching the default branch is fine
@@ -288,7 +288,7 @@ without a deploy key, or someone you would rather not add to the repository:
 ```bash
 uv build --wheel                    # writes dist/*.whl
 # send the file, then on their machine:
-uv tool install ./quanfire_multilingual_embedding-0.4.0-py3-none-any.whl
+uv tool install ./quanfire_multilingual_embedding-0.5.0-py3-none-any.whl
 ```
 
 The trade is that they get a frozen copy with no upgrade path — `uv tool upgrade` has
