@@ -35,6 +35,12 @@ single-sentence bitext — is now beaten: a production ten-language sentence ble
 released under CC BY-SA 4.0 on commercially-clean training data. Framework source is Apache-2.0;
 see [License](#license).
 
+**See it live** — every number above is verifiable in your browser at the
+[**QuanFire Playground**](https://playground.quanfire.ai/embeddings): search one meaning across
+15 languages, watch this exact adapter separate signal from noise next to the raw base it was
+trained over, and read the held-out eval numbers computed live. Nothing cached — don't take the
+table's word for it, check it.
+
 ---
 
 ## Table of contents
