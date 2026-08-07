@@ -18,7 +18,31 @@ Deterministic: picks 40 standalone, well-spaced concepts, each a genuine
 parallel across all 15 languages (600 passages). Commit `corpus.json`; it is
 vendored into the gateway (`quanfire-ai-backend`).
 
-## 2. Embed with both models (on the GPU box, after the sidecars are up)
+## 2. Build the base baseline to compare against (on the GPU box)
+
+The playground's claim is "the LoRA weights, and nothing else, did this", so the
+base must be served *exactly* the way the adapter is — same checkpoint, pooling,
+`max_length`, prefixes and normalisation. The honest way to get that is an
+**untrained** LoRA adapter: `LoRALinear` zero-initialises its up-projection, so
+before any training the adapter's contribution is exactly zero and the wrapped
+model is byte-for-byte the base checkpoint (verified: cosine 1.0 vs. raw
+mean-pooled e5-small). Serving it isolates the trained weights as the only
+difference between the two sidecars.
+
+```bash
+python scripts/playground/build_base_adapter.py \
+    --like /opt/quanfire/models/qme-model \
+    --out  /opt/quanfire/models/qme-base \
+    --local-files-only          # resolve the base from the primed HF cache
+```
+
+It mirrors the deployed adapter's own `adapter.json` (pooling, length, prefixes,
+LoRA shape, pinned base revision), so the base sidecar can never drift from the
+adapter sidecar. Then `qfme serve --adapter /opt/quanfire/models/qme-base
+--port 8010` serves the base — the same "before" baseline behind
+`reports/global-baseline-verdict.json`.
+
+## 3. Embed the corpus with both models (on the GPU box, after the sidecars are up)
 
 ```bash
 python scripts/playground/precompute_vectors.py \
