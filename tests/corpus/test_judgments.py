@@ -100,11 +100,16 @@ def test_every_record_carries_the_permissive_licence(tmp_path: Path) -> None:
 
     record = next(iter_judgments(tmp_path, reader=reader)).to_record()
 
-    # CC BY, not NC: this is the reason judgments train and MILPaC only
-    # scores, so the licence is stamped on the record at the point of use.
+    # Statutory public domain (§52(1)(q)), not NC: this is the reason
+    # judgments train and MILPaC only scores, so the basis is stamped on the
+    # record at the point of use.
     assert record["source"] == JUDGMENTS_SOURCE
 
-    assert record["license"] == JUDGMENTS_LICENSE == "CC BY 4.0"
+    assert (
+        record["license"]
+        == JUDGMENTS_LICENSE
+        == "Public Domain (India, Copyright Act §52(1)(q))"
+    )
 
 
 def test_the_language_defaults_to_english_and_is_overridable(tmp_path: Path) -> None:

@@ -3,10 +3,18 @@ Reading public court judgments into the training corpus.
 
 This is a **training front door** for the legal domain, the counterpart
 to :mod:`.wikipedia` for general text and the opposite end of the wall
-from :mod:`.milpac`. Indian court judgments are published in the open —
-the collection this reads is distributed under **CC BY 4.0**, whose
-attribution-only terms permit the commercial use a shipped adapter makes
-of them, which is exactly why judgments train and MILPaC only scores.
+from :mod:`.milpac`. Indian court judgments are **public domain by
+statute** — the Copyright Act 1957 **§52(1)(q)** places the text of any
+court judgment or order outside copyright — so no attribution obligation
+and no rights-holder attaches to the prose itself, which is exactly why
+judgments train and MILPaC (non-commercial) only scores. That statutory
+footing is stronger than a Creative Commons grant: there is no licensor
+who could later be found not to have held the right. It binds one thing
+in return — the PDFs must come from an **official court portal** (the
+Supreme Court / High Court sites, the eCourts services), never a
+commercial reporter such as SCC, whose headnotes, arrangement and
+editorial matter are a separately copyrightable layer over the
+public-domain judgment.
 
 The format is the difficulty. Judgments arrive as **PDF**, one file per
 case, with the full text in a text layer and nothing else reliable: no
@@ -75,12 +83,15 @@ __all__ = [
 _logger = get_logger(__name__)
 
 # Recorded on every record. Constants rather than literals because both
-# carry weight: the source is what the audit groups by, and CC BY — with
-# its attribution-only terms — is the reason this text may be trained on
-# where MILPaC's non-commercial licence means it may only be scored.
+# carry weight: the source is what the audit groups by, and the statutory
+# public-domain basis (§52(1)(q)) — no attribution obligation, no licensor
+# who could later be found not to hold the right — is the reason this text
+# may be trained on where MILPaC's non-commercial licence means it may only
+# be scored. Its binding is the source: an official court portal, never a
+# commercial reporter whose editorial layer is separately copyrightable.
 JUDGMENTS_SOURCE = "judgments"
 
-JUDGMENTS_LICENSE = "CC BY 4.0"
+JUDGMENTS_LICENSE = "Public Domain (India, Copyright Act §52(1)(q))"
 
 # The language every judgment is recorded as unless the caller says
 # otherwise. English is the working default for Indian superior-court

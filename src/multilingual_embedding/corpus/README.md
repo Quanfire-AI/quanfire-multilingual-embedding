@@ -7,7 +7,7 @@ Everything above this layer consumes sentences: the tokenizer trains on them, th
 
 Four modules extend that remit at the ends. `wikipedia.py` is the general-domain **front door**: it turns a MediaWiki dump into the corpus format, which for most scheduled Indian languages is the only route to a substantial amount of real text. `pairs.py` is the **exit** toward contrastive training: it manufactures anchor/positive pairs out of the structure Wikipedia already carries, because labelled retrieval pairs do not exist for these languages and never will. Together they are the `dump → corpus → pairs → adapter` path that produced `models/indic-v1`.
 
-Two more front doors serve the legal domain, deliberately kept on opposite sides of a wall. `judgments.py` reads public court-judgment PDFs (CC BY, commercial use permitted) into the corpus format — the **training** door. `milpac.py` reads the MILPaC parallel corpus (CC BY-NC-SA, non-commercial) into held-out evaluation pairs — the **evaluation** door, which by licence and by design may only be scored against, never trained on. See [the legal domain](#the-legal-domain-two-front-doors-and-a-wall) below.
+Two more front doors serve the legal domain, deliberately kept on opposite sides of a wall. `judgments.py` reads public court-judgment PDFs (**public domain by statute — Copyright Act §52(1)(q)**, commercial use permitted, official court portals only) into the corpus format — the **training** door. `milpac.py` reads the MILPaC parallel corpus (CC BY-NC-SA, non-commercial) into held-out evaluation pairs — the **evaluation** door, which by licence and by design may only be scored against, never trained on. See [the legal domain](#the-legal-domain-two-front-doors-and-a-wall) below.
 
 ## Modules
 | Module | Responsibility |
@@ -238,15 +238,15 @@ Wikipedia is a general corpus. The domain this framework was built to adapt to i
 
 | | `judgments.py` | `milpac.py` |
 |---|---|---|
-| Source | public court-judgment PDFs | the MILPaC parallel corpus (`.xlsx`) |
-| Licence | CC BY 4.0 — commercial use permitted | CC BY-NC-SA — **non-commercial** |
+| Source | public court-judgment PDFs (official court portals) | the MILPaC parallel corpus (`.xlsx`) |
+| Licence | statutory public domain — Copyright Act §52(1)(q) | CC BY-NC-SA — **non-commercial** |
 | Role | **training** — reads into the corpus format | **evaluation** — reads into held-out pairs |
 | Reaches the pair miner? | yes, like any corpus | **never** |
 | CLI output | `--source` for `mine-pairs` | `--eval-pairs-file` for `adapt` |
 
 **The wall is the licence.** A model trained on CC BY-NC-SA text inherits the non-commercial restriction, which would poison a model this project needs to be able to sell. So MILPaC is held out *by origin*: `milpac.py` produces evaluation pairs directly and there is no code path that feeds its text to `pairs.py`. It cannot leak into training by a mistaken flag, because the flag was never the thing keeping it out — the absence of a route is. This mirrors the customer-data rule the rest of the framework enforces: the safe default is a missing door, not a guarded one.
 
-**Judgments are the training door precisely because their licence permits it.** CC BY carries an attribution obligation and nothing more, so a judgment corpus can adapt a model that is later sold. `judgments.py` reads a directory of PDFs into exactly the `{id, language, title, text, source, license}` record every other reader produces, so from `pairs.py` onward a judgment is indistinguishable from a Wikipedia article — the front door's whole job is to make the legal corpus ordinary by the time the miner sees it.
+**Judgments are the training door precisely because their status permits it.** The text of a court judgment is public domain by statute — Copyright Act §52(1)(q) — so it carries no attribution obligation and, unlike a Creative Commons grant, no licensor who could later be found not to have held the right. The one binding is on origin: the PDFs must come from an **official court portal** (Supreme Court / High Court sites, eCourts), never a commercial reporter such as SCC, whose headnotes and arrangement are a separately copyrightable layer over the public-domain judgment. `judgments.py` reads a directory of PDFs into exactly the `{id, language, title, text, source, license}` record every other reader produces, so from `pairs.py` onward a judgment is indistinguishable from a Wikipedia article — the front door's whole job is to make the legal corpus ordinary by the time the miner sees it.
 
 **PDF text extraction is an injectable seam, and it does not OCR.** The one step that depends on a real PDF — pulling text out of it — is the `reader` parameter, defaulting to a `pypdf`-backed reader behind the optional `judgments` extra. Everything around it is tested exhaustively with a fake reader; the extraction fidelity itself is deliberately *not* asserted, because it cannot be known until a real collection is downloaded and audited. A scanned judgment whose text layer is an image extracts to almost nothing, and that is treated as a **failed extraction and dropped**, not emitted as an empty record that would read downstream as a real judgment — the `minimum_characters` floor is what draws that line. There is no OCR: a corpus that is mostly scans needs one bolted on before this reader is the right tool, and that is stated rather than silently producing empty records.
 

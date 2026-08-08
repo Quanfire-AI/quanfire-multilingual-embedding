@@ -315,9 +315,9 @@ matter of discipline.
 | | Training front door | Evaluation front door |
 |---|---|---|
 | Module | [`corpus/judgments.py`](../src/multilingual_embedding/corpus/judgments.py) | [`corpus/milpac.py`](../src/multilingual_embedding/corpus/milpac.py) |
-| Source | public court judgments | MILPaC parallel legal corpus |
+| Source | public court judgments (official court portals) | MILPaC parallel legal corpus |
 | Shape | PDF, full text, one file per case | `.xlsx`, English aligned to nine Indic languages |
-| Licence | **CC BY 4.0** — attribution only | **CC BY-NC-SA 4.0** — non-commercial |
+| Licence | **statutory public domain** — Copyright Act §52(1)(q) | **CC BY-NC-SA 4.0** — non-commercial |
 | Command | `qfme extract-judgments` | `qfme prepare-eval` |
 | Extra | `judgments` (`pypdf`) | `milpac` (`openpyxl`) |
 | Feeds | `qfme mine-pairs`, then `--pairs` | `qfme adapt --eval-pairs-file`, never `--pairs` |
@@ -333,11 +333,13 @@ against it is fair use of a benchmark; *training* that adapter on it is not, bec
 adapter is a commercial artefact and the NC term travels into it. `corpus/milpac.py`
 therefore produces an evaluation file and nothing else, stamps `license` on every record so
 the restriction is legible in the raw file, and does **not** route through the pair miner —
-there is no code path by which MILPaC can reach the training side. Judgments, CC BY, carry
-no such restriction, which is exactly why they are the training source.
+there is no code path by which MILPaC can reach the training side. Judgments, public domain
+by statute (§52(1)(q)) and drawn only from official court portals, carry no such restriction,
+which is exactly why they are the training source.
 
 ```bash
-# TRAINING side — public judgments, CC BY, commercial use permitted.
+# TRAINING side — public judgments, statutory public domain (§52(1)(q)),
+# official court portals only, commercial use permitted.
 # 1. Download a judgment collection into data/corpora/judgments/ (PDFs).
 # 2. Extract to corpus JSON Lines. Scanned PDFs with no text layer are
 #    dropped and counted — this does not OCR.
