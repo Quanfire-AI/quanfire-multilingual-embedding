@@ -1,0 +1,50 @@
+# Legal-domain LoRA adapter (embed-legal-indic, first run). Mirrors the proven
+# prod-a70s30 hyperparameters exactly; the ONLY changes are the training corpus
+# (Indian SC judgments, statutory PD, Copyright Act 52(1)(q)) and the name.
+# in-distribution: train and eval are both held-out legal mined pairs — measures
+# how much adaptation helps on judgment text. Result: Recall@1 0.309->0.545 (+76%).
+#
+# Domain-transfer is a SEPARATE run: score this same adapter against an out-of-origin
+# English legal eval (MILPaC's English side, within-doc `adjacent` pairs) so only the
+# corpus facet varies -> `--adaptation domain` is accepted by the attribution guard:
+#     qfme adapt --config configs/experiments/legal-indic-e1.yaml --profile configs/gpu.yaml \
+#         --eval-pairs-file .../eval/milpac-en-adjacent.jsonl.gz --adaptation domain
+# That transfer test came back FLAT (0.036->0.036) — the +76% is judgment-specific,
+# it does not generalise to statutory text. Published as embed-legal-en (English
+# judgment retriever), scoped accordingly. See MODELS.md.
+#
+#     .venv/bin/qfme adapt --config configs/experiments/legal-indic-e1.yaml --profile configs/gpu.yaml
+name: legal-indic-e1
+
+seed: 0
+
+adaptation:
+  checkpoint: intfloat/multilingual-e5-small
+
+  pairs: /home/arnab/quanfire-ai-data/embedding/legal-indic/corpus/pairs.jsonl.gz
+
+  train_pairs: 92419
+  eval_pairs: 2000
+  sample_pairs: 94419
+
+  adaptation: in-distribution
+  train_kinds: ""
+  eval_kinds: ""
+  train_languages: ""
+  eval_languages: ""
+
+  epochs: 1
+  learning_rate: 0.0001
+
+  rank: 32
+  targets: query,value
+
+  pooling: mean
+  max_length: 256
+  query_prefix: ""
+  passage_prefix: ""
+
+  save_adapter: /home/arnab/quanfire-ai-data/embedding/legal-indic/models/legal-indic-e1
+  data_provenance: public
+
+  report: /home/arnab/quanfire-ai-data/embedding/legal-indic/reports/legal-indic-e1-adapt.json

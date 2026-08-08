@@ -130,6 +130,7 @@ data/*
 models/*
 !models/indic-v1/
 !models/prod-a70s30-fr/
+!models/embed-legal-en/
 !models/README.md
 
 # Local data-prep scratch. The `scratch_*` scripts and directories are

@@ -1,0 +1,44 @@
+{
+  "format_version": 2,
+  "checkpoint": "intfloat/multilingual-e5-small",
+  "dimension": 384,
+  "pooling": "mean",
+  "max_length": 256,
+  "normalize": true,
+  "data_provenance": "public",
+  "query_prefix": "",
+  "passage_prefix": "",
+  "lora": {
+    "rank": 32,
+    "alpha": 64,
+    "dropout": 0.0,
+    "targets": [
+      "query",
+      "value"
+    ]
+  },
+  "adapter_parameters": 589824,
+  "notes": {
+    "experiment": "legal-indic-e1",
+    "data_provenance": "public",
+    "trained_on": "/home/arnab/quanfire-ai-data/embedding/legal-indic/corpus/pairs.jsonl.gz",
+    "scored_against": "/home/arnab/quanfire-ai-data/embedding/legal-indic/corpus/pairs.jsonl.gz",
+    "train_pairs": 92419,
+    "adaptation": "in-distribution",
+    "train_kinds": [
+      "adjacent",
+      "title_lead"
+    ],
+    "train_languages": [
+      "en"
+    ],
+    "held_out_languages": [
+      "en"
+    ],
+    "recall_at_1_before": 0.309,
+    "recall_at_1_after": 0.5445,
+    "epochs": 1,
+    "learning_rate": 0.0001,
+    "batch_size": 256
+  }
+}

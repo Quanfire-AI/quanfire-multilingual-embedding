@@ -51,7 +51,8 @@ id stays clean.
 | Public id | Base | Status | Internal run | Notes |
 |---|---|---|---|---|
 | `quanfire-ai/multilingual-embedding` | e5-small | **published** | `prod-a70s30-fr` | Flagship general-multilingual. Predates this scheme; kept as-is (renaming a published repo breaks every inbound link). It **is** the `embed-general-multi` slot. |
-| `quanfire-ai/embed-legal-indic` | e5-small | in training | `legal-indic-*` | Indian legal (Supreme Court judgments, statutory public domain — Copyright Act §52(1)(q), official court portals). Eval origin-walled on MILPaC. |
+| `quanfire-ai/embed-legal-en` | e5-small | **published** | `legal-indic-e1` | English Supreme Court **judgment** retriever. In-distribution Recall@1 0.309→0.545 (+76%, CIs disjoint). Trained only on statutory public-domain judgment text (Copyright Act §52(1)(q), headnotes excised, official court portals). Out-of-origin transfer to statutory text tested and **flat** — judgment-specific by design; scope is English judgments, not general legal. |
+| `quanfire-ai/embed-legal-indic` | e5-small | planned | — | **Cross-lingual** Indian legal (en↔hi/ta). Separate from `embed-legal-en`: needs Indic legal parallel data before language becomes an adapted axis. Not the English judgment model. |
 | `quanfire-ai/embed-finance-indic` | e5-small | planned | — | CA firms: accounting / tax / audit / filings. |
 
 ## Two growth axes
