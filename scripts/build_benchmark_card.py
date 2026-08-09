@@ -107,7 +107,7 @@ def build() -> str:
     L: list[str] = []
     w = L.append
 
-    w(f"# QuanFire Multilingual Embedding — Benchmark Card")
+    w(f"# Quanfire Multilingual Embedding — Benchmark Card")
     w("")
     w(f"**Framework version:** `{VERSION}` &nbsp;·&nbsp; "
       f"**Generated:** {date.today().isoformat()} &nbsp;·&nbsp; "

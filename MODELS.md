@@ -1,4 +1,4 @@
-# QuanFire embedding models — catalogue & naming
+# Quanfire embedding models — catalogue & naming
 
 Models are trained on the GPU box and published under the
 [`quanfire-ai`](https://huggingface.co/quanfire-ai) org on Hugging Face. This file

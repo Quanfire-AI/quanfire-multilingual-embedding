@@ -106,7 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="qfme",
-        description="QuanFire multilingual embedding framework",
+        description="Quanfire multilingual embedding framework",
     )
 
     parser.add_argument(

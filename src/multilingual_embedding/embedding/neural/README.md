@@ -28,7 +28,7 @@ Seven modules, splitting along one line — tensors on one side, text on the oth
 
 **torch is optional, and this subpackage is the only thing in the framework that imports
 it.** The corpus, tokenizer, vocabulary, evaluation and static-embedding layers stay
-installable without a training stack — which matters because other QuanFire work needs
+installable without a training stack — which matters because other Quanfire work needs
 text preparation and nothing else. `embedding/__init__.py` does not import `neural`;
 nothing is pulled in transitively. Import it explicitly:
 

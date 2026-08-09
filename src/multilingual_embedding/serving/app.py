@@ -230,7 +230,7 @@ def create_app(config: ServingConfig) -> FastAPI:
     )
 
     app = FastAPI(
-        title="QuanFire multilingual embeddings",
+        title="Quanfire multilingual embeddings",
         version=__version__,
         summary="An embeddings endpoint over an adapted multilingual encoder.",
     )

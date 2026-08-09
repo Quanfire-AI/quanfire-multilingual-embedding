@@ -15,7 +15,7 @@ language:
   - en
 ---
 
-# QuanFire Legal Embedding — `embed-legal-en` (Supreme Court judgments)
+# Quanfire Legal Embedding — `embed-legal-en` (Supreme Court judgments)
 
 A retrieval adapter for **English-language Indian Supreme Court judgment text**. It
 is a LoRA adaptation over a frozen
@@ -87,7 +87,7 @@ know.
 
 ## Usage
 
-Pull the adapter and run it through the QuanFire framework, which applies the LoRA
+Pull the adapter and run it through the Quanfire framework, which applies the LoRA
 over the frozen base and produces normalized embeddings:
 
 ```bash
@@ -160,6 +160,6 @@ The framework source code is Apache-2.0 (separate from these weights).
 ## Citation
 
 ```
-QuanFire Legal Embedding — embed-legal-en (internal run legal-indic-e1).
-QuanFire, 2026. https://github.com/quanfire-ai/quanfire-multilingual-embedding
+Quanfire Legal Embedding — embed-legal-en (internal run legal-indic-e1).
+Quanfire, 2026. https://github.com/quanfire-ai/quanfire-multilingual-embedding
 ```

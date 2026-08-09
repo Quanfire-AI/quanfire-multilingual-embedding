@@ -1,4 +1,4 @@
-# QuanFire AI Ecosystem — Architecture and Plan
+# Quanfire AI Ecosystem — Architecture and Plan
 
 > How the modalities fit together, what each one actually requires, and which are
 > worth building rather than integrating.
@@ -167,7 +167,7 @@ All backend, all Python, all under `python-projects/`. No frontend at this stage
 | `quanfire-vision` | Image ↔ text, image generation | core, torch | proposed |
 | `quanfire-speech` | Text ↔ speech | core, torch | proposed |
 
-Three QuanFire repositories already exist alongside this one — `quanfire-ai-backend`,
+Three Quanfire repositories already exist alongside this one — `quanfire-ai-backend`,
 `quanfire-ai-models` and `quanfire-mcp`. Their contents have not been examined, and the
 map above may overlap with them. **Reconcile before creating anything**, particularly
 `quanfire-ai-models`, whose name suggests it may already occupy part of this space.
@@ -355,10 +355,10 @@ which parts are trained in-house and which are integrated.
 ## 4. Prioritise by business proximity, not by modality
 
 The instinct is to work through the modality list in order. That is the wrong axis. The
-right one is **how close each capability sits to data QuanFire already owns**, because
+right one is **how close each capability sits to data Quanfire already owns**, because
 that is the only place an in-house model beats a free one.
 
-| Capability | Relevance to QuanFire | Build or integrate |
+| Capability | Relevance to Quanfire | Build or integrate |
 |---|---|---|
 | **Text embedding, domain-tuned** | **High** — DocPro, BillAI, MindMap corpora | **Build** (this repo) |
 | **Document understanding (VLM)** | **High** — OCR, layout, invoices, contracts | **Fine-tune** |
@@ -423,7 +423,7 @@ everything else.
 **Compute.** QLoRA on a 7B base fits in ~10 GB. Full fine-tuning caps around 1B.
 
 **Verdict: fine-tune, never pretrain.** Start with instruction tuning on document tasks —
-extraction, summarisation, structured output — where QuanFire's data is the advantage.
+extraction, summarisation, structured output — where Quanfire's data is the advantage.
 
 ### 5.3 Image-to-text (vision-language) — *the underrated one*
 
@@ -440,7 +440,7 @@ enter an LLM, by being mapped into the same space as its token embeddings. Usual
 vision encoder is frozen, the projector trained, and the LLM adapted with LoRA.
 
 **Data.** Image–text pairs. 100k+ for general capability; 10k task-specific pairs for a
-narrow domain like invoice extraction. **QuanFire generates this data as a by-product of
+narrow domain like invoice extraction. **Quanfire generates this data as a by-product of
 DocPro**, provided the documents and their extracted output are retained together.
 
 **Compute.** A 2–7B VLM under QLoRA lands around 12 GB — tight but workable.
@@ -537,7 +537,7 @@ today, and it costs nothing but storage.
 **One GPU and a small team cannot train eight modalities.** Nothing in this plan pretends
 otherwise.
 
-What is achievable is an ecosystem where QuanFire *offers* all these capabilities, trains
+What is achievable is an ecosystem where Quanfire *offers* all these capabilities, trains
 in-house only where its own data makes the model better, and integrates open models
 everywhere else. The differentiation is not "we trained everything" — it is the document
 corpus, the domain adaptation, and the fact that the whole stack can run on-premise for

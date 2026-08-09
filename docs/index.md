@@ -1,4 +1,4 @@
-# QuanFire Multilingual Embedding
+# Quanfire Multilingual Embedding
 
 A framework for turning multilingual text into searchable embeddings, built so that
 every stage between raw text and a ranked result list can be inspected, configured

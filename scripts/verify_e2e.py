@@ -800,7 +800,7 @@ def main() -> int:
 
     say("=" * 68)
 
-    say("QuanFire embedding — end-to-end verification")
+    say("Quanfire embedding — end-to-end verification")
 
     say(f"STARTED  {time.strftime('%Y-%m-%d %H:%M:%S')}")
 

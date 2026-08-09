@@ -1,4 +1,4 @@
-# QuanFire Multilingual Embedding — Benchmark Card
+# Quanfire Multilingual Embedding — Benchmark Card
 
 **Framework version:** `0.4.0` &nbsp;·&nbsp; **Generated:** 2026-08-04 &nbsp;·&nbsp; **Regenerate:** `python scripts/build_benchmark_card.py`
 

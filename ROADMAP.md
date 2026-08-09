@@ -16,7 +16,7 @@ Phases D–E planned.
 
 ## Objective
 
-This project must **completely support building QuanFire's own embedding models**. Not a
+This project must **completely support building Quanfire's own embedding models**. Not a
 single model: a pipeline that takes a corpus and produces a trained, evaluated, servable
 encoder, either general-purpose or adapted to a specific domain.
 
@@ -37,7 +37,7 @@ That is the product: **the factory, not any one model it makes.**
 ## Where the value actually sits
 
 A general-purpose model competes with well-funded open models given away free. A model
-tuned to *QuanFire's own document domains* does not, because nobody else has that corpus.
+tuned to *Quanfire's own document domains* does not, because nobody else has that corpus.
 
 DocPro, BillAI and MindMap each handle a distinct kind of text — contracts and filings,
 invoices and time entries, notes and relationships. A general model treats all three the
@@ -292,7 +292,7 @@ Still Wikipedia on both sides of every comparison, so the *corpus* axis remains 
 **The phase that makes domain-specific models possible**, and the one most likely to be
 underestimated.
 
-Labelled query-passage pairs will not exist for QuanFire's domains. They must be
+Labelled query-passage pairs will not exist for Quanfire's domains. They must be
 manufactured from document structure and content:
 
 | Source | Pair |

@@ -1,6 +1,6 @@
-# QuanFire Multilingual Embedding
+# Quanfire Multilingual Embedding
 
-**QuanFire's own embedding models: corpus in, trained embedding model out.**
+**Quanfire's own embedding models: corpus in, trained embedding model out.**
 
 Turns a multilingual corpus into meaningful vectors — generic, or adapted to a specific
 domain — with the corpus handling, tokenization, vocabulary management, training and
@@ -36,7 +36,7 @@ released under CC BY-SA 4.0 on commercially-clean training data. Framework sourc
 see [License](#license).
 
 **See it live** — every number above is verifiable in your browser at the
-[**QuanFire Playground**](https://playground.quanfire.ai/embeddings): search one meaning across
+[**Quanfire Playground**](https://playground.quanfire.ai/embeddings): search one meaning across
 15 languages, watch this exact adapter separate signal from noise next to the raw base it was
 trained over, and read the held-out eval numbers computed live. Nothing cached — don't take the
 table's word for it, check it.
@@ -70,11 +70,11 @@ table's word for it, check it.
 > miners, dimension truncation, and from-scratch pretraining. Hard-negative mining has now
 > been measured on a GPU: a specialisation/generalisation trade-off, not a free win, so the
 > shipped adapter is trained without it (see Limitations).
-> [ECOSYSTEM.md](ECOSYSTEM.md) places this repository within the wider QuanFire AI stack;
+> [ECOSYSTEM.md](ECOSYSTEM.md) places this repository within the wider Quanfire AI stack;
 > everything outside embeddings lives there and nowhere in this README.
 
 > **Looking for the full reference?**
-> [`knowledge-base/QuanFire-Multilingual-Embedding-Handbook.pdf`](knowledge-base/QuanFire-Multilingual-Embedding-Handbook.pdf)
+> [`knowledge-base/Quanfire-Multilingual-Embedding-Handbook.pdf`](knowledge-base/Quanfire-Multilingual-Embedding-Handbook.pdf)
 > is a 90-page handbook covering purpose, design, architecture, components, usage, local
 > and production operation, benefits, and an honest pros-and-cons assessment. Read that
 > if you want the whole picture in one document; read on for the quick version.
@@ -108,7 +108,7 @@ languages rather than hiding it behind an average.
 
 ## Objective
 
-Be the place QuanFire's **embedding models** are built: a corpus goes in, a trained,
+Be the place Quanfire's **embedding models** are built: a corpus goes in, a trained,
 evaluated, reproducible embedding model comes out — generic, or adapted to a specific
 domain. The vectors it produces are the input other systems build on, whether that is
 retrieval, semantic search, clustering, or a downstream model consuming the embedding
@@ -140,7 +140,7 @@ single command" is true of word2vec and of adaptation, and not of a transformer 
 scratch.
 
 **Scope.** This repository does embeddings. Nothing else. The other modalities in the
-QuanFire stack are separate repositories and are described in [ECOSYSTEM.md](ECOSYSTEM.md).
+Quanfire stack are separate repositories and are described in [ECOSYSTEM.md](ECOSYSTEM.md).
 
 ---
 
@@ -723,7 +723,7 @@ Practical consequences for a 22-language programme:
 ### What is *not* yet possible
 
 - **A non-Wikipedia corpus axis is untested.** Every comparison so far has Wikipedia on both
-  sides. `--adaptation domain` exists for it and needs a pair file from real QuanFire
+  sides. `--adaptation domain` exists for it and needs a pair file from real Quanfire
   documents to run — that is the experiment that would justify "this will help on our
   contracts".
 - **Hard negatives are measured, and they are a trade-off.** The comparison has now been made

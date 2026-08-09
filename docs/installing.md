@@ -187,7 +187,7 @@ is what you want while developing.
 ## Depend on it: from another project
 
 Everything above installs a command. This installs a library — the case for a sibling
-QuanFire repository that wants the corpus, vocabulary, tokenizer or evaluation layers
+Quanfire repository that wants the corpus, vocabulary, tokenizer or evaluation layers
 without reimplementing them.
 
 ```bash

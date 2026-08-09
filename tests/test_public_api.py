@@ -1,7 +1,7 @@
 """
 The contract this package offers to the repositories that pin it.
 
-Sibling QuanFire repositories install this one as a pinned git dependency
+Sibling Quanfire repositories install this one as a pinned git dependency
 rather than copying from it. That makes two things load-bearing that were
 previously only conventions, and neither of them fails loudly on its own:
 

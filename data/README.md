@@ -117,7 +117,7 @@ Two things it cannot check, and that therefore stay a matter of judgement:
   question that matters from something a path leaves blank into something the save refuses
   to skip.
 
-If a domain-adapted model is ever wanted for real QuanFire documents, that is the decision
+If a domain-adapted model is ever wanted for real Quanfire documents, that is the decision
 to take first and explicitly: public domain-specific text, synthetic text written to the
 same shape (which is what `sample/domain-corpus.jsonl` demonstrates), or a per-tenant
 arrangement with a contractual basis. It is not a decision to arrive at by default because
@@ -449,7 +449,7 @@ The controlled task/language experiment changes the obvious plan. Adaptation tur
 ### What is *not* yet possible from this directory
 
 - **A non-Wikipedia corpus axis is untested.** Every comparison so far has Wikipedia on both
-  sides. `--adaptation domain` exists for it and wants a pair file mined from real QuanFire
+  sides. `--adaptation domain` exists for it and wants a pair file mined from real Quanfire
   documents — that is the run that would justify "this will help on our contracts".
 - **No hard negatives.** Negatives are in-batch only; nothing here mines them against a base
   encoder. Most likely next source of gain.

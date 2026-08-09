@@ -93,7 +93,7 @@ the canonical serving artefact.
 
 **The clean-provenance retrain (Door A, August 2026).** The blend above was first assembled
 from Samanantar (CC BY-NC) on the sentence side and opus-100 (unknown licence) for the French
-fold — fine for measurement, but not weights QuanFire could redistribute for commercial use.
+fold — fine for measurement, but not weights Quanfire could redistribute for commercial use.
 So `prod-a70s30-fr` was **re-sourced, not re-engineered**: the identical recipe was rebuilt on
 **BPCC-Mined (CC0)** — which redistributes the same Samanantar sentences under a clean licence —
 and **Tatoeba (CC BY)** for en↔fr, over the unchanged CC BY-SA Wikipedia article side. Re-scored

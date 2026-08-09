@@ -1,5 +1,5 @@
 """
-QuanFire Multilingual Embedding Framework.
+Quanfire Multilingual Embedding Framework.
 
 A layered pipeline from raw multilingual text to searchable embeddings::
 
