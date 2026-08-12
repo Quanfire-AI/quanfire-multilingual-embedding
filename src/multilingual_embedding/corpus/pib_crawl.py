@@ -16,8 +16,8 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 ALLREL = "https://www.pib.gov.in/Allrel.aspx?reg=48&lang=1"
 REL = "https://www.pib.gov.in/PressReleasePage.aspx?PRID=%s"
 DELAY = 1.2
-DAYS = 7
-MAX_FETCHES = 6000          # hard safety bound
+DAYS = int(sys.argv[1]) if len(sys.argv) > 1 else 7
+MAX_FETCHES = int(sys.argv[2]) if len(sys.argv) > 2 else 15000   # hard safety bound
 OUT = Path.home() / "quanfire-ai-data/embedding/gov-indic/corpus/gov-corpus.jsonl"
 
 _LANG = {"english":"en","hindi":"hi","हिन्दी":"hi","हिंदी":"hi","urdu":"ur","اردو":"ur",
