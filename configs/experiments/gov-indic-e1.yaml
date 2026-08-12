@@ -1,0 +1,54 @@
+# Multilingual government LoRA adapter (embed-gov-indic, first run). Same proven
+# recipe as legal-indic-e1 / statute-en-e1 (base multilingual-e5-small, LoRA rank
+# 32, lr 1e-4, 1 epoch, mean pool, max_len 256) — the changes are the corpus and
+# the name. Unlike the English statute run, this corpus is CROSS-LINGUAL: pairs
+# whose anchor and positive are in DIFFERENT Indian languages about the same PIB
+# release, so in-distribution here measures cross-lingual retrieval — a query in
+# one Indian language finding the passage in another.
+#
+# Corpus: PIB press releases (pib.gov.in), 486 parallel release groups over 7 days
+# of National releases, read by corpus.pib and paired by pib.crosslingual_pairs
+# (title_body + title_title, minimum_positive_characters=40, maximum_overlap=0.3 —
+# the cap drops the English-proper-noun leakage so a gain reflects meaning, not
+# string matching). 20,215 cross-lingual pairs across 16 languages / 221 language
+# directions; title_body mean overlap 0.038.
+#
+# Provenance: PIB reproduction policy (free reproduction, attribution, no NC/SA);
+# non-reconstructive embedding + provenance card satisfy it; third-party embedded
+# material excluded. data_provenance: licensed (an attribution grant, like CC-BY).
+#
+#   .venv/bin/qfme adapt --config configs/experiments/gov-indic-e1.yaml --profile configs/gpu.yaml
+name: gov-indic-e1
+
+seed: 0
+
+adaptation:
+  checkpoint: intfloat/multilingual-e5-small
+
+  pairs: /home/arnab/quanfire-ai-data/embedding/gov-indic/corpus/pairs.jsonl.gz
+
+  train_pairs: 18715
+  eval_pairs: 1500
+  sample_pairs: 20215
+
+  adaptation: in-distribution
+  train_kinds: ""
+  eval_kinds: ""
+  train_languages: ""
+  eval_languages: ""
+
+  epochs: 1
+  learning_rate: 0.0001
+
+  rank: 32
+  targets: query,value
+
+  pooling: mean
+  max_length: 256
+  query_prefix: ""
+  passage_prefix: ""
+
+  save_adapter: /home/arnab/quanfire-ai-data/embedding/gov-indic/models/gov-indic-e1
+  data_provenance: licensed   # PIB reproduction policy (attribution, no NC/SA)
+
+  report: /home/arnab/quanfire-ai-data/embedding/gov-indic/reports/gov-indic-e1-adapt.json
