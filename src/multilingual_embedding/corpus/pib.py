@@ -201,6 +201,12 @@ class CrossLingualConfig:
 
     maximum_positive_characters: int = 2000
 
+    # A cross-lingual pair should be ~0 overlap; a high value means shared
+    # tokens — English proper nouns/acronyms leaking into an Indic body, or a
+    # same-script pairing (hi/mr) — i.e. the pair is partly solvable by string
+    # matching. Records above this are dropped. 1.0 keeps everything.
+    maximum_overlap: float = 1.0
+
 
 def _record(anchor: str, positive: str, kind: str, group: str, a_lang: str, p_lang: str) -> dict:
     return {
@@ -248,17 +254,28 @@ def crosslingual_pairs(
                 if p_lang == a_lang:
                     continue
 
+                def emit(anchor: str, positive: str, kind: str):
+                    record = _record(anchor, positive, kind, gid, a_lang, p_lang)
+
+                    return record if record["overlap"] <= cfg.maximum_overlap else None
+
                 if "title_body" in cfg.kinds:
                     body = (p.get("body") or "").strip()
 
                     if cfg.minimum_positive_characters <= len(body) <= cfg.maximum_positive_characters:
-                        yield _record(title, body, "title_body", gid, a_lang, p_lang)
+                        record = emit(title, body, "title_body")
+
+                        if record is not None:
+                            yield record
 
                 if "title_title" in cfg.kinds:
                     other = (p.get("title") or "").strip()
 
                     if len(other) >= cfg.minimum_anchor_characters:
-                        yield _record(title, other, "title_title", gid, a_lang, p_lang)
+                        record = emit(title, other, "title_title")
+
+                        if record is not None:
+                            yield record
 
                 if "body_body" in cfg.kinds:
                     a_body = (a.get("body") or "").strip()
@@ -269,4 +286,7 @@ def crosslingual_pairs(
                         cfg.minimum_positive_characters <= len(a_body)
                         and cfg.minimum_positive_characters <= len(b_body) <= cfg.maximum_positive_characters
                     ):
-                        yield _record(a_body[: cfg.maximum_positive_characters], b_body, "body_body", gid, a_lang, p_lang)
+                        record = emit(a_body[: cfg.maximum_positive_characters], b_body, "body_body")
+
+                        if record is not None:
+                            yield record
