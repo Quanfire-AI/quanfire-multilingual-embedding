@@ -17,7 +17,7 @@ base checkpoint's revision).
 | Field | Meaning | Values |
 |---|---|---|
 | `pillar` | which capability | `embed` (this project) · `gen` (reserved: generative pillar) |
-| `domain` | what it is tuned for | `general` · `legal` · `finance` · `medical`* · `gov`* |
+| `domain` | what it is tuned for | `general` · `legal` · `finance` · `medical`* · `gov` |
 | `scope` | language / region reach | `multi` (broadly multilingual) · `indic` · `in` (India, multi-script) · `en` · an ISO code |
 
 `*` reserved — not yet trained. Add a domain/scope code here **before** publishing a
@@ -52,6 +52,7 @@ id stays clean.
 |---|---|---|---|---|
 | `quanfire-ai/multilingual-embedding` | e5-small | **published** | `prod-a70s30-fr` | Flagship general-multilingual. Predates this scheme; kept as-is (renaming a published repo breaks every inbound link). It **is** the `embed-general-multi` slot. |
 | `quanfire-ai/embed-legal-en` | e5-small | **published** | `legal-indic-e1` | English Supreme Court **judgment** retriever. In-distribution Recall@1 0.309→0.545 (+76%, CIs disjoint). Trained only on statutory public-domain judgment text (Copyright Act §52(1)(q), headnotes excised, official court portals). Out-of-origin transfer to statutory text tested and **flat** — judgment-specific by design; scope is English judgments, not general legal. |
+| `quanfire-ai/embed-gov-indic` | e5-small | **published** | `gov-indic-e3` | **Cross-lingual** Indian **government press-release** retriever (16 Indian languages). In-distribution cross-lingual Recall@1 0.184→0.235 (+27.9%, CIs disjoint); right passage in the top-10 ~74% of the time. Trained on Press Information Bureau (PIB) releases, reused under PIB's reproduction policy (attribution, **no NC/SA**); non-reconstructive → Apache-2.0 weights. Specialist showcase of clean-provenance multilingual retrieval — other domains not validated; lowest-resource langs (Khasi/Nepali/Manipuri) thin. Shipped in three runs: e1 (+8.7%, ns) → e2 (+16.2%, ns) → e3 (significant). |
 | `quanfire-ai/embed-legal-indic` | e5-small | planned | — | **Cross-lingual** Indian legal (en↔hi/ta). Separate from `embed-legal-en`: needs Indic legal parallel data before language becomes an adapted axis. Not the English judgment model. |
 | `quanfire-ai/embed-finance-indic` | e5-small | planned | — | CA firms: accounting / tax / audit / filings. |
 
