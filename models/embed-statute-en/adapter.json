@@ -1,0 +1,45 @@
+{
+  "format_version": 2,
+  "checkpoint": "intfloat/multilingual-e5-small",
+  "dimension": 384,
+  "pooling": "mean",
+  "max_length": 256,
+  "normalize": true,
+  "data_provenance": "licensed",
+  "query_prefix": "",
+  "passage_prefix": "",
+  "lora": {
+    "rank": 32,
+    "alpha": 64,
+    "dropout": 0.0,
+    "targets": [
+      "query",
+      "value"
+    ]
+  },
+  "adapter_parameters": 589824,
+  "notes": {
+    "experiment": "statute-en-e2",
+    "data_provenance": "licensed",
+    "trained_on": "/home/arnab/quanfire-ai-data/embedding/statute-en/corpus/pairs-neg-m05.jsonl.gz",
+    "scored_against": "/home/arnab/quanfire-ai-data/embedding/statute-en/corpus/pairs-neg-m05.jsonl.gz",
+    "train_pairs": 32432,
+    "adaptation": "in-distribution",
+    "train_kinds": [
+      "adjacent",
+      "heading_section",
+      "title_lead"
+    ],
+    "train_languages": [
+      "en"
+    ],
+    "held_out_languages": [
+      "en"
+    ],
+    "recall_at_1_before": 0.1815,
+    "recall_at_1_after": 0.269,
+    "epochs": 2,
+    "learning_rate": 0.0001,
+    "batch_size": 256
+  }
+}
