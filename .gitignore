@@ -132,6 +132,13 @@ models/*
 !models/prod-a70s30-fr/
 !models/embed-legal-en/
 !models/embed-statute-en/
+!models/embed-gov-indic/
+# rerank-statute-en ships a full 470 MB cross-encoder; track only the card,
+# never the weights (HF-only). Un-ignore the dir, re-ignore its contents,
+# then un-ignore the README.
+!models/rerank-statute-en/
+models/rerank-statute-en/*
+!models/rerank-statute-en/README.md
 !models/README.md
 
 # Local data-prep scratch. The `scratch_*` scripts and directories are
