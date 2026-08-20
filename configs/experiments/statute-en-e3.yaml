@@ -1,0 +1,58 @@
+# English central-statute LoRA adapter, third run (embed-statute-en, e3). The ONE
+# deliberate change from the e1/e2 line is the CORPUS: pairs mined with the two
+# documented statute-tuning fixes applied, proven by an oracle-diff at build time
+# (see reports/statute-en-e3-mine-report.json):
+#   (1) minimum_positive_characters 100 -> 40. Statute provisions are terser than
+#       Wikipedia; the default floor dropped 2,039 short positives (extent/
+#       commencement/short-title). At 40 only 24 are dropped -> ~2,015 genuine short
+#       provisions recovered.
+#   (2) maximum_overlap 1.0 -> 0.5. Statute marginal-note headings frequently RESTATE
+#       the section body (overlap 1.0, pure lexical leakage). The default let every
+#       such pair through (heading_section mean overlap 0.68, string-solvable). The
+#       0.5 cap removes 34,294 leaky pairs -> heading_section mean overlap 0.68 -> 0.26,
+#       so a falling loss now reflects learned semantics, not string matching.
+# Corpus: annotated Central Acts (Zenodo 5088102, CC-BY-4.0), 858 acts -> 35,252 pairs
+#   (adjacent 26,214 + heading_section 9,026 + title_lead 12). NO hard negatives this
+#   run (in-batch only, like e1) -- adapter-confusion negatives need the trained
+#   adapter on the box and are an optional e4 refinement.
+# Recipe held identical to e2 (base/rank/targets/lr/pooling/max_len/seed/2 epochs) so
+# the readout is attributable to the corpus. NOTE: e3's held-out eval is drawn from
+# this (different, overlap-capped) pair population, so R@1 is NOT byte-comparable to
+# e2's 0.269 -- the valid signal is the base->adapter delta on e3's OWN eval, plus the
+# un-gameable low-overlap slice.
+#
+#   .venv/bin/qfme adapt --config configs/experiments/statute-en-e3.yaml --profile configs/gpu.yaml
+name: statute-en-e3
+
+seed: 0
+
+adaptation:
+  checkpoint: intfloat/multilingual-e5-small
+
+  pairs: /home/arnab/quanfire-ai-data/embedding/statute-en/corpus/pairs-e3-mo05-mp40.jsonl.gz
+
+  train_pairs: 33252
+  eval_pairs: 2000
+  sample_pairs: 35252
+
+  adaptation: in-distribution
+  train_kinds: ""
+  eval_kinds: ""
+  train_languages: ""
+  eval_languages: ""
+
+  epochs: 2
+  learning_rate: 0.0001
+
+  rank: 32
+  targets: query,value
+
+  pooling: mean
+  max_length: 256
+  query_prefix: ""
+  passage_prefix: ""
+
+  save_adapter: /home/arnab/quanfire-ai-data/embedding/statute-en/models/statute-en-e3
+  data_provenance: licensed   # CC-BY-4.0 (annotated Central Acts, Zenodo 5088102)
+
+  report: /home/arnab/quanfire-ai-data/embedding/statute-en/reports/statute-en-e3-adapt.json

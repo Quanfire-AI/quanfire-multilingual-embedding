@@ -56,6 +56,7 @@ from multilingual_embedding.config.base import (
 from multilingual_embedding.core.exceptions import ConfigurationError
 from multilingual_embedding.core.logging import get_logger
 from multilingual_embedding.corpus.pairs import MinedPair, sample_pairs
+from multilingual_embedding.corpus.prefixes import check_prefix_regime
 from multilingual_embedding.evaluation.retrieval import RetrievalReport, evaluate_retrieval
 
 __all__ = [
@@ -683,6 +684,28 @@ class AdaptationPipeline:
             settings.train_languages,
             "language",
         )
+
+        # A train/serve prefix mismatch does not raise, does not look wrong in a
+        # loss curve, and surfaces only as retrieval that is quietly worse than
+        # it should be. The corpus declares the regime each kind trains with, so
+        # check the run against it before spending the GPU rather than after.
+        selected_kinds = {p.kind for p in candidates[: settings.train_pairs]}
+        prefix_check = check_prefix_regime(
+            selected_kinds, settings.query_prefix, settings.passage_prefix
+        )
+        if not prefix_check.ok:
+            raise ConfigurationError(
+                "E5 prefix regime does not match the corpus: "
+                f"{prefix_check.describe()}. Set query_prefix/passage_prefix to the "
+                "regime the corpus declares, or train one kind per run — the "
+                "adapter applies a single global prefix pair to every pair."
+            )
+        self.echo(f"\nprefix regime: {prefix_check.describe()}")
+        if prefix_check.unchecked:
+            _logger.warning(
+                "prefix regime unverified for kind(s): %s",
+                ", ".join(sorted(prefix_check.unchecked)),
+            )
 
         train = prefixed(
             candidates[: settings.train_pairs],
