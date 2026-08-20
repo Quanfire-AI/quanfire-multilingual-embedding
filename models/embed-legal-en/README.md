@@ -154,7 +154,9 @@ The framework source code is Apache-2.0 (separate from these weights).
   cross-lingual Indian-legal model is separate work requiring parallel legal data.
 - **Judgment-specific.** Transfer to statutory / bare-act text was tested and is flat
   (table above). Do not rely on it outside judgment-style text without your own
-  evaluation.
+  evaluation. It is evaluated only on held-out Indian Supreme Court judgment pairs
+  from the same distribution as its training data; transfer to other jurisdictions or
+  legal systems is not measured and should not be assumed.
 - Exact cosine search is the intended regime up to ~10⁵–10⁶ vectors.
 
 ## Citation
