@@ -148,3 +148,7 @@ models/rerank-statute-en/*
 # regenerable evaluation slice. None of these belong in git history.
 scratch_*
 flores-global-devtest.jsonl
+
+# The project handbook and book are internal. They live in the private
+# Quanfire-AI/quanfire-internal repo under factory/knowledge-base/.
+knowledge-base/
