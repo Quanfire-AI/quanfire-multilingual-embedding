@@ -15,7 +15,10 @@ configuration.
 
 from __future__ import annotations
 
+import contextlib
+import logging
 import zlib
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -1052,3 +1055,116 @@ class TestTrainingWithHardNegatives:
     def test_one_pair_without_negatives_is_still_rejected(self) -> None:
         with pytest.raises(ValidationError):
             ContrastiveTrainer(build_encoder()).train([TextPair("a", "b")])
+
+
+class TestTruncationIsObservable:
+    """
+    The encoder truncates over-long input to the position table rather than
+    raising. That is the right behaviour — a caller embedding a long document
+    should get a vector for its opening, not an error — and it is unchanged.
+
+    What was wrong is that it happened INVISIBLY. A caller whose documents
+    exceeded the table got vectors representing only their opening paragraphs
+    with no signal that the tails had been dropped, so retrieval degraded in a
+    way that reads as a bad model rather than truncated input. These tests pin
+    the observability, not the truncation.
+    """
+
+    def test_counts_start_at_zero(self) -> None:
+        encoder = build_encoder()
+        stats = encoder.truncation_stats
+        assert stats["encoded"] == 0
+        assert stats["truncated"] == 0
+        assert stats["limit"] == 32
+
+    def test_short_input_is_not_counted_as_truncated(self) -> None:
+        encoder = build_encoder()
+        encoder.encode_batch(["alpha beta gamma"])
+        stats = encoder.truncation_stats
+        assert stats["encoded"] == 1
+        assert stats["truncated"] == 0
+
+    def test_overlong_input_is_counted_and_sized(self) -> None:
+        encoder = build_encoder()
+        long_text = " ".join(f"token{i}" for i in range(100))
+        encoder.encode_batch([long_text])
+        stats = encoder.truncation_stats
+        assert stats["truncated"] == 1
+        assert stats["max_tokens_seen"] >= 100
+        assert stats["max_tokens_seen"] > stats["limit"]
+
+    def test_counts_accumulate_and_separate_short_from_long(self) -> None:
+        encoder = build_encoder()
+        long_text = " ".join(f"token{i}" for i in range(100))
+        encoder.encode_batch([long_text, "short one", long_text])
+        stats = encoder.truncation_stats
+        assert stats["encoded"] == 3
+        assert stats["truncated"] == 2, "only the over-long rows should count"
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _captured_warnings() -> "Iterator[list[str]]":
+        """
+        Capture this module's warnings by attaching a handler DIRECTLY.
+
+        Not ``caplog``: the framework's logging setup sets ``propagate = False``
+        on its root logger, so once any earlier test has configured logging,
+        caplog sees nothing and a log assertion passes vacuously. That makes such
+        a test order-dependent — it passed alone here and failed in the full
+        suite, which is how this was found. Attaching to the named logger is
+        immune to both propagation and handler state.
+        """
+
+        records: list[str] = []
+
+        class Collect(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record.getMessage())
+
+        logger = logging.getLogger(
+            "multilingual_embedding.multilingual_embedding.embedding.neural.encoder"
+        )
+        alt = logging.getLogger("multilingual_embedding.embedding.neural.encoder")
+        handler = Collect(level=logging.WARNING)
+        for target in (logger, alt):
+            target.addHandler(handler)
+            target.setLevel(logging.WARNING)
+        try:
+            yield records
+        finally:
+            for target in (logger, alt):
+                target.removeHandler(handler)
+
+    def test_warns_when_it_truncates(self) -> None:
+        encoder = build_encoder()
+        long_text = " ".join(f"token{i}" for i in range(100))
+        with self._captured_warnings() as records:
+            encoder.encode_batch([long_text])
+        assert any("truncated" in m.lower() for m in records), (
+            "truncation must be visible as it happens, not only countable after"
+        )
+
+    def test_does_not_warn_when_nothing_is_truncated(self) -> None:
+        """A warning that always fires is noise and gets filtered out."""
+        encoder = build_encoder()
+        with self._captured_warnings() as records:
+            encoder.encode_batch(["alpha beta"])
+        assert not [m for m in records if "truncated" in m.lower()]
+
+    def test_vectors_are_UNCHANGED_by_the_instrumentation(self) -> None:
+        """
+        The whole point is that only observability changed. A truncated encode
+        must still produce exactly the vector that encoding the first `limit`
+        tokens produces — instrumentation must not perturb the maths.
+        """
+        encoder = build_encoder()
+        words = [f"token{i}" for i in range(100)]
+        long_text = " ".join(words)
+
+        truncated_vector = encoder.encode_batch([long_text])
+
+        limit = encoder.truncation_stats["limit"]
+        head_only = " ".join(words[:limit])
+        head_vector = build_encoder().encode_batch([head_only])
+
+        assert np.allclose(truncated_vector, head_vector, atol=1e-6)

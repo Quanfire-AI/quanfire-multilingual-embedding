@@ -175,7 +175,16 @@ class NeuralTextEncoder:
         batch = encoder.encode_batch(["a", "b"])    # (2, dimension)
     """
 
-    __slots__ = ("_batch_size", "_device", "_model", "_normalize", "_tokenizer")
+    __slots__ = (
+        "_batch_size",
+        "_device",
+        "_encoded_sequences",
+        "_max_truncated_tokens",
+        "_model",
+        "_normalize",
+        "_tokenizer",
+        "_truncated_sequences",
+    )
 
     def __init__(
         self,
@@ -196,9 +205,38 @@ class NeuralTextEncoder:
 
         self._normalize = normalize
 
+        # Truncation is silent by design (see _prepare), which makes it
+        # invisible to a caller whose documents are quietly losing their tails.
+        # These counters make it countable after the fact; the warning in
+        # _prepare makes it visible as it happens.
+        self._truncated_sequences = 0
+
+        self._encoded_sequences = 0
+
+        self._max_truncated_tokens = 0
+
     # ------------------------------------------------------------------
     # The TextEncoder contract
     # ------------------------------------------------------------------
+
+    @property
+    def truncation_stats(self) -> dict[str, int]:
+        """
+        How much input this encoder has silently dropped.
+
+        ``truncated`` of ``encoded`` sequences exceeded the position table, and
+        ``max_tokens_seen`` is the longest input observed — compare it with
+        ``limit`` to size the loss. A non-zero ``truncated`` means some vectors
+        represent only the opening of their document, which is worth knowing
+        before trusting a retrieval number built on them.
+        """
+
+        return {
+            "encoded": self._encoded_sequences,
+            "truncated": self._truncated_sequences,
+            "max_tokens_seen": self._max_truncated_tokens,
+            "limit": int(self._model.config.max_length),
+        }
 
     @property
     def dimension(self) -> int:
@@ -268,11 +306,42 @@ class NeuralTextEncoder:
         Sequences are truncated to the model's position table rather than
         raising, because a caller encoding a long document should get a
         vector for its opening rather than an error.
+
+        That is the right behaviour and it is deliberately unchanged. What was
+        wrong is that it happened INVISIBLY: a caller embedding documents longer
+        than the position table got vectors for their opening paragraphs and no
+        indication that the rest had been dropped. Retrieval then degrades in a
+        way that looks like a bad model rather than a truncated input.
+
+        So the truncation is now counted and warned about. The behaviour is
+        identical; only its observability changed. See :attr:`truncation_stats`.
         """
 
         limit = self._model.config.max_length
 
-        batches = [list(self._tokenizer.encode(text).ids)[:limit] for text in texts]
+        encoded = [list(self._tokenizer.encode(text).ids) for text in texts]
+
+        overlong = [len(ids) for ids in encoded if len(ids) > limit]
+
+        self._encoded_sequences += len(encoded)
+
+        if overlong:
+            self._truncated_sequences += len(overlong)
+
+            self._max_truncated_tokens = max(self._max_truncated_tokens, max(overlong))
+
+            _logger.warning(
+                "truncated %d of %d sequence(s) to the %d-token position table; "
+                "longest was %d tokens, so %d were dropped. The tail of those "
+                "inputs is not represented in their vectors.",
+                len(overlong),
+                len(encoded),
+                limit,
+                max(overlong),
+                max(overlong) - limit,
+            )
+
+        batches = [ids[:limit] for ids in encoded]
 
         # A batch of entirely empty sequences would give a zero-width
         # tensor, which the attention kernel rejects. One padding column
