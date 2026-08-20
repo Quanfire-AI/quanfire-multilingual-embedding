@@ -141,3 +141,7 @@ models/*
 # regenerable evaluation slice. None of these belong in git history.
 scratch_*
 flores-global-devtest.jsonl
+
+# Internal factory record lives in the PRIVATE Quanfire-AI/quanfire-internal
+# repo. Nothing under internal/ belongs in this public repository.
+internal/
