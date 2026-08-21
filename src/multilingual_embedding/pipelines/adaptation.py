@@ -66,6 +66,7 @@ __all__ = [
     "check_adaptation",
     "only",
     "prefixed",
+    "without_held_out",
     "varying",
 ]
 
@@ -154,6 +155,73 @@ def only(pairs: Sequence[MinedPair], wanted: Sequence[str], facet: str) -> list[
         )
 
     return kept
+
+
+
+def without_held_out(
+    pool: Sequence[MinedPair], evaluation: Sequence[MinedPair]
+) -> tuple[list[MinedPair], dict[str, int]]:
+    """
+    Drop every pool pair that the held-out set has already given away.
+
+    Hold out whole documents, not texts. ``document`` is already the identity
+    that says two pairs are about the same subject — the batch sampler honours
+    it, and the split was the one place that did not.
+
+    Excluding only pairs whose *positive* is a held-out positive lets the
+    reverse direction of a cross-lingual alignment straight through: for a
+    held-out (EN -> ES) pair, the corpus also emits (ES -> EN), whose positive
+    is the held-out *anchor*, which that filter never looked at. Same two
+    texts, roles swapped, into a symmetric bi-encoder. Measured on
+    eulaw-multi-e1: 23.4% of held-out pairs had their exact reverse in training
+    and only 7.4% were unseen on both sides.
+
+    This lives here, shared, because the leak survived review in the first
+    place by existing twice — once in this pipeline and once in the fine-tune
+    one — so fixing a copy is not fixing the bug.
+
+    Returns the surviving pairs and counts a report can be audited against.
+    """
+
+    held_documents = {pair.document for pair in evaluation if pair.document}
+
+    # Both sides, not just the positive. Checking the positive alone is what
+    # let the reverse direction through.
+    held_texts = {pair.positive for pair in evaluation}
+    held_texts.update(pair.anchor for pair in evaluation)
+
+    undocumented = sum(1 for pair in evaluation if not pair.document)
+
+    if undocumented:
+        # Silence here would mean the document rule quietly did nothing and the
+        # run reported a clean split it never had.
+        _logger.warning(
+            "%d of %d held-out pairs carry no document id; falling back to "
+            "text exclusion for those, which cannot see sibling units",
+            undocumented,
+            len(evaluation),
+        )
+
+    def leaks(pair: MinedPair) -> bool:
+        if pair.document and pair.document in held_documents:
+            return True
+
+        # Boilerplate recurs verbatim under different document ids — an
+        # entry-into-force article is the same sentence in a hundred
+        # regulations — so document identity alone cannot see it. On the real
+        # eulaw corpus the document rule closed 4 134 shared documents and
+        # still left 250 exact reverses standing on repeated text. This check
+        # therefore runs for every pair, not only for a corpus that leaves the
+        # document blank.
+        return pair.positive in held_texts or pair.anchor in held_texts
+
+    kept = [pair for pair in pool if not leaks(pair)]
+
+    return kept, {
+        "held_out_documents": len(held_documents),
+        "held_out_without_document": undocumented,
+        "pool_dropped_as_held_out": len(pool) - len(kept),
+    }
 
 
 def values(pairs: Sequence[MinedPair], facet: str) -> list[str]:
@@ -255,6 +323,13 @@ class AdaptationResult:
     adapter_directory:
         Where the adapter was written, or ``None`` when the run produced
         a measurement rather than a model.
+
+    split_hygiene:
+        How much the held-out set removed from the training pool, and how
+        many held-out pairs could not be grouped by document. Carried into
+        the report so a published number can be audited for the leak that
+        inflated eulaw-multi-e1, instead of being trusted on the grounds
+        that the code was supposed to be right by then.
     """
 
     checkpoint: str
@@ -300,6 +375,8 @@ class AdaptationResult:
     data_provenance: str = ""
 
     adapter_directory: Path | None = None
+
+    split_hygiene: dict[str, int] = field(default_factory=dict)
 
     @property
     def delta(self) -> float:
@@ -394,6 +471,7 @@ class AdaptationResult:
             "train_examples": self.train_examples,
             "eval_examples": self.eval_examples,
             "sampled_from": self.sampled_from,
+            **self.split_hygiene,
             "loss": [self.initial_loss, self.final_loss],
             "moved": self.moved,
             "trainable_share": self.trainable_share,
@@ -604,6 +682,15 @@ class AdaptationPipeline:
             trainable_share=share,
             data_provenance=settings.data_provenance,
             seconds=time.time() - started,
+            split_hygiene={
+                key: facts[key]
+                for key in (
+                    "held_out_documents",
+                    "held_out_without_document",
+                    "pool_dropped_as_held_out",
+                )
+                if key in facts
+            },
         )
 
         if settings.save_adapter:
@@ -685,50 +772,7 @@ class AdaptationPipeline:
 
         evaluation = sample_pairs(evaluation_source, settings.eval_pairs, seed=seed + 10_000)
 
-        # Hold out whole documents, not texts. ``document`` is already the
-        # identity that says two pairs are about the same subject — the batch
-        # sampler honours it, and the split is the one place that did not.
-        #
-        # Excluding only pairs whose *positive* is a held-out positive lets the
-        # reverse direction of a cross-lingual alignment straight through: for
-        # a held-out (EN -> ES) pair, the corpus also emits (ES -> EN), whose
-        # positive is the held-out *anchor*, which that filter never looked at.
-        # Same two texts, roles swapped, into a symmetric bi-encoder. Measured
-        # on eulaw-multi-e1: 23.4% of held-out pairs had their exact reverse in
-        # training and only 7.4% were unseen on both sides.
-        held_documents = {pair.document for pair in evaluation if pair.document}
-
-        # Both sides, not just the positive. Checking the positive alone is
-        # what let the reverse direction through.
-        held_texts = {pair.positive for pair in evaluation}
-        held_texts.update(pair.anchor for pair in evaluation)
-
-        undocumented = sum(1 for pair in evaluation if not pair.document)
-
-        if undocumented:
-            # Silence here would mean the document rule quietly did nothing and
-            # the run reported a clean split it never had.
-            _logger.warning(
-                "%d of %d held-out pairs carry no document id; falling back to "
-                "text exclusion for those, which cannot see sibling units",
-                undocumented,
-                len(evaluation),
-            )
-
-        def leaks(pair: MinedPair) -> bool:
-            if pair.document and pair.document in held_documents:
-                return True
-
-            # Boilerplate recurs verbatim under different document ids — an
-            # entry-into-force article is the same sentence in a hundred
-            # regulations — so document identity alone cannot see it. On the
-            # real eulaw corpus the document rule closed 4 134 shared documents
-            # and still left 250 exact reverses standing on repeated text.
-            # This check therefore runs for every pair, not only for a corpus
-            # that leaves the document blank.
-            return pair.positive in held_texts or pair.anchor in held_texts
-
-        kept = [p for p in pool if not leaks(p)]
+        kept, hygiene = without_held_out(pool, evaluation)
 
         candidates = only(
             only(kept, settings.train_kinds, "kind"),
@@ -778,9 +822,7 @@ class AdaptationPipeline:
             "evaluation_source": evaluation_source,
             # Recorded so a report can be audited for split hygiene after the
             # fact, rather than trusted because the code was supposed to be right.
-            "held_out_documents": len(held_documents),
-            "held_out_without_document": undocumented,
-            "pool_dropped_as_held_out": len(pool) - len(kept),
+            **hygiene,
             "train_kinds": values(train, "kind"),
             "eval_kinds": values(held, "kind"),
             "train_languages": values(train, "language"),

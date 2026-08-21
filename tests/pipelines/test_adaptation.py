@@ -478,6 +478,39 @@ def bidirectional_pair_file(path: Path, units: int = 96) -> Path:
     return path
 
 
+def sibling_pair_file(path: Path, documents: int = 96, units: int = 2) -> Path:
+    """
+    A corpus where each document contributes several *different* units.
+
+    Every pair here has text that appears nowhere else, so no text rule can
+    tell that two of them come from the same regulation. Only the document
+    identity can. That makes this the one shape that isolates what the
+    document rule is actually for.
+    """
+
+    with open(path, "wt", encoding="utf-8") as handle:
+        for document in range(documents):
+            for unit in range(units):
+                tag = document * 10 + unit
+
+                handle.write(
+                    json.dumps(
+                        MinedPair(
+                            anchor=f"a{tag} a{tag + 1000}",
+                            positive=f"b{tag} b{tag + 2000} b{tag + 3000}",
+                            kind="adjacent",
+                            document=f"doc-{document}",
+                            language="en",
+                            overlap=0.2,
+                        ).to_record(),
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+
+    return path
+
+
 def experiment(root: Path, **settings: Any) -> ExperimentConfig:
     """A runnable config over the built checkpoint and a fresh pair file."""
 
@@ -613,6 +646,78 @@ class TestEndToEnd:
         # closes this. Asserting it directly stops a future text-level
         # workaround from passing the check above by accident.
         assert {p.document for p in train} & {p.document for p in held} == set()
+
+    def test_the_report_carries_the_split_hygiene_counts(self, tmp_path: Path) -> None:
+        """
+        The audit trail has to survive into the artefact.
+
+        The counts existed inside ``_select`` for a while before they reached
+        the report, so the comment promising a report "can be audited for
+        split hygiene after the fact" was describing something no reader of a
+        report could actually do. gov-indic-e4c is what surfaced it: its JSON
+        answered ``None`` to every hygiene question.
+        """
+
+        config = experiment(
+            tmp_path,
+            pairs=sibling_pair_file(tmp_path / "siblings.jsonl"),
+            sample_pairs=192,
+            train_pairs=64,
+            eval_pairs=32,
+        )
+
+        payload = AdaptationPipeline(config, echo=lambda _: None).run().to_dict()
+
+        assert payload["held_out_documents"] > 0
+
+        assert payload["held_out_without_document"] == 0
+
+        # More was dropped than the held-out pairs themselves, which is the
+        # document rule doing work rather than the text rule alone.
+        assert payload["pool_dropped_as_held_out"] > payload["eval_examples"]
+
+    def test_a_sibling_unit_of_a_held_out_document_is_not_trained_on(
+        self, tmp_path: Path
+    ) -> None:
+        """
+        What the document rule is for, isolated from the text rule.
+
+        Two provisions of the same regulation share no wording, so excluding
+        by text cannot see that they belong together — and a model that
+        trained on Article 3 has been shown the register, subject matter and
+        drafting idiom of the very document it is about to be scored on.
+
+        This shape is the one that fails if the document rule is removed. The
+        bidirectional test above does not: there, both directions share their
+        text as well, so the text rule alone keeps it passing and the document
+        assertion succeeds for the wrong reason.
+        """
+
+        config = experiment(
+            tmp_path,
+            pairs=sibling_pair_file(tmp_path / "siblings.jsonl"),
+            sample_pairs=192,
+            train_pairs=64,
+            eval_pairs=32,
+        )
+
+        train, held, facts = AdaptationPipeline(config, echo=lambda _: None)._select()
+
+        assert train, "nothing left to train on — the exclusion is too broad"
+
+        assert {pair.document for pair in train} & {pair.document for pair in held} == set()
+
+        # Siblings share no text with the held-out set, so anything dropped
+        # beyond the held-out pairs themselves was dropped by document. Without
+        # this the assertion above could pass on a corpus where the text rule
+        # happened to catch everything anyway.
+        held_texts = {pair.anchor for pair in held} | {pair.positive for pair in held}
+
+        assert {pair.anchor for pair in train} & held_texts == set()
+
+        assert facts["pool_dropped_as_held_out"] > len(held)
+
+        assert facts["held_out_without_document"] == 0
 
     def test_a_pair_without_a_document_is_excluded_by_either_side(self, tmp_path: Path) -> None:
         """
