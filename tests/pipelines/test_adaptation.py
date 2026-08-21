@@ -20,6 +20,7 @@ wrong. Those guards are pure functions and are tested without torch.
 
 from __future__ import annotations
 
+import dataclasses
 import gzip
 import json
 from importlib.util import find_spec
@@ -426,6 +427,51 @@ def pair_file(
     return path
 
 
+def bidirectional_pair_file(path: Path, units: int = 96) -> Path:
+    """
+    A cross-lingual pair file shaped like the ones we actually mine.
+
+    Every aligned unit is emitted **twice** — once each way — sharing one
+    document id, which is what ``aligned``, ``eulaw``, ``pib`` and ``trade``
+    all do. That shape is the whole point: the reverse of a held-out pair has
+    the held-out *anchor* as its positive, so a filter that inspects only
+    positives cannot see it.
+    """
+
+    with open(path, "w", encoding="utf-8") as handle:
+        for index in range(units):
+            left = f"tok{index} tok{index + 100}"
+            right = f"tok{index} tok{index + 300} tok{index + 400}"
+
+            forward = MinedPair(
+                anchor=left,
+                positive=right,
+                kind="adjacent",
+                document=f"doc-{index}",
+                language="en",
+                positive_language="hi",
+                overlap=0.33,
+            )
+
+            handle.write(json.dumps(forward.to_record(), ensure_ascii=False) + "\n")
+
+            handle.write(
+                json.dumps(
+                    dataclasses.replace(
+                        forward,
+                        anchor=right,
+                        positive=left,
+                        language="hi",
+                        positive_language="en",
+                    ).to_record(),
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+
+    return path
+
+
 def experiment(root: Path, **settings: Any) -> ExperimentConfig:
     """A runnable config over the built checkpoint and a fresh pair file."""
 
@@ -524,6 +570,89 @@ class TestEndToEnd:
         train, held, _ = pipeline._select()
 
         assert {p.positive for p in train} & {p.positive for p in held} == set()
+
+    def test_the_reverse_of_a_held_out_pair_is_not_trained_on(self, tmp_path: Path) -> None:
+        """
+        The leak that inflated eulaw-multi-e1.
+
+        A cross-lingual corpus emits both directions of every alignment, so
+        holding out (A -> B) while training on (B -> A) feeds a symmetric
+        bi-encoder the same two texts with the roles swapped. Excluding by
+        positive text alone cannot catch it, because the reverse pair's
+        positive is the held-out *anchor*. Measured on the real run: 23.4% of
+        held-out pairs had their exact reverse in training and only 7.4% were
+        unseen on both sides, which is what makes this a measurement bug
+        rather than a modelling preference.
+        """
+
+        config = experiment(
+            tmp_path,
+            pairs=bidirectional_pair_file(tmp_path / "xling.jsonl"),
+            sample_pairs=192,
+            train_pairs=64,
+            eval_pairs=32,
+        )
+
+        train, held, _ = AdaptationPipeline(config, echo=lambda _: None)._select()
+
+        assert train, "nothing left to train on — the exclusion is too broad"
+
+        trained = {(pair.anchor, pair.positive) for pair in train}
+
+        reversed_held = {(pair.positive, pair.anchor) for pair in held}
+
+        assert trained & reversed_held == set()
+
+        # Both directions share one document, so the document rule is what
+        # closes this. Asserting it directly stops a future text-level
+        # workaround from passing the check above by accident.
+        assert {p.document for p in train} & {p.document for p in held} == set()
+
+    def test_a_pair_without_a_document_is_excluded_by_either_side(self, tmp_path: Path) -> None:
+        """
+        The fallback for a corpus that does not identify its documents.
+
+        There is no document to group on, so the only defence left is text —
+        and it has to look at *both* sides. Checking the positive alone is
+        what let the reverse direction through in the first place.
+        """
+
+        path = tmp_path / "anonymous.jsonl"
+
+        with open(path, "w", encoding="utf-8") as handle:
+            for index in range(96):
+                left = f"tok{index} tok{index + 100}"
+                right = f"tok{index} tok{index + 300} tok{index + 400}"
+
+                for anchor, positive in ((left, right), (right, left)):
+                    handle.write(
+                        json.dumps(
+                            MinedPair(
+                                anchor=anchor,
+                                positive=positive,
+                                kind="adjacent",
+                                document="",
+                                language="en",
+                                overlap=0.33,
+                            ).to_record(),
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+
+        config = experiment(tmp_path, pairs=path, sample_pairs=192, train_pairs=64, eval_pairs=32)
+
+        train, held, facts = AdaptationPipeline(config, echo=lambda _: None)._select()
+
+        held_sides = {pair.anchor for pair in held} | {pair.positive for pair in held}
+
+        assert {pair.anchor for pair in train} & held_sides == set()
+
+        assert {pair.positive for pair in train} & held_sides == set()
+
+        # The run must say it fell back, or a report claims a document-level
+        # split it never had.
+        assert facts["held_out_without_document"] == len(held)
 
     def test_a_fixed_evaluation_file_is_recorded(self, tmp_path: Path) -> None:
         """

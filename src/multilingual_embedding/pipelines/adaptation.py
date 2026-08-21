@@ -660,6 +660,14 @@ class AdaptationPipeline:
         baselines of 0.4238 and 0.4764 for the same checkpoint — a
         difference in the measuring stick that looked like a difference
         in the model.
+
+        Training excludes whole **documents**, not texts. A corpus that
+        emits both directions of an alignment will otherwise leak the
+        reverse of a held-out pair into training, because the reverse's
+        positive is the held-out *anchor* and a positive-only filter
+        never looks there. That is not hypothetical: it inflated
+        eulaw-multi-e1, where only 7.4% of the held-out set was unseen
+        on both sides.
         """
 
         settings = self.adaptation
@@ -677,10 +685,46 @@ class AdaptationPipeline:
 
         evaluation = sample_pairs(evaluation_source, settings.eval_pairs, seed=seed + 10_000)
 
+        # Hold out whole documents, not texts. ``document`` is already the
+        # identity that says two pairs are about the same subject — the batch
+        # sampler honours it, and the split is the one place that did not.
+        #
+        # Excluding only pairs whose *positive* is a held-out positive lets the
+        # reverse direction of a cross-lingual alignment straight through: for
+        # a held-out (EN -> ES) pair, the corpus also emits (ES -> EN), whose
+        # positive is the held-out *anchor*, which that filter never looked at.
+        # Same two texts, roles swapped, into a symmetric bi-encoder. Measured
+        # on eulaw-multi-e1: 23.4% of held-out pairs had their exact reverse in
+        # training and only 7.4% were unseen on both sides.
+        held_documents = {pair.document for pair in evaluation if pair.document}
+
+        # Both sides, not just the positive, for a corpus that does not
+        # identify its documents. This is the fallback, never the main path.
         held_texts = {pair.positive for pair in evaluation}
+        held_texts.update(pair.anchor for pair in evaluation)
+
+        undocumented = sum(1 for pair in evaluation if not pair.document)
+
+        if undocumented:
+            # Silence here would mean the document rule quietly did nothing and
+            # the run reported a clean split it never had.
+            _logger.warning(
+                "%d of %d held-out pairs carry no document id; falling back to "
+                "text exclusion for those, which cannot see sibling units",
+                undocumented,
+                len(evaluation),
+            )
+
+        def leaks(pair: MinedPair) -> bool:
+            if pair.document:
+                return pair.document in held_documents
+
+            return pair.positive in held_texts or pair.anchor in held_texts
+
+        kept = [p for p in pool if not leaks(p)]
 
         candidates = only(
-            only([p for p in pool if p.positive not in held_texts], settings.train_kinds, "kind"),
+            only(kept, settings.train_kinds, "kind"),
             settings.train_languages,
             "language",
         )
@@ -725,6 +769,11 @@ class AdaptationPipeline:
 
         facts: dict[str, Any] = {
             "evaluation_source": evaluation_source,
+            # Recorded so a report can be audited for split hygiene after the
+            # fact, rather than trusted because the code was supposed to be right.
+            "held_out_documents": len(held_documents),
+            "held_out_without_document": undocumented,
+            "pool_dropped_as_held_out": len(pool) - len(kept),
             "train_kinds": values(train, "kind"),
             "eval_kinds": values(held, "kind"),
             "train_languages": values(train, "language"),
