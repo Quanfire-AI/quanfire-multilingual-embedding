@@ -112,7 +112,16 @@ class MinedPair:
         batch is teaching the model that a correct match is wrong.
 
     language:
+        The *anchor's* language — the language the query is asked in.
         Carried through so a mixed-language pair set stays separable.
+
+    positive_language:
+        The *positive's* language, when it differs from the anchor's. A
+        cross-lingual pair has two, and code that scores candidates must
+        read this one: the candidate pool is built from positives, so
+        using ``language`` for both sides measures the wrong text. Left
+        ``None`` for a monolingual pair, where the two are the same and
+        the distinction costs a field for nothing.
 
     overlap:
         Share of the anchor's words that also appear in the positive, in
@@ -144,6 +153,8 @@ class MinedPair:
 
     negatives: tuple[str, ...] = ()
 
+    positive_language: str | None = None
+
     def to_record(self) -> dict[str, Any]:
         """
         Reduce to a JSON Lines record.
@@ -165,6 +176,12 @@ class MinedPair:
 
         if self.negatives:
             record["negatives"] = list(self.negatives)
+
+        # Omitted when absent for the same reason as ``negatives``: a pair
+        # file written before this field existed must still round-trip to a
+        # byte-identical line.
+        if self.positive_language is not None:
+            record["positive_language"] = self.positive_language
 
         return record
 
@@ -201,6 +218,7 @@ class MinedPair:
             negatives=tuple(
                 str(text) for text in (record.get("negatives") or ()) if str(text).strip()
             ),
+            positive_language=record.get("positive_language"),
         )
 
 

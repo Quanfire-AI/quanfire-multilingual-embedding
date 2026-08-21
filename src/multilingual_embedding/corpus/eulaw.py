@@ -329,9 +329,7 @@ def read_formex_articles(
         heading = f"{title} - {subtitle}" if title and subtitle else (title or subtitle)
 
         body_parts = [
-            _text_of(child)
-            for child in article
-            if child.tag not in ("TI.ART", "STI.ART")
+            _text_of(child) for child in article if child.tag not in ("TI.ART", "STI.ART")
         ]
 
         text = _normalize(" ".join(part for part in body_parts if part))
@@ -458,6 +456,7 @@ def iter_cross_lingual_pairs(
             kind=kind,
             document=document,
             language=left_code,
+            positive_language=right_code,
             overlap=forward_overlap,
         )
 
@@ -467,5 +466,6 @@ def iter_cross_lingual_pairs(
             kind=kind,
             document=document,
             language=right_code,
+            positive_language=left_code,
             overlap=token_overlap(right_text, left_text),
         )
