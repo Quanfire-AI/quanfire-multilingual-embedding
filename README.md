@@ -74,10 +74,10 @@ table's word for it, check it.
 > everything outside embeddings lives there and nowhere in this README.
 
 > **Looking for the full reference?**
-> [`knowledge-base/Quanfire-Multilingual-Embedding-Handbook.pdf`](knowledge-base/Quanfire-Multilingual-Embedding-Handbook.pdf)
-> is a 90-page handbook covering purpose, design, architecture, components, usage, local
-> and production operation, benefits, and an honest pros-and-cons assessment. Read that
-> if you want the whole picture in one document; read on for the quick version.
+> The documentation set under [`docs/`](docs/) covers installation, configuration,
+> architecture, data formats, compute profiles, and how to read evaluation output.
+> Start at [`docs/getting-started.md`](docs/getting-started.md); read on here for the
+> quick version.
 
 ---
 
@@ -1237,7 +1237,6 @@ quanfire-multilingual-embedding/
 │   ├── sample/                     six-language sample corpus (committed)
 │   └── dumps/                      Wikipedia dumps (gitignored, ~485 MB for hi + ta)
 ├── docs/                           MkDocs documentation
-├── knowledge-base/                 the reference handbook (PDF), its source and build script
 ├── models/                         saved LoRA adapters, e.g. indic-v1 (gitignored)
 ├── artifacts/                      trained static experiments (gitignored)
 ├── reports/                        evaluation output (gitignored)
