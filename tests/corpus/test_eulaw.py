@@ -154,9 +154,7 @@ def test_align_drops_provisions_present_in_only_one_language() -> None:
     en = read_formex_articles(_EN, celex="R", language="en")  # 001, 002
     de = read_formex_articles(
         _act(
-            _article(
-                "001", "Artikel 1", "", "Diese Verordnung enthaelt Vorschriften zum Schutz."
-            )
+            _article("001", "Artikel 1", "", "Diese Verordnung enthaelt Vorschriften zum Schutz.")
         ),
         celex="R",
         language="de",
@@ -202,6 +200,65 @@ def test_pairs_share_one_document_id_per_article() -> None:
     # both directions of article 001 share its document id
     assert pairs[0].document == pairs[1].document == "eur-lex:32016R0679:001"
     assert pairs[2].document == "eur-lex:32016R0679:002"
+
+
+def test_the_document_id_does_not_depend_on_which_language_is_on_the_left() -> None:
+    """
+    The property the whole split rests on for this corpus.
+
+    ``without_held_out`` holds out *documents*, and the reason eulaw is safe
+    from the cross-lingual twin leak — a held-out provision reappearing in
+    another language, a different string no text rule can see — is that all
+    renderings of one provision carry the **same** document id. That is only
+    true while the id is language-independent.
+
+    Alignment joins on the normalised identifier, so two expressions can agree
+    on the join key while their raw ``number`` differs. ``read_formex_articles``
+    happens to normalise on the way in today, but this function takes any
+    provisions a caller builds, and an id derived from one side's raw number
+    would make the id depend on which language was passed first — splitting
+    twins across the train and held-out sides of a corpus we describe as
+    structurally closed to exactly that.
+
+    Built by hand rather than parsed, because the reader's normalisation would
+    otherwise hide what is being tested.
+    """
+
+    body_en = (
+        "This Regulation lays down rules relating to the protection of natural "
+        "persons with regard to the processing of personal data."
+    )
+
+    body_de = (
+        "Diese Verordnung enthaelt Vorschriften zum Schutz natuerlicher Personen "
+        "bei der Verarbeitung personenbezogener Daten."
+    )
+
+    left = [FormexProvision(number="001", heading="Article 1 - Scope", text=body_en)]
+
+    right = [FormexProvision(number=" 001 ", heading="Artikel 1 - Anwendungsbereich", text=body_de)]
+
+    assert left[0].number != right[0].number, (
+        "the fixture no longer varies the raw identifier — this test would pass vacuously"
+    )
+
+    forward = list(
+        iter_cross_lingual_pairs(
+            left, right, left_language="en", right_language="de", celex="32016R0679"
+        )
+    )
+
+    backward = list(
+        iter_cross_lingual_pairs(
+            right, left, left_language="de", right_language="en", celex="32016R0679"
+        )
+    )
+
+    assert forward, "the join found nothing — the identifiers stopped matching"
+
+    assert {p.document for p in forward} == {"eur-lex:32016R0679:001"}
+
+    assert {p.document for p in backward} == {"eur-lex:32016R0679:001"}
 
 
 def test_cross_lingual_overlap_is_low_not_string_solvable() -> None:

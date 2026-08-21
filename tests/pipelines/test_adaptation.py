@@ -511,6 +511,50 @@ def sibling_pair_file(path: Path, documents: int = 96, units: int = 2) -> Path:
     return path
 
 
+BOILERPLATE = "shall enter into force on the twentieth day following publication"
+
+
+def repeated_text_pair_file(path: Path, documents: int = 160) -> Path:
+    """
+    A corpus where one sentence recurs verbatim under many *different* documents.
+
+    This is the shape the document rule cannot see. An entry-into-force
+    article is the same sentence in a hundred regulations, so a pair carrying
+    it under `celex:B` gives away a held-out pair carrying it under
+    `celex:A` — and both documents are properly identified, so a text check
+    that only runs when `document` is empty never looks.
+
+    Each document contributes exactly two pairs, one repeated and one unique,
+    which bounds what the document rule alone could possibly drop at two per
+    held-out document and leaves something to train on after the text rule.
+    """
+
+    with open(path, "w", encoding="utf-8") as handle:
+        for document in range(documents):
+            pairs = (
+                (f"a{document} a{document + 10000}", BOILERPLATE),
+                (f"c{document} c{document + 20000}", f"e{document} e{document + 30000}"),
+            )
+
+            for anchor, positive in pairs:
+                handle.write(
+                    json.dumps(
+                        MinedPair(
+                            anchor=anchor,
+                            positive=positive,
+                            kind="adjacent",
+                            document=f"celex-{document}",
+                            language="en",
+                            overlap=0.2,
+                        ).to_record(),
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+
+    return path
+
+
 def experiment(root: Path, **settings: Any) -> ExperimentConfig:
     """A runnable config over the built checkpoint and a fresh pair file."""
 
@@ -676,9 +720,7 @@ class TestEndToEnd:
         # document rule doing work rather than the text rule alone.
         assert payload["pool_dropped_as_held_out"] > payload["eval_examples"]
 
-    def test_a_sibling_unit_of_a_held_out_document_is_not_trained_on(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_sibling_unit_of_a_held_out_document_is_not_trained_on(self, tmp_path: Path) -> None:
         """
         What the document rule is for, isolated from the text rule.
 
@@ -716,6 +758,53 @@ class TestEndToEnd:
         assert {pair.anchor for pair in train} & held_texts == set()
 
         assert facts["pool_dropped_as_held_out"] > len(held)
+
+        assert facts["held_out_without_document"] == 0
+
+    def test_repeated_text_under_another_document_is_not_trained_on(self, tmp_path: Path) -> None:
+        """
+        What the *text* rule is for, on a corpus that documents itself.
+
+        The pair-level and sibling tests above both pass with the text check
+        restricted to undocumented pairs — that was the code before 6fe7e6b,
+        and nothing in this file said it was wrong. Here a held-out sentence
+        recurs verbatim under a document that was never held out, so the
+        document rule cannot reach it and only a text check that runs for
+        *every* pair closes it. On the real eulaw corpus this shape left 250
+        exact reverses standing after the document rule had done its work.
+        """
+
+        config = experiment(
+            tmp_path,
+            pairs=repeated_text_pair_file(tmp_path / "boilerplate.jsonl"),
+            sample_pairs=240,
+            train_pairs=32,
+            eval_pairs=32,
+        )
+
+        train, held, facts = AdaptationPipeline(config, echo=lambda _: None)._select()
+
+        assert train, "nothing left to train on — the exclusion is too broad"
+
+        # State the precondition rather than trusting the sample: if no
+        # held-out pair carries the repeated sentence there is nothing here
+        # for the text rule to catch and the test would pass vacuously.
+        assert any(pair.positive == BOILERPLATE for pair in held)
+
+        held_documents = {pair.document for pair in held}
+
+        assert {pair.document for pair in train} & held_documents == set()
+
+        held_sides = {pair.anchor for pair in held} | {pair.positive for pair in held}
+
+        assert {pair.anchor for pair in train} & held_sides == set()
+
+        assert {pair.positive for pair in train} & held_sides == set()
+
+        # Each document contributes exactly two pairs, so the document rule
+        # alone cannot account for more than two drops per held-out document.
+        # Anything beyond that was the text rule reaching across documents.
+        assert facts["pool_dropped_as_held_out"] > 2 * len(held_documents)
 
         assert facts["held_out_without_document"] == 0
 

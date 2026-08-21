@@ -444,7 +444,20 @@ def iter_cross_lingual_pairs(
 
             seen.add(key)
 
-        document = f"{source}:{celex}:{left_provision.number}"
+        # The join key, not the left side's raw number. `align_provisions`
+        # matches on `_normalize(number)`, so that is the identifier both
+        # expressions actually agree on; the raw number is whatever one
+        # language's Formex happened to write. Building the id from the raw
+        # left number makes it depend on *which* language is on the left, and
+        # a de/fr pairing whose number carries different whitespace from the
+        # en/es one would land under a different document id — which would
+        # split cross-lingual twins of the same provision across the train and
+        # held-out sides, the one leak this corpus is structurally safe from.
+        # Language-independence here is load-bearing, so it is derived rather
+        # than assumed.
+        position = _normalize(left_provision.number)
+
+        document = f"{source}:{celex}:{position}"
 
         forward_overlap = token_overlap(left_text, right_text)
 
