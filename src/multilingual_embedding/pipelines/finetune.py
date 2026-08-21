@@ -526,7 +526,11 @@ class FinetunePipeline:
 
         evaluation = sample_pairs(evaluation_source, settings.eval_pairs, seed=seed + 10_000)
 
-        kept, hygiene = without_held_out(pool, evaluation)
+        kept, hygiene = without_held_out(
+            pool,
+            evaluation,
+            allow_undocumented_fallback=settings.allow_undocumented_fallback,
+        )
 
         candidates = only(
             only(kept, settings.train_kinds, "kind"),

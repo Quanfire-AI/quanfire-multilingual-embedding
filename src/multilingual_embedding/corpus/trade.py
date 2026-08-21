@@ -831,9 +831,7 @@ def align_bilingual_sections(
 
         stats._align()
 
-        heading = _normalize(english_section.heading) or _normalize(
-            hindi_section.heading
-        )
+        heading = _normalize(english_section.heading) or _normalize(hindi_section.heading)
 
         yield BilingualSection(
             identifier=f"{act_identifier}:s.{_normalize(english_section.number)}",

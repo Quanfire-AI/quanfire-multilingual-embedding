@@ -289,9 +289,7 @@ def mask_tokens(
     to_mask = selected & (fate < replace_with_mask)
 
     to_randomise = (
-        selected
-        & (fate >= replace_with_mask)
-        & (fate < replace_with_mask + replace_with_random)
+        selected & (fate >= replace_with_mask) & (fate < replace_with_mask + replace_with_random)
     )
 
     corrupted = token_ids.clone()
@@ -863,9 +861,7 @@ class MaskedLanguageModelTrainer:
 
         target = ensure_directory(checkpoint_dir) / _CHECKPOINT_FILENAME
 
-        cuda_rng = (
-            torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
-        )
+        cuda_rng = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
 
         payload = {
             "format_version": _CHECKPOINT_VERSION,

@@ -707,6 +707,14 @@ class AdaptationConfig:
     pairs:
         Mined pair file to train on, as written by ``qfme mine-pairs``.
 
+    allow_undocumented_fallback:
+        Accept a held-out set whose pairs mostly carry no document id.
+        Off by default, and the default refuses rather than warns: with
+        no document to group on, the split falls back to text exclusion
+        alone, which is exactly the rule that was already shown to miss
+        sibling units. Set it only for a corpus that genuinely has no
+        document identity, and say so on the model card.
+
     eval_pairs_file:
         Score against this file instead of :attr:`pairs`. Holding it
         fixed is what lets two runs that train on different data be
@@ -776,6 +784,8 @@ class AdaptationConfig:
     checkpoint: str = ""
 
     pairs: Path | None = None
+
+    allow_undocumented_fallback: bool = False
 
     eval_pairs_file: Path | None = None
 
@@ -964,6 +974,14 @@ class FinetuneConfig:
     pairs:
         Mined pair file to train on, as written by ``qfme mine-pairs``.
 
+    allow_undocumented_fallback:
+        Accept a held-out set whose pairs mostly carry no document id.
+        Off by default, and the default refuses rather than warns: with
+        no document to group on, the split falls back to text exclusion
+        alone, which is exactly the rule that was already shown to miss
+        sibling units. Set it only for a corpus that genuinely has no
+        document identity, and say so on the model card.
+
     eval_pairs_file:
         Score against this file instead of :attr:`pairs`. Holding it
         fixed is what lets two fine-tunes that train on different data be
@@ -1009,6 +1027,8 @@ class FinetuneConfig:
     source: Path | None = None
 
     pairs: Path | None = None
+
+    allow_undocumented_fallback: bool = False
 
     eval_pairs_file: Path | None = None
 

@@ -146,9 +146,7 @@ class _ServedModel:
             # TextEncoder protocol, and a getattr fallback would publish a
             # confident 0 for a model whose real limit is 256 — a model card
             # that states a wrong number is worse than one that omits it.
-            self.manifest = json.loads(
-                (directory / "adapter.json").read_text(encoding="utf-8")
-            )
+            self.manifest = json.loads((directory / "adapter.json").read_text(encoding="utf-8"))
 
         self.query_prefix, self.passage_prefix = self.pipeline.prefixes
 

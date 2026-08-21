@@ -23,6 +23,7 @@ from __future__ import annotations
 import dataclasses
 import gzip
 import json
+import unicodedata
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,7 @@ from multilingual_embedding.pipelines.adaptation import (
     prefixed,
     values,
     varying,
+    without_held_out,
 )
 
 needs_neural = pytest.mark.skipif(
@@ -178,6 +180,82 @@ class TestFacetFilter:
         though it trained on a language called ``""``."""
 
         assert values([pair(language="hi"), pair(language="")], "language") == ["hi"]
+
+
+class TestHeldOutNormalisation:
+    """
+    The text rule compares normalised forms, not bytes.
+
+    Legal source formats are where exact matching breaks: EU Formex carries
+    non-breaking spaces and decomposed combining forms, so the *same sentence*
+    can appear under two document ids in two byte sequences. Neither rule sees
+    it then — the ids differ, and the strings are not equal — and it trains.
+    """
+
+    @staticmethod
+    def _pair(anchor_text: str, positive: str, document: str) -> MinedPair:
+        return MinedPair(
+            anchor=anchor_text,
+            positive=positive,
+            kind="adjacent",
+            document=document,
+            language="en",
+            overlap=0.1,
+        )
+
+    def test_a_whitespace_variant_under_another_document_is_excluded(self) -> None:
+        held_text = "This Regulation shall enter into force on the twentieth day"
+        variant = held_text.replace(" shall ", "\u00a0shall\u00a0")
+
+        assert variant != held_text, "the fixture no longer varies the bytes"
+
+        evaluation = [self._pair("when does it apply", held_text, "celex:A:1")]
+        pool = [self._pair("a different question", variant, "celex:B:9")]
+
+        kept, facts = without_held_out(pool, evaluation)
+
+        assert kept == [], "the normalised form of a held-out text trained"
+
+        # The document rule cannot have done this — the ids are disjoint — and
+        # neither can exact text. Attributing the drop is what makes the test
+        # about normalisation rather than about exclusion in general.
+        assert facts["pool_dropped_by_normalization"] == 1
+
+        assert facts["pool_dropped_by_document"] == 0
+
+        assert facts["pool_dropped_by_text"] == 0
+
+    def test_a_decomposed_form_is_excluded(self) -> None:
+        """NFD vs NFC: identical to a reader, unequal to ``in``."""
+
+        held_text = "L'acquis de l'Union européenne s'applique à cette décision"
+        decomposed = unicodedata.normalize("NFD", held_text)
+
+        assert decomposed != held_text, "the fixture no longer varies the bytes"
+
+        evaluation = [self._pair("a query", held_text, "celex:A:1")]
+        pool = [self._pair("another query", decomposed, "celex:B:9")]
+
+        kept, facts = without_held_out(pool, evaluation)
+
+        assert kept == []
+
+        assert facts["pool_dropped_by_normalization"] == 1
+
+    def test_a_genuinely_different_text_survives(self) -> None:
+        """
+        Without this the class above is satisfied by a rule that drops
+        everything, which would fail safe on integrity and destroy the run.
+        """
+
+        evaluation = [self._pair("a query", "the first provision", "celex:A:1")]
+        pool = [self._pair("another query", "an unrelated provision", "celex:B:9")]
+
+        kept, facts = without_held_out(pool, evaluation)
+
+        assert kept == pool
+
+        assert facts["pool_dropped_as_held_out"] == 0
 
 
 class TestVarying:
@@ -488,7 +566,7 @@ def sibling_pair_file(path: Path, documents: int = 96, units: int = 2) -> Path:
     document rule is actually for.
     """
 
-    with open(path, "wt", encoding="utf-8") as handle:
+    with open(path, "w", encoding="utf-8") as handle:
         for document in range(documents):
             for unit in range(units):
                 tag = document * 10 + unit
@@ -815,6 +893,10 @@ class TestEndToEnd:
         There is no document to group on, so the only defence left is text —
         and it has to look at *both* sides. Checking the positive alone is
         what let the reverse direction through in the first place.
+
+        The opt-in is deliberate and load-bearing: this split is the weak
+        one, and a corpus only gets it by asking. See the companion test
+        that the default refuses.
         """
 
         path = tmp_path / "anonymous.jsonl"
@@ -840,7 +922,14 @@ class TestEndToEnd:
                         + "\n"
                     )
 
-        config = experiment(tmp_path, pairs=path, sample_pairs=192, train_pairs=64, eval_pairs=32)
+        config = experiment(
+            tmp_path,
+            pairs=path,
+            sample_pairs=192,
+            train_pairs=64,
+            eval_pairs=32,
+            allow_undocumented_fallback=True,
+        )
 
         train, held, facts = AdaptationPipeline(config, echo=lambda _: None)._select()
 
@@ -853,6 +942,45 @@ class TestEndToEnd:
         # The run must say it fell back, or a report claims a document-level
         # split it never had.
         assert facts["held_out_without_document"] == len(held)
+
+    def test_an_undocumented_corpus_is_refused_unless_it_asks(self, tmp_path: Path) -> None:
+        """
+        The same corpus, without the opt-in, must stop the run.
+
+        A warning was the wrong instrument here. It scrolls past in a
+        ninety-second run and is gone by the next session, while the split it
+        permits is the text-only one this function exists to replace — so the
+        failure mode is a report that claims a document-level split it never
+        had, with the evidence already off the screen.
+        """
+
+        path = tmp_path / "anonymous.jsonl"
+
+        with open(path, "w", encoding="utf-8") as handle:
+            for index in range(96):
+                left = f"tok{index} tok{index + 100}"
+                right = f"tok{index} tok{index + 300} tok{index + 400}"
+
+                for anchor_text, positive in ((left, right), (right, left)):
+                    handle.write(
+                        json.dumps(
+                            MinedPair(
+                                anchor=anchor_text,
+                                positive=positive,
+                                kind="adjacent",
+                                document="",
+                                language="en",
+                                overlap=0.33,
+                            ).to_record(),
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+
+        config = experiment(tmp_path, pairs=path, sample_pairs=192, train_pairs=64, eval_pairs=32)
+
+        with pytest.raises(ConfigurationError, match="carry no document id"):
+            AdaptationPipeline(config, echo=lambda _: None)._select()
 
     def test_a_fixed_evaluation_file_is_recorded(self, tmp_path: Path) -> None:
         """

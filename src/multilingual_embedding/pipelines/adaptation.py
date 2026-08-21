@@ -42,6 +42,7 @@ static path must stay installable without it.
 from __future__ import annotations
 
 import time
+import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,8 +67,8 @@ __all__ = [
     "check_adaptation",
     "only",
     "prefixed",
-    "without_held_out",
     "varying",
+    "without_held_out",
 ]
 
 _logger = get_logger(__name__)
@@ -157,9 +158,39 @@ def only(pairs: Sequence[MinedPair], wanted: Sequence[str], facet: str) -> list[
     return kept
 
 
+# Above this share of held-out pairs missing a document id, the document rule
+# is not the split's primary defense any more — text exclusion is, and text
+# exclusion is exactly what was already proven insufficient on documented data.
+# A run in that state should stop rather than report a clean split it never had.
+UNDOCUMENTED_SHARE_REFUSED = 0.05
+
+# Over-exclusion fails safe: it wastes data and can shift the surviving
+# distribution, but it cannot inflate a number. So this warns rather than
+# refuses — but losing half the pool to the holdout is worth a line in the log
+# that a reader of the report can go looking for.
+OVER_EXCLUSION_SHARE_WARNED = 0.5
+
+
+def _membership_key(text: str) -> str:
+    """
+    The form two texts are compared in for the text rule.
+
+    Exact-match membership is Unicode-fragile, and legal source formats are
+    where that bites: EU Formex carries non-breaking spaces, soft hyphens and
+    decomposed combining forms, so an NFC or whitespace variant of a held-out
+    sentence under a different document id escapes both rules — different id,
+    not byte-equal. Normalising before membership costs one pass and makes the
+    "not a string matcher" claim mean something.
+    """
+
+    return " ".join(unicodedata.normalize("NFC", text).split())
+
 
 def without_held_out(
-    pool: Sequence[MinedPair], evaluation: Sequence[MinedPair]
+    pool: Sequence[MinedPair],
+    evaluation: Sequence[MinedPair],
+    *,
+    allow_undocumented_fallback: bool = False,
 ) -> tuple[list[MinedPair], dict[str, int]]:
     """
     Drop every pool pair that the held-out set has already given away.
@@ -180,6 +211,13 @@ def without_held_out(
     place by existing twice — once in this pipeline and once in the fine-tune
     one — so fixing a copy is not fixing the bug.
 
+    Raises ``ConfigurationError`` when more than ``UNDOCUMENTED_SHARE_REFUSED`` of the
+    held-out pairs carry no document id, unless the caller opts in with
+    ``allow_undocumented_fallback``. A warning was the wrong instrument: it is
+    precisely the safety artefact that does not survive the session boundary,
+    and the path it permits is the text-only rule this function exists to
+    replace.
+
     Returns the surviving pairs and counts a report can be audited against.
     """
 
@@ -189,10 +227,31 @@ def without_held_out(
     # let the reverse direction through.
     held_texts = {pair.positive for pair in evaluation}
     held_texts.update(pair.anchor for pair in evaluation)
+    held_keys = {_membership_key(text) for text in held_texts}
 
     undocumented = sum(1 for pair in evaluation if not pair.document)
+    share = undocumented / len(evaluation) if evaluation else 0.0
 
-    if undocumented:
+    if undocumented and share > UNDOCUMENTED_SHARE_REFUSED:
+        if not allow_undocumented_fallback:
+            raise ConfigurationError(
+                f"{undocumented} of {len(evaluation)} held-out pairs "
+                f"({share:.1%}) carry no document id, above the "
+                f"{UNDOCUMENTED_SHARE_REFUSED:.0%} ceiling. The document rule "
+                "cannot see sibling units for those, leaving only text "
+                "exclusion — which is the rule this split was changed to stop "
+                "relying on. Fix the corpus's document ids, or pass "
+                "allow_undocumented_fallback=True to accept a text-only split "
+                "and say so on the card."
+            )
+        _logger.warning(
+            "%d of %d held-out pairs (%.1f%%) carry no document id; proceeding "
+            "on text exclusion alone because allow_undocumented_fallback is set",
+            undocumented,
+            len(evaluation),
+            share * 100,
+        )
+    elif undocumented:
         # Silence here would mean the document rule quietly did nothing and the
         # run reported a clean split it never had.
         _logger.warning(
@@ -202,9 +261,12 @@ def without_held_out(
             len(evaluation),
         )
 
-    def leaks(pair: MinedPair) -> bool:
+    def reason(pair: MinedPair) -> str | None:
+        """Which rule drops this pair, or None if it survives — attributed so
+        the report says what the split actually did rather than only how much."""
+
         if pair.document and pair.document in held_documents:
-            return True
+            return "document"
 
         # Boilerplate recurs verbatim under different document ids — an
         # entry-into-force article is the same sentence in a hundred
@@ -213,14 +275,39 @@ def without_held_out(
         # still left 250 exact reverses standing on repeated text. This check
         # therefore runs for every pair, not only for a corpus that leaves the
         # document blank.
-        return pair.positive in held_texts or pair.anchor in held_texts
+        if pair.positive in held_texts or pair.anchor in held_texts:
+            return "text"
 
-    kept = [pair for pair in pool if not leaks(pair)]
+        if _membership_key(pair.positive) in held_keys or _membership_key(pair.anchor) in held_keys:
+            return "normalized"
+
+        return None
+
+    reasons = [reason(pair) for pair in pool]
+    kept = [pair for pair, why in zip(pool, reasons, strict=True) if why is None]
+
+    dropped = len(pool) - len(kept)
+    dropped_share = dropped / len(pool) if pool else 0.0
+    if dropped_share > OVER_EXCLUSION_SHARE_WARNED:
+        _logger.warning(
+            "the holdout dropped %d of %d pool pairs (%.1f%%); this cannot "
+            "inflate a score but it does shrink and reshape the training "
+            "distribution, so the surviving volume belongs on the card",
+            dropped,
+            len(pool),
+            dropped_share * 100,
+        )
 
     return kept, {
         "held_out_documents": len(held_documents),
         "held_out_without_document": undocumented,
-        "pool_dropped_as_held_out": len(pool) - len(kept),
+        "pool_dropped_as_held_out": dropped,
+        "pool_dropped_by_document": reasons.count("document"),
+        "pool_dropped_by_text": reasons.count("text"),
+        # Non-zero means exact matching would have let these through: the
+        # measure of what normalisation is buying, rather than a claim that it
+        # buys something.
+        "pool_dropped_by_normalization": reasons.count("normalized"),
     }
 
 
@@ -772,7 +859,11 @@ class AdaptationPipeline:
 
         evaluation = sample_pairs(evaluation_source, settings.eval_pairs, seed=seed + 10_000)
 
-        kept, hygiene = without_held_out(pool, evaluation)
+        kept, hygiene = without_held_out(
+            pool,
+            evaluation,
+            allow_undocumented_fallback=settings.allow_undocumented_fallback,
+        )
 
         candidates = only(
             only(kept, settings.train_kinds, "kind"),

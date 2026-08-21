@@ -40,9 +40,11 @@ def declared_regimes() -> dict[str, tuple[str, str]]:
     try:
         from . import trade
 
-        for kind in (trade.TRADE_NOTIFICATION_KIND,
-                     trade.TRADE_SECTION_KIND,
-                     trade.TRADE_SECTION_XLING_KIND):
+        for kind in (
+            trade.TRADE_NOTIFICATION_KIND,
+            trade.TRADE_SECTION_KIND,
+            trade.TRADE_SECTION_XLING_KIND,
+        ):
             regimes[kind] = trade.prefix_regime(kind)
     except Exception:  # pragma: no cover - a missing module just narrows coverage
         pass

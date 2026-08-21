@@ -201,9 +201,7 @@ def _header_index(row: tuple[Any, ...]) -> dict[str, int]:
     """
 
     header = {
-        str(value).strip().lower(): index
-        for index, value in enumerate(row)
-        if value is not None
+        str(value).strip().lower(): index for index, value in enumerate(row) if value is not None
     }
 
     missing = [column for column in _REQUIRED_COLUMNS if column not in header]

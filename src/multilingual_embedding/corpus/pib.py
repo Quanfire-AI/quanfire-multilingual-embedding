@@ -63,12 +63,35 @@ PIB_ATTRIBUTION = "Source: Press Information Bureau (pib.gov.in), Government of 
 
 # ReleaseLang labels appear in English or the native script; mapped to ISO codes.
 _LANG = {
-    "english": "en", "hindi": "hi", "हिन्दी": "hi", "हिंदी": "hi", "urdu": "ur",
-    "اردو": "ur", "marathi": "mr", "मराठी": "mr", "telugu": "te", "తెలుగు": "te",
-    "tamil": "ta", "தமிழ்": "ta", "bengali": "bn", "বাংলা": "bn", "gujarati": "gu",
-    "ગુજરાતી": "gu", "kannada": "kn", "ಕನ್ನಡ": "kn", "malayalam": "ml", "മലയാളം": "ml",
-    "punjabi": "pa", "ਪੰਜਾਬੀ": "pa", "odia": "or", "oriya": "or", "ଓଡ଼ିଆ": "or",
-    "assamese": "as", "অসমীয়া": "as", "manipuri": "mni", "nepali": "ne",
+    "english": "en",
+    "hindi": "hi",
+    "हिन्दी": "hi",
+    "हिंदी": "hi",
+    "urdu": "ur",
+    "اردو": "ur",
+    "marathi": "mr",
+    "मराठी": "mr",
+    "telugu": "te",
+    "తెలుగు": "te",
+    "tamil": "ta",
+    "தமிழ்": "ta",
+    "bengali": "bn",
+    "বাংলা": "bn",
+    "gujarati": "gu",
+    "ગુજરાતી": "gu",
+    "kannada": "kn",
+    "ಕನ್ನಡ": "kn",
+    "malayalam": "ml",
+    "മലയാളം": "ml",
+    "punjabi": "pa",
+    "ਪੰਜਾਬੀ": "pa",
+    "odia": "or",
+    "oriya": "or",
+    "ଓଡ଼ିଆ": "or",
+    "assamese": "as",
+    "অসমীয়া": "as",
+    "manipuri": "mni",
+    "nepali": "ne",
 }
 
 _WORD = re.compile(r"[^\W_]+", re.UNICODE)
@@ -262,7 +285,11 @@ def crosslingual_pairs(
                 if "title_body" in cfg.kinds:
                     body = (p.get("body") or "").strip()
 
-                    if cfg.minimum_positive_characters <= len(body) <= cfg.maximum_positive_characters:
+                    if (
+                        cfg.minimum_positive_characters
+                        <= len(body)
+                        <= cfg.maximum_positive_characters
+                    ):
                         record = emit(title, body, "title_body")
 
                         if record is not None:
@@ -284,9 +311,13 @@ def crosslingual_pairs(
 
                     if (
                         cfg.minimum_positive_characters <= len(a_body)
-                        and cfg.minimum_positive_characters <= len(b_body) <= cfg.maximum_positive_characters
+                        and cfg.minimum_positive_characters
+                        <= len(b_body)
+                        <= cfg.maximum_positive_characters
                     ):
-                        record = emit(a_body[: cfg.maximum_positive_characters], b_body, "body_body")
+                        record = emit(
+                            a_body[: cfg.maximum_positive_characters], b_body, "body_body"
+                        )
 
                         if record is not None:
                             yield record
