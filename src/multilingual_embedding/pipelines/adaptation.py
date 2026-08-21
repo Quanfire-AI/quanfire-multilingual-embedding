@@ -698,8 +698,8 @@ class AdaptationPipeline:
         # training and only 7.4% were unseen on both sides.
         held_documents = {pair.document for pair in evaluation if pair.document}
 
-        # Both sides, not just the positive, for a corpus that does not
-        # identify its documents. This is the fallback, never the main path.
+        # Both sides, not just the positive. Checking the positive alone is
+        # what let the reverse direction through.
         held_texts = {pair.positive for pair in evaluation}
         held_texts.update(pair.anchor for pair in evaluation)
 
@@ -716,9 +716,16 @@ class AdaptationPipeline:
             )
 
         def leaks(pair: MinedPair) -> bool:
-            if pair.document:
-                return pair.document in held_documents
+            if pair.document and pair.document in held_documents:
+                return True
 
+            # Boilerplate recurs verbatim under different document ids — an
+            # entry-into-force article is the same sentence in a hundred
+            # regulations — so document identity alone cannot see it. On the
+            # real eulaw corpus the document rule closed 4 134 shared documents
+            # and still left 250 exact reverses standing on repeated text.
+            # This check therefore runs for every pair, not only for a corpus
+            # that leaves the document blank.
             return pair.positive in held_texts or pair.anchor in held_texts
 
         kept = [p for p in pool if not leaks(p)]

@@ -440,8 +440,14 @@ def bidirectional_pair_file(path: Path, units: int = 96) -> Path:
 
     with open(path, "w", encoding="utf-8") as handle:
         for index in range(units):
-            left = f"tok{index} tok{index + 100}"
-            right = f"tok{index} tok{index + 300} tok{index + 400}"
+            # Every eighth unit repeats the previous unit's text under a fresh
+            # document id, the way an entry-into-force article recurs verbatim
+            # across regulations. Document identity cannot see that, so the
+            # split has to fall back on the text for these.
+            source = index - 1 if index % 8 == 7 else index
+
+            left = f"tok{source} tok{source + 100}"
+            right = f"tok{source} tok{source + 300} tok{source + 400}"
 
             forward = MinedPair(
                 anchor=left,
