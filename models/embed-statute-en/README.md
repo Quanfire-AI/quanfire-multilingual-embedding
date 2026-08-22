@@ -18,6 +18,42 @@ language:
 
 # Quanfire Statute Embedding — `embed-statute-en` (Central Acts / bare statutory text)
 
+> ### ⚠️ Measurement correction — 2026-08-21
+>
+> **The headline this card used to carry (+48 % Recall@1) was measured on a
+> contaminated evaluation split. The corrected figure is +28.1 %.**
+>
+> The bug: the training filter dropped a pair only when its *positive* was in the
+> held-out set, and pairs drawn from a held-out Act were never excluded at all.
+> Adjacent-section and heading↔section pairs from the same Act therefore sat on
+> both sides of the split — the model was partly trained on the documents it was
+> scored on.
+>
+> The adapter was retrained and rescored on a split that isolates at the
+> **source-Act** level (591 documents held out, 32,200 pairs dropped from the
+> pool). **Every number in *Results* below is the clean measurement.** The gain
+> is smaller and it is still statistically significant (disjoint 95 % CIs).
+>
+> Two things a reader deserves to know:
+>
+> 1. **The clean figures are for a retrain (`statute-en-e2c`), not for the weight
+>    file currently in this repo.** The published weights saw the evaluation
+>    documents during training, so no honest score for *them* exists. Publishing
+>    the clean adapter as a new revision is pending.
+> 2. **This was the harshest of the three corrections, and the reason is volume.**
+>    Document isolation cut training from **32,432** pairs to **3,052** — 90.6 % of
+>    the pool — because a single Act yields hundreds of same-document pairs. The two
+>    runs are not remotely volume-matched, so the drop from +48 % to +28.1 % is
+>    *not* a measure of "what the leak was worth". The honest finding is that
+>    **this corpus does not contain enough distinct Acts to support both a clean
+>    split and a high-volume train**, and that a bigger statute corpus — not a
+>    better recipe — is what would move this model next.
+>
+> Fix: `without_held_out()` in
+> [quanfire-multilingual-embedding](https://github.com/quanfire-ai/quanfire-multilingual-embedding)
+> (commits `66470fe`, `6fe7e6b`, `3deaf8d`).
+
+
 A retrieval adapter for **English-language Indian central statutory text** — the
 sections, sub-sections and marginal-note headings of Acts enacted by Parliament. It
 is a LoRA adaptation over a frozen
@@ -33,7 +69,7 @@ like its sibling, this card shows you where it helps and where it does not, meas
 - **Framework & code:** [github.com/quanfire-ai/quanfire-multilingual-embedding](https://github.com/quanfire-ai/quanfire-multilingual-embedding) (Apache-2.0)
 - **PyPI:** `pip install quanfire-multilingual-embedding`
 - **Weights licence:** Apache-2.0 (see *Licence & provenance* — attribution to the source dataset is required)
-- **Internal run:** `statute-en-e2` · base e5-small · rank 32 / alpha 64, LoRA on `query,value` · mean pooling · 2 epochs, lr 1e-4 (bf16, CUDA) · adapter-mined hard negatives (4/pair, positive-margin 0.05)
+- **Internal run:** `statute-en-e2` · base e5-small · rank 32 / alpha 64, LoRA on `query,value` · mean pooling · 2 epochs, lr 1e-4 (bf16, CUDA) · adapter-mined hard negatives (4/pair, positive-margin 0.05) · the clean re-measure reported below is `statute-en-e2c`: identical configuration, retrained on a document-isolated split
 
 ## What it is for
 
@@ -45,7 +81,7 @@ embeds a query and a passage into the same 384-d space; cosine similarity ranks.
 
 | | Validated? |
 |---|---|
-| English **central statutory** (bare-Act) retrieval | ✅ **Yes** — +48 % Recall@1 overall, **+131 % on the un-gameable low-overlap slice**; see Results |
+| English **central statutory** (bare-Act) retrieval | ✅ **Yes** — +28.1 % Recall@1 overall, **+79 % on the un-gameable low-overlap slice**, on a clean document-isolated split; see Results |
 | **Judgment / case-law** text | ❌ **No** — that is [`embed-legal-en`](https://huggingface.co/quanfire-ai/embed-legal-en)'s register, not this one |
 | **State legislation, rules, notifications, contracts** | ❌ **Not measured** — bring your own evaluation |
 | **Non-English** statutory text (Hindi, Tamil, …) | ❌ **No** — the model and its training data are English-only |
@@ -60,31 +96,61 @@ queries dropped). The published base is the only honest baseline; the adapter is
 *same* held-out pairs, which were **never** seen in training. All figures are single-run,
 measured on CUDA (never MPS).
 
-| Metric | base e5-small | **embed-statute-en** | change |
-|---|---|---|---|
-| Recall@1 | 0.182 | **0.269** | **+48 %** |
-| Recall@5 | 0.346 | **0.488** | +41 % |
-| Recall@10 | 0.411 | **0.575** | +40 % |
-| MRR | 0.262 | **0.375** | +43 % |
-| nDCG@10 | 0.290 | **0.415** | +43 % |
+| Metric | base e5-small | **clean retrain (`statute-en-e2c`)** | change | withdrawn figure |
+|---|---|---|---|---|
+| Recall@1 | 0.1815 | **0.2326** | **+28.1 %** | ~~0.269 / +48 %~~ |
+| Recall@5 | 0.3458 | **0.4085** | +18.1 % | ~~0.488~~ |
+| Recall@10 | 0.4110 | **0.4767** | +16.0 % | ~~0.575~~ |
+| MRR | 0.2623 | **0.3173** | +21.0 % | ~~0.375~~ |
+| nDCG@10 | 0.2900 | **0.3476** | +19.9 % | ~~0.415~~ |
+
+The base column is unchanged — the contamination only ever inflated the adapter, so the
+correction is confined to one column.
 
 The Recall@1 gain clears sampling noise with **disjoint 95 % confidence intervals**: base
-**[0.165, 0.199]** vs adapter **[0.250, 0.289]** — the intervals do not touch.
+**[0.1651, 0.1991]** vs clean retrain **[0.2145, 0.2517]** — the intervals do not touch.
 
 **The un-gameable slice.** Statute marginal-note headings often restate the section body, so
 a string-matcher can win on high-overlap pairs without learning meaning. The honest readout is
 the **low-lexical-overlap bucket** (`<0.3` token overlap — pure semantics), and it is where the
 adapter helps most:
 
-| Lexical-overlap slice | base Recall@1 | **embed-statute-en** | change |
-|---|---|---|---|
-| **low `<0.3`** (n = 874, un-gameable) | 0.077 | **0.177** | **+131 %** |
-| mid `0.3–0.7` (n = 1,104) | 0.265 | **0.342** | +29 % |
+| Lexical-overlap slice | base Recall@1 | **clean retrain** | change | withdrawn figure |
+|---|---|---|---|---|
+| **low `<0.3`** (n = 874, un-gameable) | 0.0767 | **0.1373** | **+79 %** | ~~0.177 / +131 %~~ |
+| mid `0.3–0.7` (n = 1,104) | 0.2645 | **0.3080** | +16 % | ~~0.342 / +29 %~~ |
 
-On the pairs a string-matcher *cannot* solve, the adapter **more than doubles** Recall@1
-(and Recall@10 rises 0.245 → 0.462) — evidence it learned statutory semantics, not surface
-overlap. By pair kind, the gain holds across both dominant types: adjacent-section
-0.185 → 0.287 (n = 1,488) and heading↔section 0.172 → 0.215 (n = 489).
+On the pairs a string-matcher *cannot* solve, the adapter still improves Recall@1 by **79 %**
+(and Recall@10 rises 0.245 → 0.334) — the relative gain is largest exactly where surface
+overlap cannot help, which is the evidence that it learned statutory semantics rather than
+string matching. It no longer "more than doubles"; that phrasing belonged to the withdrawn
+figure. By pair kind, the gain holds across both dominant types: adjacent-section
+0.185 → 0.242 (n = 1,488) and heading↔section 0.172 → 0.205 (n = 489).
+
+## Which weights should I use?
+
+Two revisions are published. They share the recipe and differ in **what can be said about
+them**:
+
+| Revision | Trained on | Has a valid score? |
+|---|---|---|
+| `main` (default) | 32,432 pairs — the full mined pool | ❌ **No.** It trained on the evaluation documents, so no clean held-out set exists for it *within this corpus* |
+| `clean-2026-08-21` | 3,052 pairs — document-isolated split | ✅ **Yes** — every figure in *Results* above is this adapter |
+
+```bash
+hf download quanfire-ai/embed-statute-en --revision clean-2026-08-21 --local-dir embed-statute-en-clean
+```
+
+**Which one to take.** If you need a number you can cite or audit, take
+`clean-2026-08-21` — it is the one the Results section describes. `main` saw
+10x the training data and may well be the stronger retriever in practice, but "may
+well be" is precisely the kind of claim this card no longer makes.
+
+**We have not swapped the default**, and the reason is worth stating: doing so would trade a
+plausibly-stronger model for a measurable one with no evidence that the trade is good.
+Settling it properly needs a head-to-head of the two adapters on a corpus *neither* of them
+trained on. That is planned, and until it runs, both revisions stay up and this section stays
+honest about which is which.
 
 ## Usage
 
