@@ -55,6 +55,70 @@ absent.
 **Not public.** Everything else, `embedding/` and `pipelines/` included. They may move
 without a minor bump.
 
+## 0.6.0 — 2026-08-23
+
+**If you trained an adapter with 0.5.0 or earlier on a corpus that emits both directions of an
+alignment, your held-out set leaked into training and your retrieval number is inflated.** This
+release fixes the split. Read this entry before you move the pin, and re-measure anything you
+published.
+
+`adapt` and `finetune` excluded a training pair only when its **positive** was a held-out
+positive. Every cross-lingual corpus emits both directions of each alignment, so for a held-out
+(EN → ES) pair the corpus also emits (ES → EN) — whose positive is the held-out **anchor**, which
+that filter never inspected. Same two texts, roles swapped, into a symmetric bi-encoder. The
+filter existed twice, once per pipeline, which is how it survived review.
+
+Measured on our own corpus, of 6,000 held-out pairs: **23.4%** had their exact reverse in
+training, **92.6%** had one side seen, and only **7.4%** were genuinely unseen. Five of our own
+published claims were measured through it; all five keep their direction and their disjoint
+confidence intervals, and none keeps its magnitude.
+
+### Fixed
+
+- **The held-out split now excludes by document identity, not by matching bytes on one side.**
+  `without_held_out` holds out whole documents — the identity `MinedPair.document` already
+  declared and the batch sampler already honoured — and checks **both** anchor and positive
+  against the held-out texts, plus a Unicode-normalised key, because boilerplate recurs verbatim
+  under different document ids and document identity alone still left exact reverses standing.
+- **The rule now has one home.** It lived in `pipelines/adaptation.py` and again in
+  `pipelines/finetune.py`; `finetune` now delegates. Fixing one copy was not fixing the bug.
+- **The split report attributes every exclusion** to the rule that caused it (`document`,
+  `text`, `normalized`), so a run can be audited on what the split actually did rather than only
+  on how much it dropped.
+- **Encode-path truncation is loud.** Both encoders and `/v1/embeddings` now report when input
+  was truncated, and name whether the count is exact or an upper bound.
+
+### Changed — breaking
+
+- **A held-out set whose pairs largely carry no document id is now refused**, with
+  `ConfigurationError`, rather than silently falling back to the text-only rule this release
+  exists to replace. Pass `allow_undocumented_fallback=True` to accept a text-only split — and
+  say so on the model card. A warning was the wrong instrument: it is exactly the safety artefact
+  that does not survive a session boundary.
+- **Expect substantially less training data after upgrading.** Document-level exclusion removes
+  sibling units, and on a document-poor corpus that is most of the pool — ours fell by between
+  46% and 91% depending on the corpus. **A number measured before and after this change is not
+  volume-matched, so the difference is not "the cost of the leak."**
+
+  The transferable lesson: a fixed *number* of held-out pairs silently becomes a huge held-out
+  *document fraction* on a document-poor corpus. Hold out a fraction of documents instead.
+
+### Added
+
+- Corpus readers, all under the public `multilingual_embedding.corpus` package: Indian Central
+  Acts via `annotated_acts`, EU legislation via `eulaw`, Indian government press releases via
+  `pib` (plus `pib_crawl`), agricultural queries via `kcc` (plus `kcc_crawl`), trade and customs
+  via `trade`, and `datagovin`.
+- `prefixes`, which checks the E5 prefix regime rather than declaring it.
+- `positive_language` on `MinedPair`, so a near miss is scored by the language it is actually in.
+
+### Note on the tests
+
+The pre-existing guard asserted only that held-out **positives** were disjoint from training —
+true the entire time the leak was live, and it passed against the defect it was named for. The
+test was the blind spot, not the absence of one. The suite now fails against the exact pre-fix
+rule; that is checked by mutation, not assumed.
+
 ## 0.5.0 — 2026-08-06
 
 This release lets an adapter pin the exact upstream revision of the base it names,
