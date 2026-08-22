@@ -292,9 +292,26 @@ class SentencePieceTokenizer(Tokenizer):
 
         normalized = self._normalizer.normalize(text)
 
-        ids: list[int] = processor.EncodeAsIds(normalized)
-
+        # Segment ONCE and derive the ids from that single segmentation.
+        #
+        # This used to call EncodeAsIds and EncodeAsPieces separately. Two
+        # independent calls are not guaranteed to segment identically, and on
+        # rare inputs they returned lists differing by one element, which
+        # tripped Encoding's length invariant and killed the whole run. The
+        # failure was non-deterministic — it depended on the encode sequence
+        # rather than the text, so the offending record almost never reproduced
+        # in isolation and a retry on the same string always succeeded. That
+        # made it look like flaky data instead of a defect here.
+        #
+        # Deriving ids from the pieces makes the lengths equal BY CONSTRUCTION
+        # rather than by assumption, so the invariant cannot be violated no
+        # matter how the underlying model segments. Every piece came from the
+        # processor's own vocabulary, so PieceToId is total over them —
+        # verified identical to EncodeAsIds across Latin, Indic scripts,
+        # zero-width joiners, emoji and long inputs.
         pieces: list[str] = processor.EncodeAsPieces(normalized)
+
+        ids: list[int] = [processor.PieceToId(piece) for piece in pieces]
 
         return Encoding(ids=ids, tokens=pieces, attention_mask=[1] * len(ids))
 

@@ -60,7 +60,7 @@ from multilingual_embedding.core.exceptions import ConfigurationError, ResourceN
 from multilingual_embedding.core.logging import get_logger
 from multilingual_embedding.corpus.pairs import MinedPair, sample_pairs
 from multilingual_embedding.evaluation.retrieval import RetrievalReport, evaluate_retrieval
-from multilingual_embedding.pipelines.adaptation import only, values
+from multilingual_embedding.pipelines.adaptation import only, values, without_held_out
 from multilingual_embedding.tokenizer.tokenizer import SentencePieceTokenizer
 from multilingual_embedding.utils.filesystem import ensure_directory
 
@@ -501,9 +501,14 @@ class FinetunePipeline:
 
         The held-out set is drawn from a fixed-size sample of its own, so
         changing the training volume does not change what the model is
-        scored on. Training positives that appear in the held-out set are
-        removed, so the score is never measured on a pair the model just
-        trained on.
+        scored on.
+
+        Exclusion is delegated to :func:`.without_held_out`, which drops any
+        pool pair sharing a document with the held-out set, and any pair whose
+        *either* side is a held-out text. This pipeline previously carried its
+        own copy of that filter which checked the positive alone — so for a
+        bidirectional corpus the reverse of every held-out pair trained
+        happily. Whatever it is, the rule now has one home.
         """
 
         settings = self.finetune
@@ -521,10 +526,14 @@ class FinetunePipeline:
 
         evaluation = sample_pairs(evaluation_source, settings.eval_pairs, seed=seed + 10_000)
 
-        held_texts = {pair.positive for pair in evaluation}
+        kept, hygiene = without_held_out(
+            pool,
+            evaluation,
+            allow_undocumented_fallback=settings.allow_undocumented_fallback,
+        )
 
         candidates = only(
-            only([p for p in pool if p.positive not in held_texts], settings.train_kinds, "kind"),
+            only(kept, settings.train_kinds, "kind"),
             settings.train_languages,
             "language",
         )
@@ -539,6 +548,9 @@ class FinetunePipeline:
 
         facts: dict[str, Any] = {
             "evaluation_source": evaluation_source,
+            # Recorded so a report can be audited for split hygiene after the
+            # fact, rather than trusted because the code was supposed to be right.
+            **hygiene,
             "train_kinds": values(train, "kind"),
             "eval_kinds": values(held, "kind"),
             "train_languages": values(train, "language"),

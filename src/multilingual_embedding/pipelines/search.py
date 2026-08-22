@@ -240,8 +240,7 @@ class SemanticSearchPipeline:
 
         if not embedding_directory.is_dir():
             raise ResourceNotFoundError(
-                "Experiment directory holds neither a trained encoder nor an "
-                "embedding matrix",
+                "Experiment directory holds neither a trained encoder nor an embedding matrix",
                 component="encoder-or-embedding",
                 expected=str(embedding_directory),
             )

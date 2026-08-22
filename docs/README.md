@@ -59,7 +59,8 @@ the source tree so docstring changes trigger a rebuild during `serve`.
 **Every code example must have been executed.** Command output shown in these pages is
 copied from a real run, not written by hand. This is not a stylistic preference: the
 project's own documentation pass found nine genuine defects in code that was already
-passing its tests, precisely because the examples were run rather than assumed.
+passing its tests, precisely because the examples were run rather than assumed. They are
+recorded in the project's internal engineering notes.
 
 **Do not document what does not exist.** Describe what is in the tree, and say plainly
 when something is not there — an honest gap with a pointer to `ROADMAP.md` is worth more

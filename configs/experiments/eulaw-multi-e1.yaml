@@ -1,0 +1,65 @@
+# embed-eulaw-multi, first run (e1) — cross-lingual EU-law retriever.
+#
+# First INTERNATIONAL model in the factory, and the first on a corpus that is
+# CC-BY-4.0 rather than §52-train-safe (Commission Decision 2011/833/EU). Same
+# base + adapter pattern as every shipped specialist.
+#
+# SIZE IS A DELIBERATE CHOICE, NOT THE WHOLE CORPUS. The full pull yields
+# ~945,000 pairs — 20-80x anything we have trained on (gov-indic shipped on
+# 11,469 balanced pairs; statute-en on 33,231). e1 trains a capped ~50,000 for a
+# FAST first signal, sized to sit alongside statute-en so the two are comparable.
+#
+# The reason for capping is not timidity, it is the epochs lever: gov-indic's
+# decisive gain came from EPOCHS, not data (e3 was undertrained at 1 epoch and
+# landed +27.9%; ep6 reached +53% on the identical corpus). At ~945k pairs even
+# one epoch is a large run, which makes an epochs sweep expensive exactly where
+# it has historically paid. Get the signal cheap, sweep epochs, then scale data.
+#
+# BALANCE NEEDS NO CAP-BY-LANGUAGE. Measured over 3,228 works, the 20 directed
+# language pairs span 29,718-30,327 — a 1.02x spread. gov-indic needed a cap of
+# 800/positive-language; this corpus is uniform by construction because EU law is
+# genuinely parallel. The cap below is applied per DIRECTION by the build tool,
+# purely to bound total size.
+#
+# PREFIXES ARE EMPTY AND THIS IS NOW CHECKED. Cross-lingual provision pairs are
+# symmetric — both sides are the same kind of text — so the regime is ("", "").
+# The recipe previously said query:/passage:, which was wrong and would have
+# silently tanked retrieval; corpus/prefixes.py now compares this config against
+# the regime the corpus declares and RAISES before the GPU is spent.
+#
+#   .venv/bin/qfme adapt --config configs/experiments/eulaw-multi-e1.yaml --profile configs/gpu.yaml
+
+name: eulaw-multi-e1
+
+seed: 0
+
+adaptation:
+  checkpoint: intfloat/multilingual-e5-small
+
+  pairs: /home/arnab/quanfire-ai-data/embedding/eulaw/corpus/pairs-e1.jsonl.gz
+
+  train_pairs: 44000
+  eval_pairs: 6000
+  sample_pairs: 50000
+
+  adaptation: in-distribution
+  train_kinds: ""
+  eval_kinds: ""
+  train_languages: ""
+  eval_languages: ""
+
+  epochs: 1
+  learning_rate: 0.0001
+
+  rank: 32
+  targets: query,value
+
+  pooling: mean
+  max_length: 256
+  query_prefix: ""
+  passage_prefix: ""
+
+  save_adapter: /home/arnab/quanfire-ai-data/embedding/eulaw/models/eulaw-multi-e1
+  data_provenance: licensed   # EUR-Lex CC-BY-4.0, Commission Decision 2011/833/EU
+
+  report: /home/arnab/quanfire-ai-data/embedding/eulaw/reports/eulaw-multi-e1-adapt.json

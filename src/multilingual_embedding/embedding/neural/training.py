@@ -768,9 +768,7 @@ class ContrastiveTrainer:
 
         target = ensure_directory(checkpoint_dir) / _CHECKPOINT_FILENAME
 
-        cuda_rng = (
-            torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
-        )
+        cuda_rng = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
 
         payload = {
             "format_version": _CHECKPOINT_VERSION,

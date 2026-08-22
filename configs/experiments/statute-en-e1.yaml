@@ -1,0 +1,56 @@
+# English central-statute LoRA adapter (embed-statute-en, first run). Mirrors the
+# proven prod-a70s30 / legal-indic-e1 hyperparameters EXACTLY; the ONLY changes are
+# the training corpus and the name — the same discipline the legal adapter held to.
+#
+# Corpus: Indian Central Acts, section-level, from the CC-BY annotated Central Acts
+# dataset (Zenodo 5088102), read by corpus.annotated_acts and mined with a
+# statute-tuned pair config (minimum_positive_characters=40, maximum_overlap=0.5 —
+# the overlap cap matters here: statute marginal-note headings frequently restate
+# their section body, and 34,294 string-matchable pairs were rejected on it, leaving
+# 35,252 clean pairs: 26,214 adjacent, 9,026 heading/section, 12 title/lead).
+#
+# in-distribution: train and eval are both held-out statute mined pairs, so this
+# measures how much adaptation helps on STATUTORY text — the exact out-of-origin
+# zone the published embed-legal-en (judgment retriever) scored FLAT on (0.036->0.036).
+# That flat transfer is the reason this is a separate adapter, not a legal-en re-run.
+#
+# Provenance is CC-BY (attribution), not the bare §52 public domain of judgments:
+# §52(1)(q)(ii) makes bare-Act reproduction conditional on commentary, so this is
+# train-safe for a non-reconstructive embedding but the corpus is not redistributed,
+# and the CC-BY credit rides on every pair record and must reach the model card.
+#
+#     .venv/bin/qfme adapt --config configs/experiments/statute-en-e1.yaml --profile configs/gpu.yaml
+name: statute-en-e1
+
+seed: 0
+
+adaptation:
+  checkpoint: intfloat/multilingual-e5-small
+
+  pairs: /home/arnab/quanfire-ai-data/embedding/statute-en/corpus/pairs.jsonl.gz
+
+  train_pairs: 33252
+  eval_pairs: 2000
+  sample_pairs: 35252
+
+  adaptation: in-distribution
+  train_kinds: ""
+  eval_kinds: ""
+  train_languages: ""
+  eval_languages: ""
+
+  epochs: 1
+  learning_rate: 0.0001
+
+  rank: 32
+  targets: query,value
+
+  pooling: mean
+  max_length: 256
+  query_prefix: ""
+  passage_prefix: ""
+
+  save_adapter: /home/arnab/quanfire-ai-data/embedding/statute-en/models/statute-en-e1
+  data_provenance: licensed   # CC-BY-4.0 (annotated Central Acts, Zenodo 5088102); not §52 public-domain like judgments
+
+  report: /home/arnab/quanfire-ai-data/embedding/statute-en/reports/statute-en-e1-adapt.json

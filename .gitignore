@@ -152,3 +152,6 @@ flores-global-devtest.jsonl
 # The project handbook and book are internal. They live in the private
 # Quanfire-AI/quanfire-internal repo under factory/knowledge-base/.
 knowledge-base/
+# Internal factory record lives in the PRIVATE Quanfire-AI/quanfire-internal
+# repo. Nothing under internal/ belongs in this public repository.
+internal/

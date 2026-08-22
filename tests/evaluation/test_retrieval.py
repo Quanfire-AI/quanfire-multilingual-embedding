@@ -44,6 +44,23 @@ def pairs(count: int = 200) -> list[Pair]:
     ]
 
 
+@dataclass
+class CrossPair:
+    """A pair whose two sides are in different languages."""
+
+    anchor: str
+
+    positive: str
+
+    language: str
+
+    positive_language: str
+
+    kind: str = "title_lead"
+
+    overlap: float = 0.0
+
+
 def topic_of(text: str) -> int:
     return int(text.split("topic ")[1].split()[0])
 
@@ -439,6 +456,62 @@ class TestLanguageSeparation:
 
         # And the verdict does not move with the skew, which is the point.
         assert separation.separation < 1.2
+
+    def test_it_reads_the_candidates_language_not_the_anchors(self) -> None:
+        """
+        A near miss is a positive, so its language is the positive's.
+
+        A cross-lingual pair carries two languages and this measure needs
+        both: the query's is the anchor's, the candidate's is the
+        positive's. Reading ``language`` for the candidate scores the
+        wrong text, and not by a little — every genuine same-language
+        distractor sits in a pair whose anchor is the *other* language,
+        so the wrong read counts it as a different-language near miss and
+        reports a language-clustered space as a blind one. Every other
+        test here uses a monolingual set, where the two fields are equal
+        and the fault is invisible, so this is the one that catches it.
+        """
+
+        class ByPositiveLanguage:
+            """Clusters on the language tag, near enough ignoring the topic."""
+
+            def encode_batch(self, texts):  # type: ignore[no-untyped-def]
+                vectors = np.zeros((len(texts), 8), dtype=np.float32)
+
+                for row, text in enumerate(texts):
+                    vectors[row, 0] = 5.0 if text.startswith("[en]") else 0.0
+
+                    vectors[row, 1] = 5.0 if text.startswith("[hi]") else 0.0
+
+                    vectors[row, 2 + topic_of(text) % 6] = 1.0
+
+                norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+
+                return (vectors / np.maximum(norms, 1e-9)).astype(np.float32)
+
+        # Anchor and positive languages are deliberately opposed, so a measure
+        # reading the wrong field cannot accidentally agree with one reading
+        # the right one.
+        crossed = [
+            CrossPair(
+                anchor=f"[{'en' if i % 2 == 0 else 'hi'}] query about topic {i}",
+                positive=(
+                    f"[{'hi' if i % 2 == 0 else 'en'}] passage discussing topic {i} at length"
+                ),
+                language="en" if i % 2 == 0 else "hi",
+                positive_language="hi" if i % 2 == 0 else "en",
+            )
+            for i in range(40)
+        ]
+
+        separation = evaluate_retrieval(ByPositiveLanguage(), crossed).language_separation
+
+        # The pool is the candidates, and the candidates are the positives.
+        assert separation.pool == {"en": 20, "hi": 20}
+
+        # Every near miss is in the query's own language by construction. Read
+        # off the anchors instead and this lands near zero.
+        assert separation.separation > 1.5
 
     def test_it_reports_each_language_separately(self) -> None:
         separation = evaluate_retrieval(Perfect(count=40), self.bilingual()).language_separation

@@ -77,6 +77,11 @@ table's word for it, check it.
 > The project handbook is an internal document and is not distributed with this
 > repository. This README, the module docstrings, and `docs/` are the public
 > reference; read on for the quick version.
+>
+> The documentation set under [`docs/`](docs/) covers installation, configuration,
+> architecture, data formats, compute profiles, and how to read evaluation output.
+> Start at [`docs/getting-started.md`](docs/getting-started.md); read on here for the
+> quick version.
 
 ---
 

@@ -1,0 +1,49 @@
+# Multilingual government LoRA adapter, second run (embed-gov-indic, e2). Tests the
+# hypothesis from e1's mixed result: e1 (+8.7% R@1, NOT significant) helped the
+# high-resource languages (en/hi/ur) but REGRESSED low-resource ones (Malayalam
+# 0.097->0.048, Tamil, Gujarati), because the corpus was language-imbalanced and
+# diluted by 14k short title_title pairs. e2 changes exactly two things:
+#   (1) title_body ONLY (drop title_title — the retrieval-irrelevant, short kind);
+#   (2) LANGUAGE-BALANCED sampling — cap each positive-language at 500 pairs, so
+#       Malayalam/Tamil are no longer drowned by Hindi/Urdu.
+# Long bodies are kept (the trainer truncates at max_length=256 anyway), which more
+# than doubled the title_body pool before balancing. Everything else — base, LoRA
+# rank/targets, lr, pooling, seed — matches e1.
+#
+# 6,739 balanced cross-lingual title_body pairs across 16 languages.
+#
+#   .venv/bin/qfme adapt --config configs/experiments/gov-indic-e2.yaml --profile configs/gpu.yaml
+name: gov-indic-e2
+
+seed: 0
+
+adaptation:
+  checkpoint: intfloat/multilingual-e5-small
+
+  pairs: /home/arnab/quanfire-ai-data/embedding/gov-indic/corpus/pairs-e2.jsonl.gz
+
+  train_pairs: 5939
+  eval_pairs: 800
+  sample_pairs: 6739
+
+  adaptation: in-distribution
+  train_kinds: ""
+  eval_kinds: ""
+  train_languages: ""
+  eval_languages: ""
+
+  epochs: 1
+  learning_rate: 0.0001
+
+  rank: 32
+  targets: query,value
+
+  pooling: mean
+  max_length: 256
+  query_prefix: ""
+  passage_prefix: ""
+
+  save_adapter: /home/arnab/quanfire-ai-data/embedding/gov-indic/models/gov-indic-e2
+  data_provenance: licensed   # PIB reproduction policy (attribution, no NC/SA)
+
+  report: /home/arnab/quanfire-ai-data/embedding/gov-indic/reports/gov-indic-e2-adapt.json

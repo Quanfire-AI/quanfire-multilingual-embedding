@@ -481,3 +481,100 @@ class TestWordTokenizer:
 
     def test_repr_reports_vocabulary_size(self, word_tokenizer: WordTokenizer) -> None:
         assert str(word_tokenizer.vocabulary_size) in repr(word_tokenizer)
+
+
+class TestEncodeLengthInvariantIsStructural:
+    """
+    Regression: ``encode`` used to derive ids and pieces from two independent
+    SentencePiece calls, which rarely disagreed in length and killed a training
+    run mid-flight (reported by the generative-text pillar, 2026-08-20).
+
+    The bug was nasty to attribute because it was non-deterministic: it depended
+    on the encode sequence rather than the text, so the offending record almost
+    never reproduced in isolation and retrying the same string always worked.
+    These tests pin the property that makes it impossible, not the symptom.
+    """
+
+    def test_ids_and_tokens_agree_across_scripts_and_edge_cases(
+        self, sentencepiece_tokenizer: SentencePieceTokenizer
+    ) -> None:
+        for text in (
+            "The Companies Act, 2013 provides for incorporation.",
+            "ಕರ್ನಾಟಕ ಗ್ರಾಮ ಸ್ವರಾಜ್",
+            "தமிழ்நாடு கரும்பு மேல்வரி",
+            "‍‌ emoji \U0001F1EE\U0001F1F3 ﷽ ",
+            "",
+            "   ",
+            "A" * 600,
+        ):
+            encoding = sentencepiece_tokenizer.encode(text)
+            assert len(encoding.ids) == len(encoding.tokens)
+            assert len(encoding.attention_mask) == len(encoding.ids)
+
+    def test_ids_are_derived_from_the_pieces_not_a_second_segmentation(
+        self, sentencepiece_tokenizer: SentencePieceTokenizer
+    ) -> None:
+        """
+        The guarantee is structural: every id must be exactly the id OF the
+        piece at the same index. A second independent segmentation could pass a
+        length check by luck; it cannot pass this.
+        """
+        processor = sentencepiece_tokenizer._require_processor()
+
+        for text in ("Incorporation of companies", "ಕರ್ನಾಟಕ ಗ್ರಾಮ ಸ್ವರಾಜ್", "A" * 200):
+            encoding = sentencepiece_tokenizer.encode(text)
+            assert encoding.ids == [processor.PieceToId(p) for p in encoding.tokens]
+
+    def test_survives_a_processor_whose_two_calls_DISAGREE(
+        self, sentencepiece_tokenizer: SentencePieceTokenizer
+    ) -> None:
+        """
+        The test that actually discriminates.
+
+        On a healthy model the two SentencePiece calls agree, so a test written
+        against real text passes with the OLD two-call code too — it pins a
+        property that holds either way and proves nothing. (Confirmed by
+        mutation: reverting the fix left such a test green.)
+
+        The defect only appears when the two calls disagree, which is rare and
+        non-deterministic and cannot be reproduced on demand. So force it: a
+        processor whose EncodeAsIds returns one MORE element than
+        EncodeAsPieces is exactly the reported failure, deterministically.
+
+        The fixed encode never calls EncodeAsIds, so it is immune by
+        construction. The old form would raise here.
+        """
+
+        processor = sentencepiece_tokenizer._require_processor()
+        real_pieces = processor.EncodeAsPieces
+        real_piece_to_id = processor.PieceToId
+
+        class DivergentProcessor:
+            def EncodeAsPieces(self, text: str) -> list[str]:
+                return list(real_pieces(text))
+
+            def EncodeAsIds(self, text: str) -> list[int]:
+                # one element longer — the reported 506 vs 507 signature
+                return [0] * (len(real_pieces(text)) + 1)
+
+            def PieceToId(self, piece: str) -> int:
+                return real_piece_to_id(piece)
+
+        sentencepiece_tokenizer._processor = DivergentProcessor()
+
+        encoding = sentencepiece_tokenizer.encode("The Companies Act, 2013")
+
+        assert len(encoding.ids) == len(encoding.tokens), (
+            "encode must not depend on EncodeAsIds agreeing with EncodeAsPieces"
+        )
+
+    def test_repeated_encoding_is_stable(
+        self, sentencepiece_tokenizer: SentencePieceTokenizer
+    ) -> None:
+        """The original failure was non-deterministic, so encode many times."""
+        text = "The Karnataka Gram Swaraj and Panchayat Raj Act, 1993"
+        first = sentencepiece_tokenizer.encode(text)
+        for _ in range(200):
+            again = sentencepiece_tokenizer.encode(text)
+            assert again.ids == first.ids
+            assert again.tokens == first.tokens

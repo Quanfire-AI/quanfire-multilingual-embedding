@@ -608,16 +608,37 @@ def _language_separation(
     answer in either case, and a zero would be indistinguishable from a
     perfectly aligned space — the same reason the evaluators elsewhere
     in this package leave a missing metric as ``None``.
+
+    **Two languages are in play and the distinction is the measurement.**
+    ``language`` is the anchor's — the language the query was asked in.
+    The candidate pool is built from *positives*, so a candidate's
+    language is ``positive_language``. Reading ``language`` for both
+    sides scores a cross-lingual corpus against the wrong text: every
+    genuine same-language distractor sits in a pair whose anchor is some
+    other language, so it is counted as a different-language near miss
+    and the metric reports close to the opposite of what it claims. A
+    monolingual pair set has the two equal, which is why this stayed
+    invisible until a cross-lingual corpus ran through it.
     """
 
-    languages = [getattr(pair, "language", None) for pair in pairs]
+    asked = [getattr(pair, "language", None) for pair in pairs]
 
-    if any(language is None for language in languages):
+    # Falls back to the anchor's language for a monolingual pair set, and for
+    # any pair file written before ``positive_language`` existed — in both
+    # cases the two sides are the same language and the fallback is exact.
+    found = [
+        getattr(pair, "positive_language", None) or getattr(pair, "language", None)
+        for pair in pairs
+    ]
+
+    if any(language is None for language in asked) or any(language is None for language in found):
         return LanguageSeparation()
 
+    # Composition of the *candidate* pool, which is what a near miss is drawn
+    # from — not the composition of the queries.
     pool: dict[str, int] = {}
 
-    for language in languages:
+    for language in found:
         pool[str(language)] = pool.get(str(language), 0) + 1
 
     if len(pool) < 2:
@@ -631,7 +652,7 @@ def _language_separation(
 
     per_language: dict[str, list[float]] = {}
 
-    for index, language in enumerate(languages):
+    for index, language in enumerate(asked):
         name = str(language)
 
         candidates = [int(other) for other in near_misses[index] if int(other) != index]
@@ -639,11 +660,16 @@ def _language_separation(
         if not candidates:
             continue
 
-        share = sum(1 for other in candidates if str(languages[other]) == name) / len(candidates)
+        share = sum(1 for other in candidates if str(found[other]) == name) / len(candidates)
 
-        # The query's own passage is not a candidate for itself, so the
-        # language-blind expectation excludes it from both counts.
-        chance = (pool[name] - 1) / (total - 1)
+        # The query's own positive is not a candidate for itself, so it leaves
+        # the pool — but it only leaves the *numerator* when it is in the
+        # language being counted, which for a cross-lingual pair it is not.
+        # Subtracting it unconditionally understates chance by one candidate
+        # for exactly the corpora this measure exists to judge.
+        mine = 1 if str(found[index]) == name else 0
+
+        chance = (pool[name] - mine) / (total - 1)
 
         observed.append(share)
 

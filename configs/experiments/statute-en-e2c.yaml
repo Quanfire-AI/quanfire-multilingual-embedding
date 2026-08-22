@@ -1,0 +1,72 @@
+# Reads the zcat-decompressed corpus, not the .gz. Every Python-zlib read of a
+# large pair file on this box has wedged so far; the plain read has not wedged at
+# the read stage. That is a correlation we are exploiting, not a root cause — the
+# gzip theory was falsified once already, when a plain .jsonl run wedged later on.
+# statute-en-e2c — statute-en-e2 re-run on a split that does not leak.
+#
+# `embed-statute-en` is published on this run. Its number was measured with the old `_select`, which excluded a
+# training pair only when its *positive* was a held-out positive. That misses
+# two things: the reverse direction of any bidirectional pair, and every
+# sibling unit of a held-out document — a second provision of the same Act
+# shares no wording with the first, so no text rule can see it, and a model
+# trained on it has been shown the register and drafting idiom of the very
+# document it is about to be scored on.
+#
+# Identical to statute-en-e2 in every other respect. Only the split logic differs
+# (66470fe, 6fe7e6b, 3deaf8d) plus the output paths, so the published
+# artefacts are not clobbered.
+#
+# Expect materially fewer training pairs. This is NOT volume-matched to the
+# published run and the two numbers must not be differenced as though split
+# hygiene were the only thing that changed.
+
+# English central-statute LoRA adapter, second run (embed-statute-en, e2). Isolates
+# TWO changes from e1 so the comparison to e1's R@1 0.2523 stays apples-to-apples:
+#   (1) hard negatives mined against the e1 adapter (its own confusions), 4 per pair,
+#       FILTERED with --positive-margin 0.05. The unfiltered mine had a 78.8% suspicion
+#       rate — generic statutory headings ("Short title", "Definitions") match sections
+#       across every Act, so naive cross-Act negatives are mostly FALSE negatives that
+#       would poison training. The margin drops every candidate that scores within 0.05
+#       of (or above) the pair's own positive, keeping only genuinely-harder negatives.
+#   (2) 2 epochs instead of 1.
+# Everything else — base, LoRA rank/targets, lr, pooling, max_length, seed, and the
+# train/eval SPLIT (same seed + same counts + same pair order) — is held fixed, so the
+# eval set is byte-identical to e1's and any delta is attributable to negatives+epochs.
+# The overlap cap was deliberately NOT relaxed here (that would change the eval set and
+# reintroduce marginal-note leakage); volume/overlap is a separate e3 question if needed.
+#
+#   .venv/bin/qfme adapt --config configs/experiments/statute-en-e2.yaml --profile configs/gpu.yaml
+name: statute-en-e2c
+
+seed: 0
+
+adaptation:
+  checkpoint: intfloat/multilingual-e5-small
+
+  pairs: /home/arnab/quanfire-ai-data/embedding/statute-en/corpus/pairs-neg-m05.jsonl
+
+  train_pairs: 33252
+  eval_pairs: 2000
+  sample_pairs: 35252
+
+  adaptation: in-distribution
+  train_kinds: ""
+  eval_kinds: ""
+  train_languages: ""
+  eval_languages: ""
+
+  epochs: 2
+  learning_rate: 0.0001
+
+  rank: 32
+  targets: query,value
+
+  pooling: mean
+  max_length: 256
+  query_prefix: ""
+  passage_prefix: ""
+
+  save_adapter: /home/arnab/quanfire-ai-data/embedding/statute-en/models/statute-en-e2c
+  data_provenance: licensed   # CC-BY-4.0 (annotated Central Acts, Zenodo 5088102)
+
+  report: /home/arnab/quanfire-ai-data/embedding/statute-en/reports/statute-en-e2c-adapt.json

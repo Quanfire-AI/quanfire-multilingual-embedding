@@ -111,8 +111,38 @@ class MinedPair:
         are about the same subject, so a sampler that puts them in one
         batch is teaching the model that a correct match is wrong.
 
+        **It is also the split's identity key**, which is a stronger
+        requirement than the sampler's and is the reason this entry is
+        long. ``without_held_out`` holds out whole documents, so a miner
+        that gives two renderings of one subject two different ids splits
+        them across the train and held-out sides and the model trains on
+        its own test. That is not hypothetical: text exclusion cannot
+        catch it either, because two renderings of one subject are rarely
+        byte-equal, and the generative pillar measured exactly this in a
+        sibling corpus — 31 of 1,017 held-out items had a twin in
+        training, one rule reaching 64%, purely through a held-out item
+        being rendered in another language.
+
+        So the id must be **independent of representation**: derived from
+        what the subject *is*, never from which language, direction or
+        surface form happened to produce this row. ``eulaw`` is safe
+        because ``CELEX:position`` carries no language token, and it
+        derives ``position`` from the alignment key rather than from one
+        side's raw number, so the same provision lands under one id from
+        every language pairing. A corpus whose natural identifier cannot
+        meet this needs a computed one before it is trained on.
+
     language:
+        The *anchor's* language — the language the query is asked in.
         Carried through so a mixed-language pair set stays separable.
+
+    positive_language:
+        The *positive's* language, when it differs from the anchor's. A
+        cross-lingual pair has two, and code that scores candidates must
+        read this one: the candidate pool is built from positives, so
+        using ``language`` for both sides measures the wrong text. Left
+        ``None`` for a monolingual pair, where the two are the same and
+        the distinction costs a field for nothing.
 
     overlap:
         Share of the anchor's words that also appear in the positive, in
@@ -144,6 +174,8 @@ class MinedPair:
 
     negatives: tuple[str, ...] = ()
 
+    positive_language: str | None = None
+
     def to_record(self) -> dict[str, Any]:
         """
         Reduce to a JSON Lines record.
@@ -165,6 +197,12 @@ class MinedPair:
 
         if self.negatives:
             record["negatives"] = list(self.negatives)
+
+        # Omitted when absent for the same reason as ``negatives``: a pair
+        # file written before this field existed must still round-trip to a
+        # byte-identical line.
+        if self.positive_language is not None:
+            record["positive_language"] = self.positive_language
 
         return record
 
@@ -201,6 +239,7 @@ class MinedPair:
             negatives=tuple(
                 str(text) for text in (record.get("negatives") or ()) if str(text).strip()
             ),
+            positive_language=record.get("positive_language"),
         )
 
 

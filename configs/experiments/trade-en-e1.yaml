@@ -1,0 +1,67 @@
+# English customs/trade LoRA adapter, first run (embed-trade-indic, e1 — English-first).
+#
+# SCOPE: English-only, notification-only. Layer B/C CBIC customs notifications
+# (subject -> body), the operative import/export body. This is the honest first ship,
+# mirroring statute-en and gov-indic shipping English-first when Hindi hit the
+# Devanagari-govt-PDF font trap (see the trade-indic memory + Gate-1/pilot session
+# records): CBIC Hindi is born-digital-but-cmap-broken (only ~7% cleanly extractable),
+# so bilingual is v2, gated on OCR-calibrated remap. Do NOT add section/bilingual pairs
+# to this run — they are symmetric (empty prefixes) and would be mislabeled by this
+# run's single asymmetric prefix pair (the qfme-adapt one-global-prefix constraint;
+# "option A / focus first", same as gov e1).
+#
+# PAIR DESIGN: asymmetric subject -> body. Notifications train with the E5
+# query:/passage: prefixes, matching prefix_regime(TRADE_NOTIFICATION_KIND) =
+# ("query: ", "passage: ") in src/multilingual_embedding/corpus/trade.py. SERVING MUST
+# USE THE SAME PREFIXES (unlike the empty-prefix statute/gov adapters) — a train/serve
+# prefix mismatch silently tanks retrieval. Card and playground wiring must state this.
+#
+# NEGATIVES: in-batch only this run (like statute e1/gov e1). Do NOT reach for retriever
+# top-hard negatives here — the gov reranker proved (v1, -45.1%) that a corpus dense with
+# near-duplicate govt notifications punishes too-hard negatives; if an e2 adds mined
+# negatives, use the semi-hard band [20,100) lesson, chosen from THIS corpus's
+# near-duplicate density (recurring "Amendment to Notification 36/2001" tariff fixations
+# are a known near-duplicate cluster to measure first).
+#
+# PREREQUISITE — NOT YET SATISFIED: the mined pair count below is a PLACEHOLDER. The
+# proven pipeline has only the 26-PDF CBIC customs pilot (too small to train). Box-return
+# step 1 is a bounded, gated, polite scaled crawl of CBIC customs (English), then
+# extract -> CSV -> mine -> JSONL, THEN fill train_pairs/eval_pairs/sample_pairs here from
+# the mine report and run. See internal/trade-indic-recipe.md for the full sequence.
+#
+#   .venv/bin/qfme adapt --config configs/experiments/trade-en-e1.yaml --profile configs/gpu.yaml
+name: trade-en-e1
+
+seed: 0
+
+adaptation:
+  checkpoint: intfloat/multilingual-e5-small
+
+  pairs: /home/arnab/quanfire-ai-data/embedding/trade-en/corpus/pairs-e1.jsonl.gz
+
+  # TODO(box-return): fill from the scaled-mine report; the pilot's 26 is a floor, not a run.
+  train_pairs: 0
+  eval_pairs: 0
+  sample_pairs: 0
+
+  adaptation: in-distribution
+  train_kinds: ""
+  eval_kinds: ""
+  train_languages: ""
+  eval_languages: ""
+
+  epochs: 2
+  learning_rate: 0.0001
+
+  rank: 32
+  targets: query,value
+
+  pooling: mean
+  max_length: 256
+  query_prefix: "query: "
+  passage_prefix: "passage: "
+
+  save_adapter: /home/arnab/quanfire-ai-data/embedding/trade-en/models/trade-en-e1
+  data_provenance: licensed   # GoI-statutory: §52(1)(q)(i) Gazette matter (CBIC customs notifications), freely reproducible with attribution; corpus stays off the public repo
+
+  report: /home/arnab/quanfire-ai-data/embedding/trade-en/reports/trade-en-e1-adapt.json

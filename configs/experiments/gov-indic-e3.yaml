@@ -1,0 +1,43 @@
+# Multilingual government LoRA adapter, third run (embed-gov-indic, e3). Same
+# validated e2 recipe (title_body only + language-balanced), on the FULL 4-week
+# corpus: 2,065 PIB parallel groups (2,016 multilingual) → 66,352 title_body pairs
+# → 11,469 balanced (cap 800/positive-language; 14 langs at 800, kha/ne in full).
+# e2's +16.2% was directional-but-not-significant purely on eval SIZE (~615 queries);
+# e3 nearly doubles the balanced set to lift the eval and test for significance.
+# Everything else matches e2/e1 (multilingual-e5-small, rank 32, lr 1e-4, 1 epoch).
+#
+#   .venv/bin/qfme adapt --config configs/experiments/gov-indic-e3.yaml --profile configs/gpu.yaml
+name: gov-indic-e3
+
+seed: 0
+
+adaptation:
+  checkpoint: intfloat/multilingual-e5-small
+
+  pairs: /home/arnab/quanfire-ai-data/embedding/gov-indic/corpus/pairs-e3.jsonl.gz
+
+  train_pairs: 9669
+  eval_pairs: 1800
+  sample_pairs: 11469
+
+  adaptation: in-distribution
+  train_kinds: ""
+  eval_kinds: ""
+  train_languages: ""
+  eval_languages: ""
+
+  epochs: 1
+  learning_rate: 0.0001
+
+  rank: 32
+  targets: query,value
+
+  pooling: mean
+  max_length: 256
+  query_prefix: ""
+  passage_prefix: ""
+
+  save_adapter: /home/arnab/quanfire-ai-data/embedding/gov-indic/models/gov-indic-e3
+  data_provenance: licensed   # PIB reproduction policy (attribution, no NC/SA)
+
+  report: /home/arnab/quanfire-ai-data/embedding/gov-indic/reports/gov-indic-e3-adapt.json

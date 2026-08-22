@@ -42,6 +42,7 @@ static path must stay installable without it.
 from __future__ import annotations
 
 import time
+import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,6 +57,7 @@ from multilingual_embedding.config.base import (
 from multilingual_embedding.core.exceptions import ConfigurationError
 from multilingual_embedding.core.logging import get_logger
 from multilingual_embedding.corpus.pairs import MinedPair, sample_pairs
+from multilingual_embedding.corpus.prefixes import check_prefix_regime
 from multilingual_embedding.evaluation.retrieval import RetrievalReport, evaluate_retrieval
 
 __all__ = [
@@ -66,6 +68,7 @@ __all__ = [
     "only",
     "prefixed",
     "varying",
+    "without_held_out",
 ]
 
 _logger = get_logger(__name__)
@@ -153,6 +156,159 @@ def only(pairs: Sequence[MinedPair], wanted: Sequence[str], facet: str) -> list[
         )
 
     return kept
+
+
+# Above this share of held-out pairs missing a document id, the document rule
+# is not the split's primary defense any more — text exclusion is, and text
+# exclusion is exactly what was already proven insufficient on documented data.
+# A run in that state should stop rather than report a clean split it never had.
+UNDOCUMENTED_SHARE_REFUSED = 0.05
+
+# Over-exclusion fails safe: it wastes data and can shift the surviving
+# distribution, but it cannot inflate a number. So this warns rather than
+# refuses — but losing half the pool to the holdout is worth a line in the log
+# that a reader of the report can go looking for.
+OVER_EXCLUSION_SHARE_WARNED = 0.5
+
+
+def _membership_key(text: str) -> str:
+    """
+    The form two texts are compared in for the text rule.
+
+    Exact-match membership is Unicode-fragile, and legal source formats are
+    where that bites: EU Formex carries non-breaking spaces, soft hyphens and
+    decomposed combining forms, so an NFC or whitespace variant of a held-out
+    sentence under a different document id escapes both rules — different id,
+    not byte-equal. Normalising before membership costs one pass and makes the
+    "not a string matcher" claim mean something.
+    """
+
+    return " ".join(unicodedata.normalize("NFC", text).split())
+
+
+def without_held_out(
+    pool: Sequence[MinedPair],
+    evaluation: Sequence[MinedPair],
+    *,
+    allow_undocumented_fallback: bool = False,
+) -> tuple[list[MinedPair], dict[str, int]]:
+    """
+    Drop every pool pair that the held-out set has already given away.
+
+    Hold out whole documents, not texts. ``document`` is already the identity
+    that says two pairs are about the same subject — the batch sampler honours
+    it, and the split was the one place that did not.
+
+    Excluding only pairs whose *positive* is a held-out positive lets the
+    reverse direction of a cross-lingual alignment straight through: for a
+    held-out (EN -> ES) pair, the corpus also emits (ES -> EN), whose positive
+    is the held-out *anchor*, which that filter never looked at. Same two
+    texts, roles swapped, into a symmetric bi-encoder. Measured on
+    eulaw-multi-e1: 23.4% of held-out pairs had their exact reverse in training
+    and only 7.4% were unseen on both sides.
+
+    This lives here, shared, because the leak survived review in the first
+    place by existing twice — once in this pipeline and once in the fine-tune
+    one — so fixing a copy is not fixing the bug.
+
+    Raises ``ConfigurationError`` when more than ``UNDOCUMENTED_SHARE_REFUSED`` of the
+    held-out pairs carry no document id, unless the caller opts in with
+    ``allow_undocumented_fallback``. A warning was the wrong instrument: it is
+    precisely the safety artefact that does not survive the session boundary,
+    and the path it permits is the text-only rule this function exists to
+    replace.
+
+    Returns the surviving pairs and counts a report can be audited against.
+    """
+
+    held_documents = {pair.document for pair in evaluation if pair.document}
+
+    # Both sides, not just the positive. Checking the positive alone is what
+    # let the reverse direction through.
+    held_texts = {pair.positive for pair in evaluation}
+    held_texts.update(pair.anchor for pair in evaluation)
+    held_keys = {_membership_key(text) for text in held_texts}
+
+    undocumented = sum(1 for pair in evaluation if not pair.document)
+    share = undocumented / len(evaluation) if evaluation else 0.0
+
+    if undocumented and share > UNDOCUMENTED_SHARE_REFUSED:
+        if not allow_undocumented_fallback:
+            raise ConfigurationError(
+                f"{undocumented} of {len(evaluation)} held-out pairs "
+                f"({share:.1%}) carry no document id, above the "
+                f"{UNDOCUMENTED_SHARE_REFUSED:.0%} ceiling. The document rule "
+                "cannot see sibling units for those, leaving only text "
+                "exclusion — which is the rule this split was changed to stop "
+                "relying on. Fix the corpus's document ids, or pass "
+                "allow_undocumented_fallback=True to accept a text-only split "
+                "and say so on the card."
+            )
+        _logger.warning(
+            "%d of %d held-out pairs (%.1f%%) carry no document id; proceeding "
+            "on text exclusion alone because allow_undocumented_fallback is set",
+            undocumented,
+            len(evaluation),
+            share * 100,
+        )
+    elif undocumented:
+        # Silence here would mean the document rule quietly did nothing and the
+        # run reported a clean split it never had.
+        _logger.warning(
+            "%d of %d held-out pairs carry no document id; falling back to "
+            "text exclusion for those, which cannot see sibling units",
+            undocumented,
+            len(evaluation),
+        )
+
+    def reason(pair: MinedPair) -> str | None:
+        """Which rule drops this pair, or None if it survives — attributed so
+        the report says what the split actually did rather than only how much."""
+
+        if pair.document and pair.document in held_documents:
+            return "document"
+
+        # Boilerplate recurs verbatim under different document ids — an
+        # entry-into-force article is the same sentence in a hundred
+        # regulations — so document identity alone cannot see it. On the real
+        # eulaw corpus the document rule closed 4 134 shared documents and
+        # still left 250 exact reverses standing on repeated text. This check
+        # therefore runs for every pair, not only for a corpus that leaves the
+        # document blank.
+        if pair.positive in held_texts or pair.anchor in held_texts:
+            return "text"
+
+        if _membership_key(pair.positive) in held_keys or _membership_key(pair.anchor) in held_keys:
+            return "normalized"
+
+        return None
+
+    reasons = [reason(pair) for pair in pool]
+    kept = [pair for pair, why in zip(pool, reasons, strict=True) if why is None]
+
+    dropped = len(pool) - len(kept)
+    dropped_share = dropped / len(pool) if pool else 0.0
+    if dropped_share > OVER_EXCLUSION_SHARE_WARNED:
+        _logger.warning(
+            "the holdout dropped %d of %d pool pairs (%.1f%%); this cannot "
+            "inflate a score but it does shrink and reshape the training "
+            "distribution, so the surviving volume belongs on the card",
+            dropped,
+            len(pool),
+            dropped_share * 100,
+        )
+
+    return kept, {
+        "held_out_documents": len(held_documents),
+        "held_out_without_document": undocumented,
+        "pool_dropped_as_held_out": dropped,
+        "pool_dropped_by_document": reasons.count("document"),
+        "pool_dropped_by_text": reasons.count("text"),
+        # Non-zero means exact matching would have let these through: the
+        # measure of what normalisation is buying, rather than a claim that it
+        # buys something.
+        "pool_dropped_by_normalization": reasons.count("normalized"),
+    }
 
 
 def values(pairs: Sequence[MinedPair], facet: str) -> list[str]:
@@ -254,6 +410,13 @@ class AdaptationResult:
     adapter_directory:
         Where the adapter was written, or ``None`` when the run produced
         a measurement rather than a model.
+
+    split_hygiene:
+        How much the held-out set removed from the training pool, and how
+        many held-out pairs could not be grouped by document. Carried into
+        the report so a published number can be audited for the leak that
+        inflated eulaw-multi-e1, instead of being trusted on the grounds
+        that the code was supposed to be right by then.
     """
 
     checkpoint: str
@@ -299,6 +462,8 @@ class AdaptationResult:
     data_provenance: str = ""
 
     adapter_directory: Path | None = None
+
+    split_hygiene: dict[str, int] = field(default_factory=dict)
 
     @property
     def delta(self) -> float:
@@ -393,6 +558,7 @@ class AdaptationResult:
             "train_examples": self.train_examples,
             "eval_examples": self.eval_examples,
             "sampled_from": self.sampled_from,
+            **self.split_hygiene,
             "loss": [self.initial_loss, self.final_loss],
             "moved": self.moved,
             "trainable_share": self.trainable_share,
@@ -603,6 +769,15 @@ class AdaptationPipeline:
             trainable_share=share,
             data_provenance=settings.data_provenance,
             seconds=time.time() - started,
+            split_hygiene={
+                key: facts[key]
+                for key in (
+                    "held_out_documents",
+                    "held_out_without_document",
+                    "pool_dropped_as_held_out",
+                )
+                if key in facts
+            },
         )
 
         if settings.save_adapter:
@@ -659,6 +834,14 @@ class AdaptationPipeline:
         baselines of 0.4238 and 0.4764 for the same checkpoint — a
         difference in the measuring stick that looked like a difference
         in the model.
+
+        Training excludes whole **documents**, not texts. A corpus that
+        emits both directions of an alignment will otherwise leak the
+        reverse of a held-out pair into training, because the reverse's
+        positive is the held-out *anchor* and a positive-only filter
+        never looks there. That is not hypothetical: it inflated
+        eulaw-multi-e1, where only 7.4% of the held-out set was unseen
+        on both sides.
         """
 
         settings = self.adaptation
@@ -676,13 +859,39 @@ class AdaptationPipeline:
 
         evaluation = sample_pairs(evaluation_source, settings.eval_pairs, seed=seed + 10_000)
 
-        held_texts = {pair.positive for pair in evaluation}
+        kept, hygiene = without_held_out(
+            pool,
+            evaluation,
+            allow_undocumented_fallback=settings.allow_undocumented_fallback,
+        )
 
         candidates = only(
-            only([p for p in pool if p.positive not in held_texts], settings.train_kinds, "kind"),
+            only(kept, settings.train_kinds, "kind"),
             settings.train_languages,
             "language",
         )
+
+        # A train/serve prefix mismatch does not raise, does not look wrong in a
+        # loss curve, and surfaces only as retrieval that is quietly worse than
+        # it should be. The corpus declares the regime each kind trains with, so
+        # check the run against it before spending the GPU rather than after.
+        selected_kinds = {p.kind for p in candidates[: settings.train_pairs]}
+        prefix_check = check_prefix_regime(
+            selected_kinds, settings.query_prefix, settings.passage_prefix
+        )
+        if not prefix_check.ok:
+            raise ConfigurationError(
+                "E5 prefix regime does not match the corpus: "
+                f"{prefix_check.describe()}. Set query_prefix/passage_prefix to the "
+                "regime the corpus declares, or train one kind per run — the "
+                "adapter applies a single global prefix pair to every pair."
+            )
+        self.echo(f"\nprefix regime: {prefix_check.describe()}")
+        if prefix_check.unchecked:
+            _logger.warning(
+                "prefix regime unverified for kind(s): %s",
+                ", ".join(sorted(prefix_check.unchecked)),
+            )
 
         train = prefixed(
             candidates[: settings.train_pairs],
@@ -702,6 +911,9 @@ class AdaptationPipeline:
 
         facts: dict[str, Any] = {
             "evaluation_source": evaluation_source,
+            # Recorded so a report can be audited for split hygiene after the
+            # fact, rather than trusted because the code was supposed to be right.
+            **hygiene,
             "train_kinds": values(train, "kind"),
             "eval_kinds": values(held, "kind"),
             "train_languages": values(train, "language"),
