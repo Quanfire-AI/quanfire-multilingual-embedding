@@ -257,6 +257,70 @@ class TestHeldOutNormalisation:
 
         assert facts["pool_dropped_as_held_out"] == 0
 
+    def test_a_pool_pair_reusing_a_held_out_anchor_is_excluded(self) -> None:
+        """
+        The anchor side of the text rule, which nothing above reaches.
+
+        Every other text-rule test here matches a held-out *positive* against
+        a pool *positive* — the one case the pre-fix rule already handled, so
+        they all pass against it. Replaying the exact rule that produced the
+        withdrawn numbers (``held_texts`` built from positives only, and only
+        the pool pair's positive compared) leaves this whole file green. What
+        actually stops that rule in the fixtures above is the *document* rule;
+        the text rule is never the thing under test.
+
+        Here a multi-language alignment emits the same English anchor against
+        several translations. Hold out EN -> ES and the corpus still offers
+        EN -> FR: same held-out query text, a positive that was never held,
+        and its own document id, so the document rule cannot reach it either.
+        Training on it hands the model the exact anchor it is about to be
+        scored on.
+        """
+
+        held_anchor = "when does this regulation start to apply"
+
+        evaluation = [self._pair(held_anchor, "entra en vigor a los veinte dias", "celex:A:es")]
+
+        pool = [self._pair(held_anchor, "entre en vigueur le vingtieme jour", "celex:A:fr")]
+
+        kept, facts = without_held_out(pool, evaluation)
+
+        assert kept == [], "a pool pair carrying the held-out anchor trained"
+
+        # Attributed, so a future change to the document rule cannot make this
+        # pass without the text rule doing the work.
+        assert facts["pool_dropped_by_text"] == 1
+
+        assert facts["pool_dropped_by_document"] == 0
+
+    def test_the_reverse_direction_is_excluded_when_the_documents_differ(self) -> None:
+        """
+        The eulaw leak on a corpus that ids each language separately.
+
+        ``test_the_reverse_of_a_held_out_pair_is_not_trained_on`` covers the
+        reverse direction, but its two directions share one document, and it
+        asserts as much — so the document rule closes it and the text rule is
+        never exercised. A corpus that files each language manifestation under
+        its own id does not give the document rule that handle, and then the
+        reverse pair's positive is the held-out *anchor*, which the pre-fix
+        rule never looked at.
+        """
+
+        english = "the Commission shall adopt implementing acts"
+        spanish = "la Comision adoptara actos de ejecucion"
+
+        evaluation = [self._pair(english, spanish, "celex:A:en")]
+
+        pool = [self._pair(spanish, english, "celex:A:es")]
+
+        kept, facts = without_held_out(pool, evaluation)
+
+        assert kept == [], "the reverse of a held-out pair trained"
+
+        assert facts["pool_dropped_by_text"] == 1
+
+        assert facts["pool_dropped_by_document"] == 0
+
 
 class TestVarying:
     def test_the_same_values_are_held_fixed(self) -> None:
