@@ -9,7 +9,8 @@ evaluation in between built to be inspected, configured and reproduced.
 
 ## Creator and Maintainer
 
-**Ajeet Kumar Chakrawarty**  
+**Ajeet Kumar Chakrawarty**
+
 Software Engineer | Solutions Architect | AI/ML Developer
 
 Quanfire Multilingual Embedding was created and is maintained by Ajeet Kumar Chakrawarty, a software engineering professional with over 21 years of experience in software development, distributed systems, enterprise integration, cloud infrastructure, and AI-enabled applications.
