@@ -6,6 +6,21 @@ Turns a multilingual corpus into meaningful vectors — generic, or adapted to a
 domain — with the corpus handling, tokenization, vocabulary management, training and
 evaluation in between built to be inspected, configured and reproduced.
 
+
+## Creator and Maintainer
+
+**Ajeet Kumar Chakrawarty**  
+Software Engineer | Solutions Architect | AI/ML Developer
+
+Quanfire Multilingual Embedding was created and is maintained by Ajeet Kumar Chakrawarty, a software engineering professional with over 21 years of experience in software development, distributed systems, enterprise integration, cloud infrastructure, and AI-enabled applications.
+
+- **Professional website:** https://www.quanfire.ai
+- **Contact:** ajeet@quanfire.ai
+- **Hugging Face:** https://huggingface.co/quanfire-ai
+
+---
+
+
 ```
 Wikipedia dump  ->  corpus  ->  mined pairs  ->  adapted encoder  ->  evaluation  ->  search
                        |
